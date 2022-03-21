@@ -6,16 +6,21 @@ import (
 )
 
 type Game struct {
+	Tick  uint64
+	Tanks []*m.Tank
 }
 
 func (g *Game) Update() error {
+	g.Tick++
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	// ebitenutil.DebugPrint(screen, "Hello, World!")
-	t := m.NewTank()
-	screen.DrawImage(t.Sprite.Image, nil)
+	// screen.DrawImage(t.Sprite.Image, nil)
+	for _, t := range g.Tanks {
+		screen.DrawImage(t.Move(float64(screen.Bounds().Dx()), 0))
+	}
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {

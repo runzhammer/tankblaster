@@ -1,29 +1,26 @@
-animations:
-  stand:
-    tick: 60
-    speed: 0
-    frames:
-      - x: 0
-        y: 0
-        w: 64
-        h: 64
-  move:
-    tick: 10
-    speed: 30
-    frames:
-      - x: 64
-        y: 0
-        w: 64
-        h: 64
-      - x: 128
-        y: 0
-        w: 64
-        h: 64
-      - x: 192
-        y: 0
-        w: 64
-        h: 64
-      - x: 256
-        y: 0
-        w: 64
-        h: 64
+stand:
+  speed: 1.0
+  frames:
+    - x: 0
+      y: 0
+      w: 64
+      h: 64
+move:
+  speed: 0.2
+  frames:
+    - x: 64
+      y: 0
+      w: 64
+      h: 64
+    - x: 128
+      y: 0
+      w: 64
+      h: 64
+    - x: 192
+      y: 0
+      w: 64
+      h: 64
+    - x: 256
+      y: 0
+      w: 64
+      h: 64

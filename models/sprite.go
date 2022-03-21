@@ -13,27 +13,25 @@ import (
 
 type Sprite struct {
 	Image      *ebiten.Image
-	Animations Animations `yaml:"frames"`
+	Animations Animations
 }
 
 type Animations struct {
 	Stand struct {
-		Tick   float64
-		Speed  float64
+		Speed  float64 `yaml:"speed"`
 		Frames []frameSpec
 	} `yaml:"stand"`
 	Move struct {
-		Tick   float64
-		Speed  float64
+		Speed  float64 `yaml:"speed"`
 		Frames []frameSpec
 	} `yaml:"move"`
 }
 
 type frameSpec struct {
-	x int `yaml:"x"`
-	y int `yaml:"y"`
-	w int `yaml:"w"`
-	h int `yaml:"h"`
+	X int `yaml:"x"`
+	Y int `yaml:"y"`
+	W int `yaml:"w"`
+	H int `yaml:"h"`
 }
 
 func (t *Sprite) Init(sprite []byte, animations []byte) {
@@ -53,7 +51,7 @@ func (t *Sprite) Init(sprite []byte, animations []byte) {
 	}
 
 	// load frames
-	err = yaml.Unmarshal(animations, t.Animations)
+	err = yaml.Unmarshal(animations, &t.Animations)
 	if err != nil {
 		log.Fatalf("Unmarshal: %v", err)
 	}
