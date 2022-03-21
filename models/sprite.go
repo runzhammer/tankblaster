@@ -21,10 +21,10 @@ type Animations struct {
 		Speed  float64 `yaml:"speed"`
 		Frames []frameSpec
 	} `yaml:"stand"`
-	Move struct {
+	Drive struct {
 		Speed  float64 `yaml:"speed"`
 		Frames []frameSpec
-	} `yaml:"move"`
+	} `yaml:"drive"`
 }
 
 type frameSpec struct {

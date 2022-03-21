@@ -10,9 +10,9 @@ import (
 
 func main() {
 	game := g.Game{Tick: 1}
-	t1 := m.NewTank(&game.Tick, m.Position{X: 0, Y: 0})
+	t1 := m.NewTank(&game.Tick, m.Position{X: 128, Y: 64})
 	t1.Name = "Player 1"
-	t2 := m.NewTank(&game.Tick, m.Position{X: 0, Y: 64})
+	t2 := m.NewTank(&game.Tick, m.Position{X: 320, Y: 423})
 	t2.Name = "Player 2"
 	game.Tanks = append(game.Tanks, &t1, &t2)
 

@@ -19,7 +19,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// ebitenutil.DebugPrint(screen, "Hello, World!")
 	// screen.DrawImage(t.Sprite.Image, nil)
 	for _, t := range g.Tanks {
-		screen.DrawImage(t.Move(float64(screen.Bounds().Dx()), 0))
+		screen.DrawImage(t.Place(m.Position{}))
 	}
 }
 

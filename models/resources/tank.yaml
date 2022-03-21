@@ -5,7 +5,7 @@ stand:
       y: 0
       w: 64
       h: 64
-move:
+drive:
   speed: 0.2
   frames:
     - x: 64
