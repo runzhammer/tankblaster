@@ -13,10 +13,10 @@ import (
 
 type Sprite struct {
 	Image      *ebiten.Image
-	Animations Animations
+	SpriteSpec spriteSpec
 }
 
-type Animations struct {
+type spriteSpec struct {
 	Stand struct {
 		Speed  float64 `yaml:"speed"`
 		Frames []frameSpec
@@ -51,7 +51,7 @@ func (t *Sprite) Init(sprite []byte, animations []byte) {
 	}
 
 	// load frames
-	err = yaml.Unmarshal(animations, &t.Animations)
+	err = yaml.Unmarshal(animations, &t.SpriteSpec)
 	if err != nil {
 		log.Fatalf("Unmarshal: %v", err)
 	}

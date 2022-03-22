@@ -8,12 +8,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-//go:embed resources/tank.png
-var sprite []byte
-
-//go:embed resources/tank.yaml
-var animations []byte
-
 type Tank struct {
 	Name        string
 	Options     *ebiten.DrawImageOptions
@@ -23,14 +17,9 @@ type Tank struct {
 	Destination Position
 }
 
-type Position struct {
-	X float64
-	Y float64
-}
-
 func NewTank(tick *uint64, position Position) Tank {
 	t := Tank{}
-	t.Sprite.Init(sprite, animations)
+	t.Sprite.Init(tankSprite, tankSpec)
 	t.tick = tick
 	t.Options = &ebiten.DrawImageOptions{}
 	t.Destination = position
@@ -41,9 +30,9 @@ func NewTank(tick *uint64, position Position) Tank {
 func (t *Tank) Drive() *ebiten.Image {
 
 	// fmt.Printf("tick: %v\nspeed: %v\nlen-frames: %v\n", int(*t.tick), uint64(t.Sprite.Animations.Move.Speed)+1, len(t.Sprite.Animations.Move.Frames))
-	frameNum := int(float64(*t.tick)/t.Sprite.Animations.Drive.Speed) % len(t.Sprite.Animations.Drive.Frames)
+	frameNum := int(float64(*t.tick)/t.Sprite.SpriteSpec.Drive.Speed) % len(t.Sprite.SpriteSpec.Drive.Frames)
 	// fmt.Printf("frame: %v\n", frameNum)
-	f := t.Sprite.Animations.Drive.Frames[frameNum]
+	f := t.Sprite.SpriteSpec.Drive.Frames[frameNum]
 	rect := image.Rect(f.X, f.Y, f.X+f.W, f.Y+f.H)
 	subImg := t.Sprite.Image.SubImage(rect).(*ebiten.Image)
 
@@ -52,7 +41,7 @@ func (t *Tank) Drive() *ebiten.Image {
 
 func (t *Tank) Stand() *ebiten.Image {
 
-	f := t.Sprite.Animations.Stand.Frames[0]
+	f := t.Sprite.SpriteSpec.Stand.Frames[0]
 	rect := image.Rect(f.X, f.Y, f.X+f.W, f.Y+f.H)
 	subImg := t.Sprite.Image.SubImage(rect).(*ebiten.Image)
 

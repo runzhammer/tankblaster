@@ -5,9 +5,13 @@ import (
 	m "github.com/runzhammer/gamedemo/models"
 )
 
+var ScreenWidth, ScreenHeight int = 1024, 768
+
 type Game struct {
-	Tick  uint64
-	Tanks []*m.Tank
+	Tick       uint64
+	Background m.Background
+	Ground     m.Ground
+	Tanks      []*m.Tank
 }
 
 func (g *Game) Update() error {
@@ -16,6 +20,13 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+
+	// background
+	screen.DrawImage(g.Background.Place(m.Position{}))
+
+	// ground
+	screen.DrawImage(g.Ground.Place(m.Position{}))
+
 	// ebitenutil.DebugPrint(screen, "Hello, World!")
 	// screen.DrawImage(t.Sprite.Image, nil)
 	for _, t := range g.Tanks {
@@ -24,5 +35,5 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
-	return 1024, 768
+	return ScreenWidth, ScreenHeight
 }
