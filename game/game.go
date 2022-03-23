@@ -2,16 +2,25 @@ package game
 
 import (
 	"github.com/hajimehoshi/ebiten/v2"
-	m "github.com/runzhammer/gamedemo/models"
+	"github.com/runzhammer/gamedemo/models"
+	"github.com/runzhammer/gamedemo/pkg/core"
 )
 
 var ScreenWidth, ScreenHeight int = 1024, 768
 
+const (
+	Title     = "Tank Blaster 3.0"
+	bgmVolume = 0.5
+)
+
 type Game struct {
-	Tick       uint64
-	Background m.Background
-	Ground     m.Ground
-	Tanks      []*m.Tank
+	
+	core.GameSceneLoop
+	context core.Context
+
+	Background models.Background
+	Ground     models.Ground
+	Tanks      []*models.Tank
 }
 
 func (g *Game) Update() error {
@@ -22,15 +31,15 @@ func (g *Game) Update() error {
 func (g *Game) Draw(screen *ebiten.Image) {
 
 	// background
-	screen.DrawImage(g.Background.Place(m.Position{}))
+	screen.DrawImage(g.Background.Place(models.Position{}))
 
 	// ground
-	screen.DrawImage(g.Ground.Place(m.Position{}))
+	screen.DrawImage(g.Ground.Place(models.Position{}))
 
 	// ebitenutil.DebugPrint(screen, "Hello, World!")
 	// screen.DrawImage(t.Sprite.Image, nil)
 	for _, t := range g.Tanks {
-		screen.DrawImage(t.Place(m.Position{}))
+		screen.DrawImage(t.Place(models.Position{}))
 	}
 }
 

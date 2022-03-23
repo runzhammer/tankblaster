@@ -22,18 +22,18 @@ func (g *GameSceneLoop) SetScene(scene Scene) error {
 	return nil
 }
 
-func (g *GameSceneLoop) Update(dt float64) error {
+func (g *GameSceneLoop) Update() error {
 	if g.scene != nil {
-		if err := g.scene.Update(dt); err != nil {
+		if err := g.scene.Update(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (g *GameSceneLoop) Draw(image *ebiten.Image) {
+func (g *GameSceneLoop) Draw(screen *ebiten.Image) {
 	if g.scene != nil {
-		g.scene.Draw(image)
+		g.scene.Draw(screen)
 	}
 }
 

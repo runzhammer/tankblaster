@@ -7,8 +7,7 @@ import (
 )
 
 const (
-	Title = "Tanks"
-
+	Title     = "Tanks"
 	bgmVolume = 0.5
 )
 
