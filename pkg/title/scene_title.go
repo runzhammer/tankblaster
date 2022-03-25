@@ -72,7 +72,7 @@ func NewTitleScene(game *Game) (core.Scene, error) {
 
 func (s *titleScene) Update() error {
 	if obj := s.menuTouch(); obj != nil {
-		return &core.ChangeGameError{Game: obj.Tag}
+		return &core.ChangeSceneError{Game: obj.Tag}
 	}
 	return nil
 }

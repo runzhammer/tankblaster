@@ -6,13 +6,6 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/core"
 )
 
-var ScreenWidth, ScreenHeight int = 1024, 768
-
-const (
-	Title     = "Tank Blaster 3.0"
-	bgmVolume = 0.5
-)
-
 type Game struct {
 	
 	core.GameSceneLoop
@@ -43,6 +36,4 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 }
 
-func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
-	return ScreenWidth, ScreenHeight
-}
+

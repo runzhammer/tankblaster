@@ -1,4 +1,4 @@
-package tanks
+package tankblaster
 
 import (
 	"github.com/hajimehoshi/ebiten/v2"

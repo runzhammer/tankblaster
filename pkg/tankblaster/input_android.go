@@ -1,4 +1,4 @@
-package tanks
+package tankblaster
 
 import (
 	"github.com/explodes/tanks/go/core"

@@ -7,14 +7,14 @@ import (
 )
 
 type Scene interface {
-	Update() error
+	Update(dt float64) error
 	Draw(image *ebiten.Image)
 }
 
-type ChangeGameError struct {
+type ChangeSceneError struct {
 	Game string
 }
 
-func (c *ChangeGameError) Error() string {
+func (c *ChangeSceneError) Error() string {
 	return fmt.Sprintf("change game: %s", c.Game)
 }

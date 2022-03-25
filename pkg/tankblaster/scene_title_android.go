@@ -1,4 +1,4 @@
-package tanks
+package tankblaster
 
 var instructionsStrings = []string{
 	"Blue will rotate the tank with the left side of the screen.",

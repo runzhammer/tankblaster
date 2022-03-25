@@ -8,6 +8,7 @@ type Game interface {
 	Scene
 	OnMuted(muted bool)
 	Close() error
+	Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int)
 }
 
 var _ Game = (*GameSceneLoop)(nil)
@@ -17,14 +18,13 @@ type GameSceneLoop struct {
 }
 
 func (g *GameSceneLoop) SetScene(scene Scene) error {
-	DebugLog("new scene: %T", scene)
 	g.scene = scene
 	return nil
 }
 
-func (g *GameSceneLoop) Update() error {
+func (g *GameSceneLoop) Update(tick float64) error {
 	if g.scene != nil {
-		if err := g.scene.Update(); err != nil {
+		if err := g.scene.Update(tick); err != nil {
 			return err
 		}
 	}
@@ -39,3 +39,7 @@ func (g *GameSceneLoop) Draw(screen *ebiten.Image) {
 
 func (g *GameSceneLoop) OnMuted(muted bool) {}
 func (g *GameSceneLoop) Close() error       { return nil }
+
+func (g *GameSceneLoop) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
+	return outsideWidth, outsideHeight
+}

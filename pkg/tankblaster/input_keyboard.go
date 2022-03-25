@@ -1,8 +1,9 @@
+//go:build (darwin || freebsd || linux || windows || js) && !android && !ios
 // +build darwin freebsd linux windows js
 // +build !android
 // +build !ios
 
-package tanks
+package tankblaster
 
 import (
 	"github.com/hajimehoshi/ebiten"
