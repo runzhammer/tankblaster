@@ -1,30 +1,30 @@
-package tempura
+package engine
 
 import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// Object is a game object that has basic physics, optional
+// sprite is a game sprite that has basic physics, optional
 // graphics, and associated Behaviors. It can be used standalone
-// or managed (Updated and Drawn) by Objects.
-type Object struct {
-	// Tag is an optional identifier for this type of object.
-	// It can be retrieved as an ObjectSet from an Objects by
-	// this tag along with other Objects with the same tag.
+// or managed (Updated and Drawn) by sprites.
+type sprite struct {
+	// Tag is an optional identifier for this type of sprite.
+	// It can be retrieved as an spriteSet from an sprites by
+	// this tag along with other sprites with the same tag.
 	Tag string
 
-	// Pos is the position of the Object. The Drawable, if any,
+	// Pos is the position of the sprite. The Drawable, if any,
 	// will be drawn with this as the origin.
 	Pos Vec
-	// Size is the size of the Object. The Drawable, if any,
+	// Size is the size of the sprite. The Drawable, if any,
 	// will be scaled to fit.
 	Size Vec
 	// Velocity is the Vec describing the movement speed
-	// and direction of this Object.
+	// and direction of this sprite.
 	Velocity Vec
 
 	// Drawable is an optional Drawable to use to draw this
-	// Object on a Target.
+	// sprite on a Target.
 	Drawable Drawable
 	// Rot is an amount in radians used to rotate the Drawable
 	// where 0 degrees is right and 90 degrees is upwards.
@@ -35,30 +35,30 @@ type Object struct {
 	RotNormal float64
 
 	// PreSteps is Behaviors to execute before Steps and
-	// PostSteps during an Update performed by Objects.
+	// PostSteps during an Update performed by sprites.
 	PreSteps Behaviors
 	// Steps is Behaviors to execute before PostSteps and
-	// after PreSteps during an Update performed by Objects.
+	// after PreSteps during an Update performed by sprites.
 	Steps Behaviors
 	// PostSteps is Behaviors to execute after Steps during
-	// an Update performed by Objects.
+	// an Update performed by sprites.
 	PostSteps Behaviors
 
 	// Meta is an arbitrary value used to hold miscellaneous
-	// information about this object.
-	// It is not used by the tempura library.
+	// information about this sprite.
+	// It is not used by the engine library.
 	Meta interface{}
 }
 
-// Bounds gets the hitbox for this Object. Any Drawable will
+// Bounds gets the hitbox for this sprite. Any Drawable will
 // scaled and translated to fit this box. Collision detection
 // can be performed using this Rect.
-func (o *Object) Bounds() Rect {
+func (o *sprite) Bounds() Rect {
 	return R(o.Pos.X, o.Pos.Y, o.Pos.X+o.Size.X, o.Pos.Y+o.Size.Y)
 }
 
 // HitTest performs a hit test for the given point.
-func (o *Object) HitTest(v Vec) bool {
+func (o *sprite) HitTest(v Vec) bool {
 	if o == nil {
 		return false
 	}
@@ -68,13 +68,13 @@ func (o *Object) HitTest(v Vec) bool {
 		o.Pos.Y+o.Size.Y >= v.Y
 }
 
-// Draw will render this Object on a target if a Drawable is associated with
-// this Object. The Object's Drawable will be scaled and translated to fit
-// this Object's Bounds. It will also be rotated by Rot radians to
-// This function does nothing if this Object has no Drawable.
+// Draw will render this sprite on a target if a Drawable is associated with
+// this sprite. The sprite's Drawable will be scaled and translated to fit
+// this sprite's Bounds. It will also be rotated by Rot radians to
+// This function does nothing if this sprite has no Drawable.
 //
 // The camera transformation is applied to draw, if it is not nil.
-func (o *Object) Draw(camera *ebiten.GeoM, image *ebiten.Image) {
+func (o *sprite) Draw(camera *ebiten.GeoM, image *ebiten.Image) {
 	if o.Drawable == nil {
 		return
 	}

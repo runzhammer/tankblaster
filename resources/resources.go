@@ -3,19 +3,19 @@ package resources
 import _ "embed"
 
 //go:embed tank.png
-var tankSprite []byte
+var TankSprite []byte
 
 //go:embed tank.yaml
-var tankSpec []byte
+var TankSpec []byte
 
 //go:embed background.png
-var backgroundSprite []byte
+var BackgroundSprite []byte
 
 //go:embed background.yaml
-var backgroundSpec []byte
+var BackgroundSpec []byte
 
 //go:embed ground.png
-var groundSprite []byte
+var GroundSprite []byte
 
 //go:embed ground.yaml
-var groundSpec []byte
+var GroundSpec []byte

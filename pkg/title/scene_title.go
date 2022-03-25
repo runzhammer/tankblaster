@@ -4,7 +4,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/tempura"
+	"github.com/runzhammer/gamedemo/pkg/engine"
 )
 
 var _ core.Scene = (*titleScene)(nil)
@@ -19,7 +19,7 @@ const (
 type titleScene struct {
 	g *Game
 
-	layers tempura.Layers
+	layers engine.Layers
 }
 
 func NewTitleScene(game *Game) (core.Scene, error) {
@@ -34,7 +34,7 @@ func NewTitleScene(game *Game) (core.Scene, error) {
 		return nil, err
 	}
 
-	layers := tempura.NewLayers(numLayers)
+	layers := engine.NewLayers(numLayers)
 
 	titleScene := &titleScene{
 		g:      game,
@@ -58,11 +58,11 @@ func NewTitleScene(game *Game) (core.Scene, error) {
 	y := core.ScreenHeight*0.5 - h*0.5
 
 	for _, m := range menu {
-		layers[layerMenu].Add(&tempura.Object{
+		layers[layerMenu].Add(&engine.Object{
 			Tag:      m.name,
-			Drawable: tempura.NewImageDrawable(m.image),
-			Pos:      tempura.V(x, y),
-			Size:     tempura.V(w, h),
+			Drawable: engine.NewImageDrawable(m.image),
+			Pos:      engine.V(x, y),
+			Size:     engine.V(w, h),
 		})
 		x += dx
 	}
@@ -81,14 +81,14 @@ func (s *titleScene) Draw(image *ebiten.Image) {
 	s.layers.Draw(nil, image)
 }
 
-func objectBoundsContainsPoint(obj *tempura.Object, x, y float64) bool {
+func objectBoundsContainsPoint(obj *engine.Object, x, y float64) bool {
 	return obj.Pos.X <= x &&
 		obj.Pos.X+obj.Size.X >= x &&
 		obj.Pos.Y <= y &&
 		obj.Pos.Y+obj.Size.Y >= y
 }
 
-func (s *titleScene) menuTouch() *tempura.Object {
+func (s *titleScene) menuTouch() *engine.Object {
 	for _, touch := range ebiten.TouchIDs() {
 		x, y := ebiten.TouchPosition(touch)
 		if obj := s.menuTouchAt(float64(x), float64(y)); obj != nil {
@@ -102,7 +102,7 @@ func (s *titleScene) menuTouch() *tempura.Object {
 	return nil
 }
 
-func (s *titleScene) menuTouchAt(x, y float64) *tempura.Object {
+func (s *titleScene) menuTouchAt(x, y float64) *engine.Object {
 	xf, yf := float64(x), float64(y)
 	iter := s.layers[layerMenu].Iterator()
 	for obj, ok := iter(); ok; obj, ok = iter() {

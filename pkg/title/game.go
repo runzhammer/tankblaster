@@ -2,7 +2,7 @@ package title
 
 import (
 	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/tempura"
+	"github.com/runzhammer/gamedemo/pkg/engine"
 )
 
 var _ core.Game = (*Game)(nil)
@@ -14,7 +14,7 @@ type Game struct {
 
 func NewGame(context core.Context) (core.Game, error) {
 	if core.Debug {
-		defer tempura.LogStart("Title init").End()
+		defer engine.LogStart("Title init").End()
 	}
 	game := &Game{
 		context: context,
@@ -29,7 +29,7 @@ func NewGame(context core.Context) (core.Game, error) {
 
 func (g *Game) SetNewScene(factory func(*Game) (scene core.Scene, err error)) error {
 	if core.Debug {
-		defer tempura.LogStart("New title scene").End()
+		defer engine.LogStart("New title scene").End()
 	}
 	scene, err := factory(g)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/tempura"
+	"github.com/runzhammer/gamedemo/pkg/engine"
 	"golang.org/x/image/colornames"
 )
 
@@ -30,9 +30,9 @@ type titleScene struct {
 	g    *Game
 	time float64
 
-	title        tempura.Text
-	instructions tempura.Texts
-	scoreboard   *tempura.Texts
+	title        engine.Text
+	instructions engine.Texts
+	scoreboard   *engine.Texts
 }
 
 func NewTitleScene(game *Game) (core.Scene, error) {
@@ -48,13 +48,13 @@ func NewTitleScene(game *Game) (core.Scene, error) {
 		return nil, err
 	}
 
-	var scoreboard *tempura.Texts
+	var scoreboard *engine.Texts
 	if game.redScore != 0 || game.blueScore != 0 {
 		face, err := loader.Face("fonts/BlackKnightFLF.ttf", 36)
 		if err != nil {
 			return nil, err
 		}
-		texts := make(tempura.Texts, 0, 3)
+		texts := make(engine.Texts, 0, 3)
 		texts.Pushf(face, colornames.Blue, "Blue: %d", game.blueScore)
 		texts.Push(face, colornames.White, " - ")
 		texts.Pushf(face, colornames.Red, "Red: %d", game.redScore)
@@ -63,8 +63,8 @@ func NewTitleScene(game *Game) (core.Scene, error) {
 
 	s := &titleScene{
 		g:            game,
-		title:        tempura.NewText(titleFace, colornames.White, Title),
-		instructions: tempura.NewTexts(instructionsFace, colornames.White, instructionsStrings),
+		title:        engine.NewText(titleFace, colornames.White, Title),
+		instructions: engine.NewTexts(instructionsFace, colornames.White, instructionsStrings),
 		scoreboard:   scoreboard,
 	}
 
@@ -110,7 +110,7 @@ func (s *titleScene) drawScoreboard(image *ebiten.Image) {
 			dx += jitter(jit)
 			dy += jitter(jit)
 		}
-		t.Draw(image, dx, dy, tempura.AlignLeft)
+		t.Draw(image, dx, dy, engine.AlignLeft)
 		x += t.Advance
 	}
 }
@@ -124,7 +124,7 @@ func (s *titleScene) drawInstructions(image *ebiten.Image) {
 		return
 	}
 	height := s.instructions.MultiLineHeight(space)
-	s.instructions.DrawLines(image, space, core.ScreenWidth/2, core.ScreenHeight-height-vpad, tempura.AlignCenter)
+	s.instructions.DrawLines(image, space, core.ScreenWidth/2, core.ScreenHeight-height-vpad, engine.AlignCenter)
 }
 
 func (s *titleScene) drawTitle(image *ebiten.Image) {

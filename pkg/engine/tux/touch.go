@@ -2,7 +2,7 @@ package tux
 
 import (
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/runzhammer/gamedemo/pkg/tempura"
+	"github.com/runzhammer/gamedemo/pkg/engine"
 )
 
 // TouchState describes the state of a touch pointer
@@ -26,7 +26,7 @@ type Touch struct {
 	// State is the last known state of the touch
 	State TouchState
 	// Position is the position at which the State changed to its current state
-	Position tempura.Vec
+	Position engine.Vec
 }
 
 // TouchInput is a mechanism for collecting all touch events and transforming

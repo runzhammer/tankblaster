@@ -1,4 +1,4 @@
-package tempura
+package engine
 
 import (
 	"image/color"

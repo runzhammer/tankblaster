@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/tempura"
+	"github.com/runzhammer/gamedemo/pkg/engine"
 )
 
 var _ core.Game = (*Game)(nil)
@@ -20,7 +20,7 @@ const (
 )
 
 var (
-	ScreenBounds = tempura.R(0, 0, ScreenWidth, ScreenHeight)
+	ScreenBounds = engine.R(0, 0, ScreenWidth, ScreenHeight)
 
 	RegularTermination = errors.New("goodbye")
 	GameTermination    = errors.New("game over")
@@ -48,7 +48,7 @@ func NewGame() (core.Game, error) {
 	// }
 	game := &Game{}
 
-	if err := game.SetNewScene(NewTitleScene); err != nil {
+	if err := game.SetNewScene(NewGameScene); err != nil {
 		return nil, err
 	}
 
