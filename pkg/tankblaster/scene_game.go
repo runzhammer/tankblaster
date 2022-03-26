@@ -16,8 +16,7 @@ var _ core.Scene = (*GameScene)(nil)
 type Phase uint8
 
 const (
-	phaseCountdown Phase = iota
-	phaseBattle
+	phaseBattle Phase = iota
 	phaseBlueVictory
 	phaseRedVictory
 )
@@ -47,7 +46,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 
 	s := &GameScene{
 		g:     game,
-		phase: phaseCountdown,
+		phase: phaseBattle,
 		// cannonSFX:   cannonSFX,
 		// messageFace: messageFace,
 		// shot:        shotDrawable,
@@ -88,20 +87,19 @@ func (s *GameScene) Update() error {
 	s.time += 1
 
 	switch s.phase {
-	case phaseCountdown:
-		// countdownTime := s.time * 2
-		// if countdownTime >= 3 {
-		// 	s.phase = phaseBattle
-		// 	break
-		// }
-		// seconds := 3 - int(countdownTime)
+	// countdownTime := s.time * 2
+	// if countdownTime >= 3 {
+	// 	s.phase = phaseBattle
+	// 	break
+	// }
+	// seconds := 3 - int(countdownTime)
 
-		// countdownColorIndex := 3 - seconds
-		// if countdownColorIndex < 0 {
-		// 	countdownColorIndex = 0
-		// }
-		// text := engine.NewText(s.messageFace, countdownColors[countdownColorIndex], strconv.Itoa(seconds))
-		// s.message = &text
+	// countdownColorIndex := 3 - seconds
+	// if countdownColorIndex < 0 {
+	// 	countdownColorIndex = 0
+	// }
+	// text := engine.NewText(s.messageFace, countdownColors[countdownColorIndex], strconv.Itoa(seconds))
+	// s.message = &text
 	case phaseBattle:
 		s.layers.Update()
 	case phaseBlueVictory:
@@ -123,8 +121,8 @@ func (s *GameScene) Draw(image *ebiten.Image) {
 	case phaseBlueVictory:
 		fallthrough
 	case phaseRedVictory:
-		fallthrough
-	case phaseCountdown:
+		// fallthrough
+		// case phaseCountdown:
 		// if s.message == nil {
 		// 	return
 		// }
