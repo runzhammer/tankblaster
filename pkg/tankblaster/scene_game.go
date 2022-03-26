@@ -23,10 +23,9 @@ const (
 
 const (
 	layerBackground = iota
-	layerTanks
-	layerBullets
-	ground
-	background
+	// layerGround
+	// layerTanks
+	// layerBullets
 	numLayers
 )
 
@@ -54,20 +53,20 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 
 	b := models.NewBackground()
-	gr := models.NewGround()
+	// gr := models.NewGround()
 
-	t1 := models.NewTank()
-	t1.Position = engine.Vec{X: 128, Y: float64(core.Config().Screen.Height) - 160}
-	t1.Name = "Player 1"
+	// t1 := models.NewTank("Player 1")
+	// t2 := models.NewTank("Player 2")
 
-	t2 := models.NewTank()
-	t2.Position = engine.Vec{X: float64(core.Config().Screen.Width) - 64 - 128, Y: float64(core.Config().Screen.Height) - 160}
-	t2.Name = "Player 2"
-
-	s.layers[layerTanks].Add(t1.Sprite)
-	s.layers[layerTanks].Add(t2.Sprite)
+	// s.layers[layerTanks].Add(t1.Sprite)
+	// s.layers[layerTanks].Add(t2.Sprite)
+	// s.layers[layerGround].Add(gr.Sprite)
 	s.layers[layerBackground].Add(b.Sprite)
-	s.layers[layerBackground].Add(gr.Sprite)
+
+	// log.Printf("t1.Sprite: %v", t1.Sprite)
+	// log.Printf("t2.Sprite: %v", t2.Sprite)
+	// log.Printf("gr.Sprite: %v", gr.Sprite)
+	// log.Printf("b.Sprite: %v", b.Sprite)
 
 	return s, nil
 }
@@ -113,8 +112,9 @@ func (s *GameScene) Update() error {
 	return nil
 }
 
-func (s *GameScene) Draw(image *ebiten.Image) {
-	s.layers.Draw(nil, image)
+func (s *GameScene) Draw(screen *ebiten.Image) {
+
+	s.layers.Draw(nil, screen)
 
 	switch s.phase {
 	case phaseBattle:
@@ -250,11 +250,11 @@ func (s *GameScene) spawnRedShots() {
 	// }
 }
 
-func (s *GameScene) behaviorRemoveOutOfBounds(source *engine.Sprite, dt float64) {
-	if !engine.Collision(source.Bounds(), core.Config().Screen.Bounds) {
-		s.layers[layerBullets].Remove(source)
-	}
-}
+// func (s *GameScene) behaviorRemoveOutOfBounds(source *engine.Sprite, dt float64) {
+// 	if !engine.Collision(source.Bounds(), core.Config().Screen.Bounds) {
+// 		s.layers[layerBullets].Remove(source)
+// 	}
+// }
 
 // func (s *gameScene) behaviorRedHitsBlueBullet(source *engine.Sprite, dt float64) {
 // 	if s.phase != phaseBattle {

@@ -46,8 +46,8 @@ func NewTitleScene(game *Game) (core.Scene, error) {
 		name  string
 		image *ebiten.Image
 	}{
-		{"tanks", models.NewTank().Sprite.Image},
-		{"shipwreck", models.NewTank().Sprite.Image},
+		{"tanks", models.NewTank("Tanks").Sprite.Image},
+		{"shipwreck", models.NewTank("Shipwreck").Sprite.Image},
 	}
 
 	w := core.Config().Screen.Width / float64(len(menu)) * 0.75

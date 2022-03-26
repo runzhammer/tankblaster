@@ -21,6 +21,7 @@ func NewGround() Ground {
 	gr.Sprite.Tag = "ground"
 	gr.Sprite.Pos = engine.V(0, core.Config().Screen.Height-110)
 	gr.Sprite.Size = engine.V(core.Config().Screen.Width, core.Config().Screen.Height)
+	gr.Sprite.Drawable = engine.NewImageDrawableFrames(gr.Sprite.Image, engine.R(0, 0, float64(gr.Sprite.SpriteSpec.Still.Frames[0].W), float64(gr.Sprite.SpriteSpec.Still.Frames[0].H)))
 
 	return gr
 }

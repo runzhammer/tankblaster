@@ -14,23 +14,25 @@ type Tank struct {
 	Name      string
 	Speed     int
 	Sprite    *engine.Sprite
-	Position  engine.Vec
+	PreSteps  engine.Behavior
 	Steps     engine.Behavior
 	PostSteps engine.Behavior
 }
 
-func NewTank() Tank {
+func NewTank(name string) Tank {
 
-	t := Tank{}
+	t := Tank{Name: name}
 	t.Speed = 215
 
 	t.Sprite = engine.NewSprite(r.TankSprite, r.TankSpec)
-
+	t.Sprite.Tag = name
 	t.Sprite.Pos = engine.V(100, core.Config().Screen.Height/2-t.Sprite.Bounds().H()/2)
 	t.Sprite.Size = engine.V(t.Sprite.Bounds().W(), t.Sprite.Bounds().H())
 	t.Sprite.Steps = engine.MakeBehaviors(
 		engine.Movement,
 	)
+	t.Sprite.Drawable = engine.NewImageDrawableFrames(t.Sprite.Image, engine.R(0, 0, float64(t.Sprite.SpriteSpec.Still.Frames[0].W), float64(t.Sprite.SpriteSpec.Still.Frames[0].H)))
+
 	// PostSteps: engine.MakeBehaviors(
 	// 	t.Sprite.reflectInBounds,
 	// 	t.Sprite.behaviorBlueHitsRedBullet,

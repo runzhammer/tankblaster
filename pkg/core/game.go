@@ -41,5 +41,6 @@ func (g *GameSceneLoop) OnMuted(muted bool) {}
 func (g *GameSceneLoop) Close() error       { return nil }
 
 func (g *GameSceneLoop) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
-	return outsideWidth, outsideHeight
+	return int((*Config()).Screen.Width), int((*Config()).Screen.Height)
+	// return outsideWidth, outsideHeight
 }

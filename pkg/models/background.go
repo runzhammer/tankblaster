@@ -16,11 +16,11 @@ type Background struct {
 func NewBackground() Background {
 
 	b := Background{}
-	b.Sprite = engine.NewSprite(r.GroundSprite, r.GroundSpec)
+	b.Sprite = engine.NewSprite(r.BackgroundSprite, r.BackgroundSpec)
 
 	b.Sprite.Tag = "background"
-	b.Sprite.Pos = engine.V(0, 0)
 	b.Sprite.Size = engine.V(core.Config().Screen.Width, core.Config().Screen.Height)
+	b.Sprite.Drawable = engine.NewImageDrawable(b.Sprite.Image)
 
 	return b
 }

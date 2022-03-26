@@ -15,6 +15,8 @@ type Sprite struct {
 	// The actual image loaded from resources
 	Image *ebiten.Image
 
+	DrawImageOptions *ebiten.DrawImageOptions
+
 	// Spec of sprite sheet
 	SpriteSpec spriteSpec
 
@@ -95,6 +97,8 @@ func NewSprite(sprite []byte, animations []byte) *Sprite {
 
 	s.Image = ebiten.NewImageFromImage(spriteDecoded)
 
+	s.DrawImageOptions = &ebiten.DrawImageOptions{}
+
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -104,9 +108,6 @@ func NewSprite(sprite []byte, animations []byte) *Sprite {
 	if err != nil {
 		log.Fatalf("Unmarshal: %v", err)
 	}
-
-	// set drawable specs
-	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.SpriteSpec.Still.Frames[0].W), float64(s.SpriteSpec.Still.Frames[0].H)))
 
 	return &s
 }
@@ -136,13 +137,16 @@ func (s *Sprite) HitTest(v Vec) bool {
 //
 // The camera transformation is applied to draw, if it is not nil.
 func (s *Sprite) Draw(camera *ebiten.GeoM, image *ebiten.Image) {
+	// log.Printf("drawing %s", s.Tag)
+
 	if s.Image == nil {
 		return
 	}
 	bounds := s.Bounds()
-	mat := FitRotated(s.Rot+s.RotNormal, s.Drawable.Bounds(), bounds)
+	FitRotated(s.Rot+s.RotNormal, s.Drawable.Bounds(), bounds, s.DrawImageOptions)
 	if camera != nil {
-		mat.Concat(*camera)
+		s.DrawImageOptions.GeoM.Concat(*camera)
 	}
-	s.Drawable.DrawAbsolute(image, mat)
+	s.Drawable.DrawAbsolute(image, s.DrawImageOptions)
+
 }

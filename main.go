@@ -8,10 +8,6 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/tankblaster"
 )
 
-func init() {
-	log.Printf("%v", core.Config())
-}
-
 func main() {
 
 	ebiten.SetWindowSize(int((*core.Config()).Screen.Width), int((*core.Config()).Screen.Height))
