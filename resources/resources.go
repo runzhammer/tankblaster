@@ -2,6 +2,9 @@ package resources
 
 import _ "embed"
 
+//go:embed config.yaml
+var GameConfig []byte
+
 //go:embed tank.png
 var TankSprite []byte
 

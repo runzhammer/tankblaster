@@ -27,7 +27,7 @@ var (
 )
 
 type Game struct {
-	core.GameSceneLoop
+	Loop    core.GameSceneLoop
 	context core.Context
 
 	redScore  int

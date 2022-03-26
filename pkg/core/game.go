@@ -22,9 +22,9 @@ func (g *GameSceneLoop) SetScene(scene Scene) error {
 	return nil
 }
 
-func (g *GameSceneLoop) Update(tick float64) error {
+func (g *GameSceneLoop) Update() error {
 	if g.scene != nil {
-		if err := g.scene.Update(tick); err != nil {
+		if err := g.scene.Update(); err != nil {
 			return err
 		}
 	}

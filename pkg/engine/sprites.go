@@ -25,7 +25,7 @@ type TaggedSpriteContainer interface {
 // for obj, ok := iter(); ok; obj, ok = iter() {
 //   ..use obj..
 // }
-// Removing an object during iteration is undefined.
+// Removing an sprite during iteration is undefined.
 type SpriteIterator func() (next *Sprite, ok bool)
 
 // Layers is a container for multiple Sprites collections such that
@@ -43,9 +43,9 @@ func NewLayers(n int) Layers {
 }
 
 // Update updates all Sprites. Updates happen in the first layer forward.
-func (ly Layers) Update(dt float64) {
+func (ly Layers) Update() {
 	for _, layer := range ly {
-		layer.Update(dt)
+		layer.Update()
 	}
 }
 
@@ -75,7 +75,7 @@ func (ly Layers) Contains(obj *Sprite) bool {
 	return false
 }
 
-// Iterator returns an SpriteIterator for all objects in all layers
+// Iterator returns an SpriteIterator for all sprites in all layers
 // from the lowest layer to highest
 func (ly Layers) Iterator() SpriteIterator {
 	iters := make([]SpriteIterator, len(ly))
@@ -85,7 +85,7 @@ func (ly Layers) Iterator() SpriteIterator {
 	return chainIterators(iters)
 }
 
-// Iterator returns an SpriteIterator for all objects in all layers
+// Iterator returns an SpriteIterator for all sprites in all layers
 // from the highest layer to lowest
 func (ly Layers) IteratorTop() SpriteIterator {
 	iters := make([]SpriteIterator, len(ly))
@@ -95,7 +95,7 @@ func (ly Layers) IteratorTop() SpriteIterator {
 	return chainIterators(iters)
 }
 
-// Iterator returns an SpriteIterator for all objects
+// Iterator returns an SpriteIterator for all sprites
 // with the given tags in all layers from the lowest layer to highest
 func (ly Layers) TagIterator(tags ...string) SpriteIterator {
 	if len(tags) == 0 {
@@ -112,7 +112,7 @@ func (ly Layers) TagIterator(tags ...string) SpriteIterator {
 	return chainIterators(iters)
 }
 
-// Iterator returns an SpriteIterator for all objects
+// Iterator returns an SpriteIterator for all sprites
 // with the given tags in all layers from the highest layer to lowest
 func (ly Layers) TagIteratorTop(tags ...string) SpriteIterator {
 	if len(tags) == 0 {
@@ -137,14 +137,14 @@ func (ly Layers) TagIteratorTop(tags ...string) SpriteIterator {
 // container.
 type Sprites struct {
 	all    *SpriteSet
-	tagged objectTagMap
+	tagged spriteTagMap
 }
 
 // NewSprites makes a new Sprites container.
 func NewSprites() *Sprites {
 	return &Sprites{
 		all:    NewSpriteSet(),
-		tagged: make(objectTagMap),
+		tagged: make(spriteTagMap),
 	}
 }
 
@@ -166,7 +166,7 @@ func (o *Sprites) Tagged(tag string) *SpriteSet {
 	return o.tagged[tag]
 }
 
-// Add adds an object to this container. If the Sprite has a Tag, that
+// Add adds an sprite to this container. If the Sprite has a Tag, that
 // tag is used to quickly access a particular subset of Sprite.
 func (o *Sprites) Add(obj *Sprite) {
 	o.all.Add(obj)
@@ -175,7 +175,7 @@ func (o *Sprites) Add(obj *Sprite) {
 	}
 }
 
-// Remove removes an object from this container.
+// Remove removes an sprite from this container.
 func (o *Sprites) Remove(obj *Sprite) {
 	o.all.Remove(obj)
 	if obj.Tag != "" {
@@ -183,15 +183,15 @@ func (o *Sprites) Remove(obj *Sprite) {
 	}
 }
 
-// Contains tests to see if an object is contained in this container.
+// Contains tests to see if an sprite is contained in this container.
 func (o *Sprites) Contains(obj *Sprite) bool {
 	return o.all.Contains(obj)
 }
 
 // Update performs all PreSteps, then all Steps, then all PostSteps
 // of Sprite in this container.
-func (o *Sprites) Update(dt float64) {
-	o.all.Update(dt)
+func (o *Sprites) Update() {
+	o.all.Update()
 }
 
 // Draw draws all Sprite in this container.
@@ -238,7 +238,7 @@ func emptySpriteIterator() (*Sprite, bool) {
 }
 
 // Iterator returns an iterator function that can be used
-// to iterate over all objects in this set.
+// to iterate over all sprites in this set.
 func (os *SpriteSet) Iterator() SpriteIterator {
 	if os == nil {
 		return emptySpriteIterator
@@ -270,46 +270,46 @@ func (os *SpriteSet) Contains(obj *Sprite) bool {
 	return ok
 }
 
-// Add adds objects to this set
+// Add adds sprites to this set
 func (os *SpriteSet) Add(obj *Sprite) {
 	os.set.Set(obj, struct{}{})
 }
 
-// Remove removes objects from this set
+// Remove removes sprites from this set
 func (os *SpriteSet) Remove(obj *Sprite) {
 	os.set.Delete(obj)
 }
 
 // Update performs all PreSteps, then all Steps, then all PostSteps
 // of Sprite in this container.
-func (os *SpriteSet) Update(dt float64) {
+func (os *SpriteSet) Update() {
 	iter := os.Iterator()
-	for object, ok := iter(); ok; object, ok = iter() {
-		object.PreSteps.Execute(object, dt)
+	for sprite, ok := iter(); ok; sprite, ok = iter() {
+		sprite.PreSteps.Execute(sprite)
 	}
 	iter = os.Iterator()
-	for object, ok := iter(); ok; object, ok = iter() {
-		object.Steps.Execute(object, dt)
+	for sprite, ok := iter(); ok; sprite, ok = iter() {
+		sprite.Steps.Execute(sprite)
 	}
 	iter = os.Iterator()
-	for object, ok := iter(); ok; object, ok = iter() {
-		object.PostSteps.Execute(object, dt)
+	for sprite, ok := iter(); ok; sprite, ok = iter() {
+		sprite.PostSteps.Execute(sprite)
 	}
 }
 
 // Draw draws all Sprite in this container.
 func (os *SpriteSet) Draw(camera *ebiten.GeoM, image *ebiten.Image) {
 	iter := os.Iterator()
-	for object, ok := iter(); ok; object, ok = iter() {
-		object.Draw(camera, image)
+	for sprite, ok := iter(); ok; sprite, ok = iter() {
+		sprite.Draw(camera, image)
 	}
 }
 
-// objectTagMap is a defaultdict-like map for adding and removing
-// objects from an SpriteSet by tag
-type objectTagMap map[string]*SpriteSet
+// spriteTagMap is a defaultdict-like map for adding and removing
+// sprites from an SpriteSet by tag
+type spriteTagMap map[string]*SpriteSet
 
-func (m objectTagMap) add(tag string, obj *Sprite) {
+func (m spriteTagMap) add(tag string, obj *Sprite) {
 	set := m[tag]
 	if set == nil {
 		set = NewSpriteSet()
@@ -318,7 +318,7 @@ func (m objectTagMap) add(tag string, obj *Sprite) {
 	set.Add(obj)
 }
 
-func (m objectTagMap) remove(tag string, obj *Sprite) {
+func (m spriteTagMap) remove(tag string, obj *Sprite) {
 	set := m[tag]
 	if set != nil {
 		set.Remove(obj)

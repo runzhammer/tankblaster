@@ -61,6 +61,10 @@ type Sprite struct {
 }
 
 type spriteSpec struct {
+	Still struct {
+		Speed  float64 `yaml:"speed"`
+		Frames []frameSpec
+	} `yaml:"still"`
 	Stand struct {
 		Speed  float64 `yaml:"speed"`
 		Frames []frameSpec
@@ -78,7 +82,7 @@ type frameSpec struct {
 	H int `yaml:"h"`
 }
 
-func (s *Sprite) NewSprite(sprite []byte, animations []byte) {
+func NewSprite(s *Sprite, sprite []byte, animations []byte) *Sprite {
 
 	var err error
 
@@ -102,6 +106,8 @@ func (s *Sprite) NewSprite(sprite []byte, animations []byte) {
 
 	// set drawable specs
 	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.SpriteSpec.Stand.Frames[0].W), float64(s.SpriteSpec.Stand.Frames[0].H)))
+
+	return s
 }
 
 // Bounds gets the hitbox for this sprite. Any Drawable will

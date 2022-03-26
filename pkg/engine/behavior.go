@@ -1,12 +1,12 @@
 package engine
 
 // Behavior is what happens when an object meets a condition for a given time delta
-type Behavior func(source *Sprite, dt float64)
+type Behavior func(source *Sprite)
 
 // Reaction is what happens when two objects meet a condition for a given time delta.
 // Source is the Sprite performing a behavior "with" is the object the source is
 // reacting with.
-type Reaction func(source, with *Sprite, dt float64)
+type Reaction func(source, with *Sprite)
 
 // Behaviors is a slice of Behavior that should happen in succession
 type Behaviors []Behavior
@@ -18,21 +18,21 @@ func MakeBehaviors(behaviors ...Behavior) Behaviors {
 }
 
 // Execute executes all behaviors for an object with a time delta
-func (b Behaviors) Execute(source *Sprite, dt float64) {
+func (b Behaviors) Execute(source *Sprite) {
 	for _, behavior := range b {
-		behavior(source, dt)
+		behavior(source)
 	}
 }
 
 // Movement is a Behavior that will move a source an object
 // by its velocity scaled by time delta
-var Movement = Behavior(func(source *Sprite, dt float64) {
-	v := source.Velocity.Scaled(dt)
+var Movement = Behavior(func(source *Sprite) {
+	v := source.Velocity.Scaled(1)
 	source.Pos = source.Pos.Add(v)
 })
 
 // FaceDirection is a behavior that adjusts an Sprite's
 // Rot (rotation) to face the same angle as its Velocity.
-func FaceDirection(source *Sprite, dt float64) {
+func FaceDirection(source *Sprite) {
 	source.Rot = source.Velocity.Angle()
 }

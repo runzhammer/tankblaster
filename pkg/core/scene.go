@@ -7,7 +7,7 @@ import (
 )
 
 type Scene interface {
-	Update(dt float64) error
+	Update() error
 	Draw(image *ebiten.Image)
 }
 

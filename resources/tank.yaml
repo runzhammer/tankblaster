@@ -1,3 +1,10 @@
+still:
+  speed: 1
+  frames:
+    - x: 0
+      y: 0
+      w: 64
+      h: 64
 stand:
   speed: 1.0
   frames:

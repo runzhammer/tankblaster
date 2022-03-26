@@ -4,7 +4,6 @@ import (
 	_ "embed"
 
 	"github.com/runzhammer/gamedemo/pkg/engine"
-	"github.com/runzhammer/gamedemo/pkg/tankblaster"
 	r "github.com/runzhammer/gamedemo/resources"
 )
 
@@ -16,7 +15,7 @@ type Ground struct {
 func NewGround() Background {
 
 	gr := Ground{}
-	gr = engine.NewSprite(r.GroundSprite, r.GroundSpec)
+	gr.Sprite = engine.NewSprite(r.GroundSprite, r.GroundSpec)
 
 	gr.Sprite = engine.Sprite{
 		Tag:  "ground",

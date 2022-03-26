@@ -4,15 +4,23 @@ import (
 	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	g "github.com/runzhammer/gamedemo/game"
+	"github.com/runzhammer/gamedemo/pkg/core"
+	"github.com/runzhammer/gamedemo/pkg/tankblaster"
 )
 
 func main() {
 
-	ebiten.SetWindowSize(g.ScreenWidth, g.ScreenHeight)
+	ebiten.SetWindowSize(int(core.Config().Screen.Width), int(core.Config().Screen.Height))
 	ebiten.SetWindowTitle("Tank Blaster 3.0")
 
-	if err := ebiten.RunGame(&game); err != nil {
+	var err error
+	var tankblasterGame core.Game
+
+	if tankblasterGame, err = tankblaster.NewGame(); err != nil {
+		log.Fatal(err)
+	}
+
+	if err = ebiten.RunGame(tankblasterGame); err != nil {
 		log.Fatal(err)
 	}
 }
