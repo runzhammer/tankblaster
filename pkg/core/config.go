@@ -9,30 +9,42 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type Settings struct {
-	Screen struct {
-		Width  float64 `yaml:"width"`
-		Height float64 `yaml:"height"`
-		Bounds engine.Rect
-	} `yaml:"screen"`
+type FileSettings struct {
+	Window struct {
+		Width  int `yaml:"width"`
+		Height int `yaml:"height"`
+	} `yaml:"window"`
 }
 
-var GameSettings Settings
+type Settings struct {
+	Screen struct {
+		Width  float64
+		Height float64
+		Bounds engine.Rect
+	}
+}
+
+var GameSettings *Settings
 
 func init() {
 
 	var err error
-	GameSettings = Settings{}
+	fs := FileSettings{}
 
 	// load config
-	err = yaml.Unmarshal(r.GameConfig, Config)
+	err = yaml.Unmarshal(r.GameConfig, &fs)
 	if err != nil {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 
-	GameSettings.Screen.Bounds = engine.R(0, 0, GameSettings.Screen.Width, GameSettings.Screen.Height)
+	s := Settings{}
+
+	s.Screen.Width = float64(fs.Window.Width)
+	s.Screen.Height = float64(fs.Window.Height)
+	s.Screen.Bounds = engine.R(0, 0, s.Screen.Width, s.Screen.Height)
+	GameSettings = &s
 }
 
-func Config() Settings {
+func Config() *Settings {
 	return GameSettings
 }

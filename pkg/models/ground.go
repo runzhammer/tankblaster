@@ -3,25 +3,24 @@ package models
 import (
 	_ "embed"
 
+	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
 	r "github.com/runzhammer/gamedemo/resources"
 )
 
 type Ground struct {
 	Name   string
-	Sprite engine.Sprite
+	Sprite *engine.Sprite
 }
 
-func NewGround() Background {
+func NewGround() Ground {
 
 	gr := Ground{}
 	gr.Sprite = engine.NewSprite(r.GroundSprite, r.GroundSpec)
 
-	gr.Sprite = engine.Sprite{
-		Tag:  "ground",
-		Pos:  engine.V(0, ScreenHeight-110),
-		Size: engine.V(ScreenWidth, tankblaster.ScreenHeight),
-	}
+	gr.Sprite.Tag = "ground"
+	gr.Sprite.Pos = engine.V(0, core.Config().Screen.Height-110)
+	gr.Sprite.Size = engine.V(core.Config().Screen.Width, core.Config().Screen.Height)
 
 	return gr
 }

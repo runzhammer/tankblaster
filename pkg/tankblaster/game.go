@@ -7,7 +7,7 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/engine"
 )
 
-var _ core.Game = (*Game)(nil)
+var _ core.Game = (*GameLoop)(nil)
 
 const (
 	Title     = "Tank Blaster 3.0"
@@ -26,8 +26,8 @@ var (
 	GameTermination    = errors.New("game over")
 )
 
-type Game struct {
-	Loop    core.GameSceneLoop
+type GameLoop struct {
+	core.GameSceneLoop
 	context core.Context
 
 	redScore  int
@@ -46,7 +46,7 @@ func NewGame() (core.Game, error) {
 	// 	context: context,
 	// 	bgm: bgm,
 	// }
-	game := &Game{}
+	game := &GameLoop{}
 
 	if err := game.SetNewScene(NewGameScene); err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func NewGame() (core.Game, error) {
 	return game, nil
 }
 
-func (g *Game) SetNewScene(factory func(*Game) (scene core.Scene, err error)) error {
+func (g *GameLoop) SetNewScene(factory func(*GameLoop) (scene core.Scene, err error)) error {
 	scene, err := factory(g)
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func (g *Game) SetNewScene(factory func(*Game) (scene core.Scene, err error)) er
 	return g.SetScene(scene)
 }
 
-func (g *Game) OnMuted(muted bool) {
+func (g *GameLoop) OnMuted(muted bool) {
 	// if muted {
 	// 	g.bgm.SetVolume(0)
 	// } else {
@@ -74,7 +74,7 @@ func (g *Game) OnMuted(muted bool) {
 	// }
 }
 
-func (g *Game) Close() error {
+func (g *GameLoop) Close() error {
 	// return g.bgm.Close()
 	return nil
 }

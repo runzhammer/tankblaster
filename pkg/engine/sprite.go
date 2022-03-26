@@ -82,9 +82,10 @@ type frameSpec struct {
 	H int `yaml:"h"`
 }
 
-func NewSprite(s *Sprite, sprite []byte, animations []byte) *Sprite {
+func NewSprite(sprite []byte, animations []byte) *Sprite {
 
 	var err error
+	s := Sprite{}
 
 	// load sprite
 	spriteDecoded, _, err := image.Decode(bytes.NewReader(sprite))
@@ -105,9 +106,9 @@ func NewSprite(s *Sprite, sprite []byte, animations []byte) *Sprite {
 	}
 
 	// set drawable specs
-	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.SpriteSpec.Stand.Frames[0].W), float64(s.SpriteSpec.Stand.Frames[0].H)))
+	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.SpriteSpec.Still.Frames[0].W), float64(s.SpriteSpec.Still.Frames[0].H)))
 
-	return s
+	return &s
 }
 
 // Bounds gets the hitbox for this sprite. Any Drawable will

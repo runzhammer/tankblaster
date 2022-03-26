@@ -27,7 +27,7 @@ var (
 )
 
 type titleScene struct {
-	g    *Game
+	g    *GameLoop
 	time float64
 
 	title        engine.Text
@@ -35,44 +35,44 @@ type titleScene struct {
 	scoreboard   *engine.Texts
 }
 
-func NewTitleScene(game *Game) (core.Scene, error) {
-	loader := game.context.Loader()
+func NewTitleScene(game *GameLoop) (core.Scene, error) {
+	// loader := game.context.Loader()
 
-	titleFace, err := loader.Face("fonts/DampfPlatz.ttf", 240)
-	if err != nil {
-		return nil, err
-	}
+	// titleFace, err := loader.Face("fonts/DampfPlatz.ttf", 240)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	instructionsFace, err := loader.Face("fonts/Lekton-Regular.ttf", 12)
-	if err != nil {
-		return nil, err
-	}
+	// instructionsFace, err := loader.Face("fonts/Lekton-Regular.ttf", 12)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	var scoreboard *engine.Texts
-	if game.redScore != 0 || game.blueScore != 0 {
-		face, err := loader.Face("fonts/BlackKnightFLF.ttf", 36)
-		if err != nil {
-			return nil, err
-		}
-		texts := make(engine.Texts, 0, 3)
-		texts.Pushf(face, colornames.Blue, "Blue: %d", game.blueScore)
-		texts.Push(face, colornames.White, " - ")
-		texts.Pushf(face, colornames.Red, "Red: %d", game.redScore)
-		scoreboard = &texts
-	}
+	// var scoreboard *engine.Texts
+	// if game.redScore != 0 || game.blueScore != 0 {
+	// 	face, err := loader.Face("fonts/BlackKnightFLF.ttf", 36)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	texts := make(engine.Texts, 0, 3)
+	// 	texts.Pushf(face, colornames.Blue, "Blue: %d", game.blueScore)
+	// 	texts.Push(face, colornames.White, " - ")
+	// 	texts.Pushf(face, colornames.Red, "Red: %d", game.redScore)
+	// 	scoreboard = &texts
+	// }
 
 	s := &titleScene{
-		g:            game,
-		title:        engine.NewText(titleFace, colornames.White, Title),
-		instructions: engine.NewTexts(instructionsFace, colornames.White, instructionsStrings),
-		scoreboard:   scoreboard,
+		g: game,
+		// title:        engine.NewText(titleFace, colornames.White, Title),
+		// instructions: engine.NewTexts(instructionsFace, colornames.White, instructionsStrings),
+		// scoreboard:   scoreboard,
 	}
 
 	return s, nil
 }
 
-func (s *titleScene) Update(dt float64) error {
-	s.time += dt
+func (s *titleScene) Update() error {
+	s.time += 1
 
 	if Begin() {
 		return s.g.SetNewScene(NewGameScene)
@@ -98,7 +98,7 @@ func (s *titleScene) drawScoreboard(image *ebiten.Image) {
 	}
 
 	width := s.scoreboard.SingleLineWidth()
-	x := core.ScreenWidth/2 - width/2
+	x := int(core.Config().Screen.Width)/2 - width/2
 
 	for i, t := range *s.scoreboard {
 		dx, dy := x, vpad
@@ -124,14 +124,14 @@ func (s *titleScene) drawInstructions(image *ebiten.Image) {
 		return
 	}
 	height := s.instructions.MultiLineHeight(space)
-	s.instructions.DrawLines(image, space, core.ScreenWidth/2, core.ScreenHeight-height-vpad, engine.AlignCenter)
+	s.instructions.DrawLines(image, space, int(core.Config().Screen.Width)/2, int(core.Config().Screen.Height)-height-vpad, engine.AlignCenter)
 }
 
 func (s *titleScene) drawTitle(image *ebiten.Image) {
 	const jit = 3
 	for _, textColor := range textColors {
 		dx, dy := jitter(jit), jitter(jit)
-		text.Draw(image, s.title.Text, s.title.Face, core.ScreenWidth/2-s.title.W/2+dx, core.ScreenHeight/2+s.title.H/2+dy, textColor)
+		text.Draw(image, s.title.Text, s.title.Face, int(core.Config().Screen.Width)/2-s.title.W/2+dx, int(core.Config().Screen.Height)/2+s.title.H/2+dy, textColor)
 	}
 }
 

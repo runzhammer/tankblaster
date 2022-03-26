@@ -6,17 +6,17 @@
 package tankblaster
 
 import (
-	"github.com/hajimehoshi/ebiten"
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 func Begin() bool {
 	return ebiten.IsKeyPressed(ebiten.KeySpace)
 }
 
-func BlueRotate() bool {
-	return ebiten.IsKeyPressed(ebiten.KeyA)
+func MoveLeft() bool {
+	return ebiten.IsKeyPressed(ebiten.KeyArrowLeft)
 }
 
-func RedRotate() bool {
-	return ebiten.IsKeyPressed(ebiten.KeyL)
+func MoveRight() bool {
+	return ebiten.IsKeyPressed(ebiten.KeyArrowRight)
 }
