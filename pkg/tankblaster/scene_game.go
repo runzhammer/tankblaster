@@ -67,20 +67,24 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		)
 	}
 
-	iter = t1.Sprites.All().Iterator()
-	for obj, ok := iter(); ok; obj, ok = iter() {
-		s.layers[layerTanks].Add(obj)
-	}
+	s.layers[layerTanks] = engine.AddSprites(s.layers[layerTanks], t1.Sprites)
+	s.layers[layerGround] = engine.AddSprites(s.layers[layerGround], gr.Sprites)
+	s.layers[layerBackground] = engine.AddSprites(s.layers[layerBackground], b.Sprites)
 
-	iter = gr.Sprites.All().Iterator()
-	for obj, ok := iter(); ok; obj, ok = iter() {
-		s.layers[layerGround].Add(obj)
-	}
+	// iter = t1.Sprites.All().Iterator()
+	// for obj, ok := iter(); ok; obj, ok = iter() {
+	// 	s.layers[layerTanks].Add(obj)
+	// }
 
-	iter = b.Sprites.All().Iterator()
-	for obj, ok := iter(); ok; obj, ok = iter() {
-		s.layers[layerBackground].Add(obj)
-	}
+	// iter = gr.Sprites.All().Iterator()
+	// for obj, ok := iter(); ok; obj, ok = iter() {
+	// 	s.layers[layerGround].Add(obj)
+	// }
+
+	// iter = b.Sprites.All().Iterator()
+	// for obj, ok := iter(); ok; obj, ok = iter() {
+	// 	s.layers[layerBackground].Add(obj)
+	// }
 
 	// log.Printf("t1.Sprite: %v", t1.Sprite)
 	// log.Printf("t2.Sprite: %v", t2.Sprite)

@@ -175,6 +175,15 @@ func (o *Sprites) Add(obj *Sprite) {
 	}
 }
 
+// Add all *Sprites to left side *Sprites
+func AddSprites(objs1 *Sprites, objs2 *Sprites) *Sprites {
+	iter := objs2.All().Iterator()
+	for obj, ok := iter(); ok; obj, ok = iter() {
+		objs1.Add(obj)
+	}
+	return objs1
+}
+
 // Remove removes an sprite from this container.
 func (o *Sprites) Remove(obj *Sprite) {
 	o.all.Remove(obj)
