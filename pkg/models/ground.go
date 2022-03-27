@@ -15,13 +15,12 @@ type Ground struct {
 
 func NewGround() Ground {
 
-	gr := Ground{}
+	gr := Ground{Name: "ground"}
 	gr.Sprite = engine.NewSprite(r.GroundSprite, r.GroundSpec)
 
 	gr.Sprite.Tag = "ground"
-	gr.Sprite.Pos = engine.V(0, core.Config().Screen.Height-110)
-	gr.Sprite.Size = engine.V(core.Config().Screen.Width, core.Config().Screen.Height)
-	gr.Sprite.Drawable = engine.NewImageDrawableFrames(gr.Sprite.Image, engine.R(0, 0, float64(gr.Sprite.SpriteSpec.Still.Frames[0].W), float64(gr.Sprite.SpriteSpec.Still.Frames[0].H)))
+	gr.Sprite.Pos = engine.Vec{X: 0, Y: core.Config().Screen.Height - 110}
+	gr.Sprite.Size = engine.V(core.Config().Screen.Width, 110)
 
 	return gr
 }

@@ -9,7 +9,7 @@ import (
 type Drawable interface {
 	// DrawAbsolute draws this Drawable onto an image with the supplied transformation.
 	// The transform has already had a camera applied to it.
-	DrawAbsolute(image *ebiten.Image, opts *ebiten.DrawImageOptions)
+	DrawAbsolute(image *ebiten.Image, mat ebiten.GeoM)
 
 	// Bounds returns the dimension of the current frame of this Drawable.
 	Bounds() Rect
@@ -75,11 +75,13 @@ func (d *ImageDrawable) NumFrames() int {
 }
 
 // DrawAbsolute draws this ImageDrawable onto a canvas with the given transform.
-func (d *ImageDrawable) DrawAbsolute(screen *ebiten.Image, opts *ebiten.DrawImageOptions) {
+func (d *ImageDrawable) DrawAbsolute(screen *ebiten.Image, mat ebiten.GeoM) {
 	frame := d.imgFrames[d.frameNum]
-	d.src = ebiten.NewImageFromImage(frame)
+	subImg := d.src.SubImage(frame).(*ebiten.Image)
 
-	screen.DrawImage(d.src, opts)
+	d.opts.GeoM = mat
+
+	screen.DrawImage(subImg, d.opts)
 }
 
 // Bounds returns the bounds of the current frame.

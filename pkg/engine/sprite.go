@@ -109,10 +109,12 @@ func NewSprite(sprite []byte, animations []byte) *Sprite {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 
+	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.SpriteSpec.Still.Frames[0].W), float64(s.SpriteSpec.Still.Frames[0].H)))
+
 	return &s
 }
 
-// Bounds gets the hitbox for this sprite. Any Drawable will
+// Bounds gets the hitbox for this sprite. Any Drawable will be
 // scaled and translated to fit this box. Collision detection
 // can be performed using this Rect.
 func (s *Sprite) Bounds() Rect {
@@ -132,21 +134,18 @@ func (s *Sprite) HitTest(v Vec) bool {
 
 // Draw will render this sprite on a target if a Drawable is associated with
 // this sprite. The sprite's Drawable will be scaled and translated to fit
-// this sprite's Bounds. It will also be rotated by Rot radians to
+// this sprite's Bounds. It will also be rotated by Rot radians.
 // This function does nothing if this sprite has no Drawable.
 //
 // The camera transformation is applied to draw, if it is not nil.
-func (s *Sprite) Draw(camera *ebiten.GeoM, image *ebiten.Image) {
-	// log.Printf("drawing %s", s.Tag)
-
-	if s.Image == nil {
+func (s *Sprite) Draw(camera *ebiten.GeoM, screen *ebiten.Image) {
+	if s.Drawable == nil {
 		return
 	}
 	bounds := s.Bounds()
-	FitRotated(s.Rot+s.RotNormal, s.Drawable.Bounds(), bounds, s.DrawImageOptions)
+	mat := FitRotated(s.Rot+s.RotNormal, s.Drawable.Bounds(), bounds)
 	if camera != nil {
-		s.DrawImageOptions.GeoM.Concat(*camera)
+		mat.Concat(*camera)
 	}
-	s.Drawable.DrawAbsolute(image, s.DrawImageOptions)
-
+	s.Drawable.DrawAbsolute(screen, mat)
 }

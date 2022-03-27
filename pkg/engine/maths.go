@@ -32,20 +32,24 @@ func Fit(source, dest Rect) ebiten.GeoM {
 
 // FitGeoM returns the Matrix that will transform a source Rect
 // into the dest Rect
-func FitRotated(rot float64, source, dest Rect, mat *ebiten.DrawImageOptions) {
+func FitRotated(rot float64, source, dest Rect) ebiten.GeoM {
 	scaleX := dest.W() / source.W()
 	scaleY := dest.H() / source.H()
 
+	mat := ebiten.GeoM{}
+
 	// rotate about center of source
-	mat.GeoM.Translate(-source.W()/2, -source.W()/2)
-	mat.GeoM.Rotate(rot)
-	mat.GeoM.Translate(source.W()/2, source.W()/2)
+	mat.Translate(-source.W()/2, -source.W()/2)
+	mat.Rotate(rot)
+	mat.Translate(source.W()/2, source.W()/2)
 
 	// scale
-	mat.GeoM.Scale(scaleX, scaleY)
+	mat.Scale(scaleX, scaleY)
 
 	// move to destination
-	mat.GeoM.Translate(dest.Min.X, dest.Min.Y)
+	mat.Translate(dest.Min.X, dest.Min.Y)
+
+	return mat
 }
 
 // Collision returns if two rectangles intersect

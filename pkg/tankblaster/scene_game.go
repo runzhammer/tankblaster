@@ -23,8 +23,8 @@ const (
 
 const (
 	layerBackground = iota
-	// layerGround
-	// layerTanks
+	layerGround
+	layerTanks
 	// layerBullets
 	numLayers
 )
@@ -53,14 +53,19 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 
 	b := models.NewBackground()
-	// gr := models.NewGround()
+	gr := models.NewGround()
 
-	// t1 := models.NewTank("Player 1")
+	t1 := models.NewTank("Player 1")
+	t1.Sprite.Pos = engine.Vec{X: 0, Y: gr.Sprite.Pos.Y - t1.Sprite.Size.Y}
+	t1.Sprite.Steps = engine.MakeBehaviors(
+		s.behaviorMoveOnButton,
+	)
+
 	// t2 := models.NewTank("Player 2")
 
-	// s.layers[layerTanks].Add(t1.Sprite)
+	s.layers[layerTanks].Add(t1.Sprite)
 	// s.layers[layerTanks].Add(t2.Sprite)
-	// s.layers[layerGround].Add(gr.Sprite)
+	s.layers[layerGround].Add(gr.Sprite)
 	s.layers[layerBackground].Add(b.Sprite)
 
 	// log.Printf("t1.Sprite: %v", t1.Sprite)
@@ -154,19 +159,16 @@ func (s *GameScene) reflectInBounds(source *engine.Sprite, dt float64) {
 	}
 }
 
-func (s *GameScene) behaviorBlueRotateOnButton(source *engine.Sprite, dt float64) {
-	// if BlueRotate() {
-	// 	// rotate
-	// 	source.Rot += engine.DegToRad(-tankRotatesPerSecond*360) * dt
-	// 	s.blueShotDelay = 0
-	// } else {
-	// 	source.Velocity = engine.V(tankSpeed, 0).Rotated(source.Rot)
-	// 	engine.Movement(source, dt)
-	// 	if s.blueShotDelay > 1.0/autoShotPerSecond {
-	// 		s.spawnBlueShots()
-	// 		s.blueShotDelay = 0
-	// 	}
-	// }
+func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {
+	if MoveLeft() {
+		// move
+		moveLeft := engine.Vec{X: source.Pos.X - 1, Y: source.Pos.Y}
+		source.Pos = moveLeft
+	} else if MoveRight() {
+		moveRight := engine.Vec{X: source.Pos.X + 1, Y: source.Pos.Y}
+		source.Pos = moveRight
+		engine.Movement(source)
+	}
 }
 
 func (s *GameScene) behaviorRedRotateOnButton(source *engine.Sprite, dt float64) {

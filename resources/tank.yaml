@@ -4,30 +4,30 @@ still:
     - x: 0
       y: 0
       w: 64
-      h: 64
+      h: 41
 stand:
   speed: 1.0
   frames:
     - x: 0
       y: 0
       w: 64
-      h: 64
+      h: 41
 drive:
   speed: 0.2
   frames:
     - x: 64
       y: 0
       w: 64
-      h: 64
+      h: 41
     - x: 128
       y: 0
       w: 64
-      h: 64
+      h: 41
     - x: 192
       y: 0
       w: 64
-      h: 64
+      h: 41
     - x: 256
       y: 0
       w: 64
-      h: 64
+      h: 41

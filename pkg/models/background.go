@@ -19,8 +19,8 @@ func NewBackground() Background {
 	b.Sprite = engine.NewSprite(r.BackgroundSprite, r.BackgroundSpec)
 
 	b.Sprite.Tag = "background"
-	b.Sprite.Size = engine.V(core.Config().Screen.Width, core.Config().Screen.Height)
-	b.Sprite.Drawable = engine.NewImageDrawable(b.Sprite.Image)
+	b.Sprite.Pos = engine.Vec{X: 0, Y: 0}
+	b.Sprite.Size = engine.Vec{X: core.Config().Screen.Width, Y: core.Config().Screen.Height}
 
 	return b
 }
