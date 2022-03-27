@@ -9,18 +9,25 @@ import (
 )
 
 type Background struct {
-	Name   string
-	Sprite *engine.Sprite
+	Name     string
+	Sprites  *engine.Sprites
+	Position *engine.Vec
+	Size     *engine.Vec
 }
 
 func NewBackground() Background {
 
-	b := Background{}
-	b.Sprite = engine.NewSprite(r.BackgroundSprite, r.BackgroundSpec)
+	m := Background{}
+	m.Sprites = engine.NewSprites()
+	m.Position = &engine.Vec{X: 0, Y: 0}
+	m.Size = &engine.Vec{X: core.Config().Screen.Width, Y: core.Config().Screen.Height}
 
-	b.Sprite.Tag = "background"
-	b.Sprite.Pos = engine.Vec{X: 0, Y: 0}
-	b.Sprite.Size = engine.Vec{X: core.Config().Screen.Width, Y: core.Config().Screen.Height}
+	backgroundSprite := engine.NewSprite(r.BackgroundSprite, r.BackgroundSpec)
+	backgroundSprite.Tag = "background"
+	backgroundSprite.Pos = m.Position
+	backgroundSprite.Size = m.Size
 
-	return b
+	m.Sprites.Add(backgroundSprite)
+
+	return m
 }

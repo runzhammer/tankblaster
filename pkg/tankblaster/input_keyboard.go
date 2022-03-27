@@ -14,9 +14,17 @@ func Begin() bool {
 }
 
 func MoveLeft() bool {
-	return ebiten.IsKeyPressed(ebiten.KeyArrowLeft)
+	return ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 }
 
 func MoveRight() bool {
+	return ebiten.IsKeyPressed(ebiten.KeyArrowDown)
+}
+
+func RotateLeft() bool {
+	return ebiten.IsKeyPressed(ebiten.KeyArrowLeft)
+}
+
+func RotateRight() bool {
 	return ebiten.IsKeyPressed(ebiten.KeyArrowRight)
 }

@@ -56,17 +56,31 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	gr := models.NewGround()
 
 	t1 := models.NewTank("Player 1")
-	t1.Sprite.Pos = engine.Vec{X: 0, Y: gr.Sprite.Pos.Y - t1.Sprite.Size.Y}
-	t1.Sprite.Steps = engine.MakeBehaviors(
-		s.behaviorMoveOnButton,
-	)
+	t1.Position = &engine.Vec{X: 0, Y: gr.Position.Y - t1.Size.Y}
 
 	// t2 := models.NewTank("Player 2")
 
-	s.layers[layerTanks].Add(t1.Sprite)
-	// s.layers[layerTanks].Add(t2.Sprite)
-	s.layers[layerGround].Add(gr.Sprite)
-	s.layers[layerBackground].Add(b.Sprite)
+	iter := t1.Sprites.Tagged("cannon").Iterator()
+	for obj, ok := iter(); ok; obj, ok = iter() {
+		obj.Steps = engine.MakeBehaviors(
+			s.behaviorRotateOnButton,
+		)
+	}
+
+	iter = t1.Sprites.All().Iterator()
+	for obj, ok := iter(); ok; obj, ok = iter() {
+		s.layers[layerTanks].Add(obj)
+	}
+
+	iter = gr.Sprites.All().Iterator()
+	for obj, ok := iter(); ok; obj, ok = iter() {
+		s.layers[layerGround].Add(obj)
+	}
+
+	iter = b.Sprites.All().Iterator()
+	for obj, ok := iter(); ok; obj, ok = iter() {
+		s.layers[layerBackground].Add(obj)
+	}
 
 	// log.Printf("t1.Sprite: %v", t1.Sprite)
 	// log.Printf("t2.Sprite: %v", t2.Sprite)
@@ -135,39 +149,46 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	}
 }
 
-func (s *GameScene) reflectInBounds(source *engine.Sprite, dt float64) {
-	objBounds := source.Bounds()
-	switch {
-	case objBounds.Min.X <= 0:
-		source.Velocity = engine.V(-source.Velocity.X, source.Velocity.Y)
-		source.Rot = source.Velocity.Angle()
-		source.Pos = engine.V(0, source.Pos.Y)
-	case objBounds.Max.X >= core.Config().Screen.Width:
-		source.Velocity = engine.V(-source.Velocity.X, source.Velocity.Y)
-		source.Rot = source.Velocity.Angle()
-		source.Pos = engine.V(core.Config().Screen.Width-source.Size.X, source.Pos.Y)
-	}
-	switch {
-	case objBounds.Min.Y <= 0:
-		source.Velocity = engine.V(source.Velocity.X, -source.Velocity.Y)
-		source.Rot = source.Velocity.Angle()
-		source.Pos = engine.V(source.Pos.X, 0)
-	case objBounds.Max.Y >= core.Config().Screen.Height:
-		source.Velocity = engine.V(source.Velocity.X, -source.Velocity.Y)
-		source.Rot = source.Velocity.Angle()
-		source.Pos = engine.V(source.Pos.X, core.Config().Screen.Height-source.Size.Y)
-	}
-}
+// func (s *GameScene) reflectInBounds(source *engine.Sprite, dt float64) {
+// 	objBounds := source.Bounds()
+// 	switch {
+// 	case objBounds.Min.X <= 0:
+// 		source.Velocity = engine.V(-source.Velocity.X, source.Velocity.Y)
+// 		source.Rot = source.Velocity.Angle()
+// 		source.Pos = &engine.V(0, source.Pos.Y)
+// 	case objBounds.Max.X >= core.Config().Screen.Width:
+// 		source.Velocity = engine.V(-source.Velocity.X, source.Velocity.Y)
+// 		source.Rot = source.Velocity.Angle()
+// 		source.Pos = &engine.V(core.Config().Screen.Width-source.Size.X, source.Pos.Y)
+// 	}
+// 	switch {
+// 	case objBounds.Min.Y <= 0:
+// 		source.Velocity = engine.V(source.Velocity.X, -source.Velocity.Y)
+// 		source.Rot = source.Velocity.Angle()
+// 		source.Pos = &engine.V(source.Pos.X, 0)
+// 	case objBounds.Max.Y >= core.Config().Screen.Height:
+// 		source.Velocity = engine.V(source.Velocity.X, -source.Velocity.Y)
+// 		source.Rot = source.Velocity.Angle()
+// 		source.Pos = &engine.V(source.Pos.X, core.Config().Screen.Height-source.Size.Y)
+// 	}
+// }
 
 func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {
 	if MoveLeft() {
-		// move
-		moveLeft := engine.Vec{X: source.Pos.X - 1, Y: source.Pos.Y}
-		source.Pos = moveLeft
+		moveLeft := engine.Vec{X: source.Pos.X - float64(source.MovementSpeed), Y: source.Pos.Y}
+		source.Pos = &moveLeft
 	} else if MoveRight() {
-		moveRight := engine.Vec{X: source.Pos.X + 1, Y: source.Pos.Y}
-		source.Pos = moveRight
+		moveRight := engine.Vec{X: source.Pos.X + float64(source.MovementSpeed), Y: source.Pos.Y}
+		source.Pos = &moveRight
 		engine.Movement(source)
+	}
+}
+
+func (s *GameScene) behaviorRotateOnButton(source *engine.Sprite) {
+	if RotateLeft() {
+		source.Rot += engine.DegToRad(float64(source.RotationSpeed) * 360 * -1)
+	} else if RotateRight() {
+		source.Rot += engine.DegToRad(float64(source.RotationSpeed) * 360)
 	}
 }
 

@@ -9,18 +9,25 @@ import (
 )
 
 type Ground struct {
-	Name   string
-	Sprite *engine.Sprite
+	Name     string
+	Sprites  *engine.Sprites
+	Position *engine.Vec
+	Size     *engine.Vec
 }
 
 func NewGround() Ground {
 
-	gr := Ground{Name: "ground"}
-	gr.Sprite = engine.NewSprite(r.GroundSprite, r.GroundSpec)
+	m := Ground{Name: "ground"}
+	m.Sprites = engine.NewSprites()
+	m.Position = &engine.Vec{X: 0, Y: core.Config().Screen.Height - 110}
+	m.Size = &engine.Vec{X: core.Config().Screen.Width, Y: 110}
 
-	gr.Sprite.Tag = "ground"
-	gr.Sprite.Pos = engine.Vec{X: 0, Y: core.Config().Screen.Height - 110}
-	gr.Sprite.Size = engine.V(core.Config().Screen.Width, 110)
+	groundSprite := engine.NewSprite(r.GroundSprite, r.GroundSpec)
+	groundSprite.Tag = m.Name
+	groundSprite.Pos = m.Position
+	groundSprite.Size = m.Size
 
-	return gr
+	m.Sprites.Add(groundSprite)
+
+	return m
 }

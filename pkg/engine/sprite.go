@@ -27,10 +27,18 @@ type Sprite struct {
 
 	// Pos is the position of the sprite. The Drawable, if any,
 	// will be drawn with this as the origin.
-	Pos Vec
+	Pos *Vec
+
 	// Size is the size of the sprite. The Drawable, if any,
 	// will be scaled to fit.
-	Size Vec
+	Size *Vec
+
+	// Movement Speed of Sprite
+	MovementSpeed int
+
+	// Rotation Speed of Sprite
+	RotationSpeed int
+
 	// Velocity is the Vec describing the movement speed
 	// and direction of this sprite.
 	Velocity Vec

@@ -31,8 +31,8 @@ func (u Vec) Scaled(p float64) Vec {
 }
 
 // Add returns the sum of vectors u and v.
-func (u Vec) Add(v Vec) Vec {
-	return Vec{
+func (u Vec) Add(v Vec) *Vec {
+	return &Vec{
 		u.X + v.X,
 		u.Y + v.Y,
 	}
