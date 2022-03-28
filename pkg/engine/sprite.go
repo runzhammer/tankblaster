@@ -34,10 +34,13 @@ type Sprite struct {
 	Size *Vec
 
 	// Movement Speed of Sprite
-	MovementSpeed int
+	MovementSpeed float64
 
 	// Rotation Speed of Sprite
-	RotationSpeed int
+	RotationSpeedPerSecond float64
+
+	// Rotate on Center of Sprite
+	RotCenter bool
 
 	// Velocity is the Vec describing the movement speed
 	// and direction of this sprite.
@@ -46,13 +49,21 @@ type Sprite struct {
 	// Drawable is an optional Drawable to use to draw this
 	// sprite on a Target.
 	Drawable Drawable
+
 	// Rot is an amount in radians used to rotate the Drawable
 	// where 0 degrees is right and 90 degrees is upwards.
 	Rot float64
+
 	// RotNormal is the amount that the drawable should be rotated
 	// initially such that its default orientation is right-facing,
 	// or 0 degrees.
 	RotNormal float64
+
+	// MaxRange
+	// first value max positive radiant (left)
+	// second value max negative radiant (right)
+	// unit: degree
+	MaxRange []float64
 
 	// PreSteps is Behaviors to execute before Steps and
 	// PostSteps during an Update performed by sprites.
@@ -117,6 +128,8 @@ func NewSprite(sprite []byte, animations []byte) *Sprite {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 
+	s.MaxRange = []float64{-360, 360}
+
 	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.SpriteSpec.Still.Frames[0].W), float64(s.SpriteSpec.Still.Frames[0].H)))
 
 	return &s
@@ -151,7 +164,8 @@ func (s *Sprite) Draw(camera *ebiten.GeoM, screen *ebiten.Image) {
 		return
 	}
 	bounds := s.Bounds()
-	mat := FitRotated(s.Rot+s.RotNormal, s.Drawable.Bounds(), bounds)
+
+	mat := FitRotated(s, bounds)
 	if camera != nil {
 		mat.Concat(*camera)
 	}

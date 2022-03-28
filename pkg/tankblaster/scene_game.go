@@ -183,13 +183,11 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 
 func (s *GameScene) behaviorMoveTankOnButton(source *engine.Sprite) {
 	if MoveLeft() {
-		log.Println("move left")
-		moveLeft := engine.Vec{X: source.Pos.X - float64(source.MovementSpeed), Y: source.Pos.Y}
+		moveLeft := engine.Vec{X: source.Pos.X - source.MovementSpeed, Y: source.Pos.Y}
 		source.Pos = &moveLeft
 	} else if MoveRight() {
-		moveRight := engine.Vec{X: source.Pos.X + float64(source.MovementSpeed), Y: source.Pos.Y}
+		moveRight := engine.Vec{X: source.Pos.X + source.MovementSpeed, Y: source.Pos.Y}
 		source.Pos = &moveRight
-		engine.Movement(source)
 	}
 }
 
@@ -205,12 +203,30 @@ func (s *GameScene) behaviorMoveTankOnButton(source *engine.Sprite) {
 // }
 
 func (s *GameScene) behaviorRotateCannonOnButton(source *engine.Sprite) {
+
+	// var rotate float64
+
+	// if RadToDeg() >= source.MaxRange[0] {
+	// 	rotate = DegToRad(source.MaxRange[0])
+	// }
+
+	// if engine.RadToDeg(source.Rot+source.RotNormal) <= source.MaxRange[1] {
+	// 	rotate = DegToRad(source.MaxRange[1])
+	// }
+
 	if RotateLeft() {
-		log.Println("rotate left")
-		source.Rot += engine.DegToRad(float64(source.RotationSpeed) * 360 * -1)
+		degL := -source.RotationSpeedPerSecond * 360
+		if engine.RadToDeg(source.Rot)+degL < source.MaxRange[1] {
+			degL = (source.MaxRange[1] - engine.RadToDeg(source.Rot) + degL) * -1
+		}
+		log.Printf("rotate left: degL: %v - Rot: %v - <= MaxRange: %v\n", degL, source.Rot, source.MaxRange[1])
 	} else if RotateRight() {
-		log.Println("rotate right")
-		source.Rot += engine.DegToRad(float64(source.RotationSpeed) * 360)
+		degR := source.RotationSpeedPerSecond * 360
+		if engine.RadToDeg(source.Rot)+degR > source.MaxRange[0] {
+			degR = engine.RadToDeg(source.Rot) + degR - source.MaxRange[0]
+		}
+		log.Printf("rotate right: degR: %v - Rot: %v - <= MaxRange: %v\n", degR, source.Rot, source.MaxRange[0])
+		source.Rot += engine.DegToRad(degR)
 	}
 }
 

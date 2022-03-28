@@ -32,16 +32,23 @@ func Fit(source, dest Rect) ebiten.GeoM {
 
 // FitGeoM returns the Matrix that will transform a source Rect
 // into the dest Rect
-func FitRotated(rot float64, source, dest Rect) ebiten.GeoM {
-	scaleX := dest.W() / source.W()
-	scaleY := dest.H() / source.H()
+func FitRotated(source *Sprite, dest Rect) ebiten.GeoM {
+
+	scaleX := dest.W() / source.Drawable.Bounds().W()
+	scaleY := dest.H() / source.Drawable.Bounds().H()
 
 	mat := ebiten.GeoM{}
 
 	// rotate about center of source
-	mat.Translate(-source.W()/2, -source.W()/2)
-	mat.Rotate(rot)
-	mat.Translate(source.W()/2, source.W()/2)
+	if source.RotCenter {
+		mat.Translate(-source.Drawable.Bounds().W()/2, -source.Drawable.Bounds().H()/2)
+	}
+
+	mat.Rotate(source.Rot + source.RotNormal)
+
+	if source.RotCenter {
+		mat.Translate(source.Drawable.Bounds().W()/2, source.Drawable.Bounds().H()/2)
+	}
 
 	// scale
 	mat.Scale(scaleX, scaleY)

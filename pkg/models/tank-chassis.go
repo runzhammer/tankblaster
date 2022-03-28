@@ -27,7 +27,7 @@ func NewTankChassis() *TankChassis {
 	m.Size = engine.Vec{X: m.Sprite.Drawable.Bounds().W() * scaleFactor, Y: m.Sprite.Drawable.Bounds().H() * scaleFactor}
 
 	m.Sprite.MovementSpeed = 2
-	m.Sprite.RotationSpeed = 1
+	m.Sprite.RotationSpeedPerSecond = 1
 
 	m.Sprite.Tag = "chassis"
 	m.Sprite.Pos = &m.Position
