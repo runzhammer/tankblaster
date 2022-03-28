@@ -1,0 +1,41 @@
+package models
+
+import (
+	_ "embed"
+
+	"github.com/runzhammer/gamedemo/pkg/engine"
+	r "github.com/runzhammer/gamedemo/resources"
+)
+
+type TankChassis struct {
+	Sprite    *engine.Sprite
+	Position  engine.Vec
+	Size      engine.Vec
+	PreSteps  engine.Behaviors
+	Steps     engine.Behaviors
+	PostSteps engine.Behaviors
+}
+
+func NewTankChassis() *TankChassis {
+
+	scaleFactor := float64(1)
+
+	m := TankChassis{}
+
+	m.Sprite = engine.NewSprite(r.TankSprite, r.TankSpec)
+	// m.Position = engine.Vec{X: 200, Y: 700} //core.Config().Screen.Height/2 - t.Sprite.Bounds().H()/2}
+	m.Size = engine.Vec{X: m.Sprite.Drawable.Bounds().W() * scaleFactor, Y: m.Sprite.Drawable.Bounds().H() * scaleFactor}
+
+	m.Sprite.MovementSpeed = 2
+	m.Sprite.RotationSpeed = 1
+
+	m.Sprite.Tag = "chassis"
+	m.Sprite.Pos = &m.Position
+	m.Sprite.Size = &m.Size
+
+	return &m
+}
+
+func (t *TankChassis) SetPosition(vec engine.Vec) {
+	t.Position = vec
+}

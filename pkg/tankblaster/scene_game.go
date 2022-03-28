@@ -56,20 +56,21 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	gr := models.NewGround()
 
 	t1 := models.NewTank("Player 1")
-	t1.Position = &engine.Vec{X: 0, Y: gr.Position.Y - t1.Size.Y}
+	t1.SetPosition(engine.Vec{X: 0, Y: gr.Position.Y - t1.Size.Y})
 
 	// t2 := models.NewTank("Player 2")
 
-	iter := t1.Sprites.Tagged("cannon").Iterator()
-	for obj, ok := iter(); ok; obj, ok = iter() {
-		obj.Steps = engine.MakeBehaviors(
-			s.behaviorRotateOnButton,
-		)
-	}
+	t1.TankCannon.Steps = engine.MakeBehaviors(
+		s.behaviorRotateCannonOnButton,
+	)
 
-	s.layers[layerTanks] = engine.AddSprites(s.layers[layerTanks], t1.Sprites)
-	s.layers[layerGround] = engine.AddSprites(s.layers[layerGround], gr.Sprites)
-	s.layers[layerBackground] = engine.AddSprites(s.layers[layerBackground], b.Sprites)
+	t1.Steps = engine.MakeBehaviors(
+		s.behaviorMoveTankOnButton,
+	)
+
+	s.layers[layerTanks].AddSprites(t1.GetSprites())
+	s.layers[layerGround].AddSprites(gr.GetSprites())
+	s.layers[layerBackground].AddSprites(b.GetSprites())
 
 	// iter = t1.Sprites.All().Iterator()
 	// for obj, ok := iter(); ok; obj, ok = iter() {
@@ -94,16 +95,16 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	return s, nil
 }
 
-func (g *GameScene) Movement(source *engine.Sprite) {
-	if MoveLeft() {
-		// move left
-		source.Velocity = source.Velocity.Rotated(source.Rot)
-		engine.Movement(source)
-	} else {
-		source.Velocity = source.Velocity.Rotated(source.Rot)
-		engine.Movement(source)
-	}
-}
+// func (g *GameScene) Movement(source *engine.Sprite) {
+// 	if MoveLeft() {
+// 		// move left
+// 		source.Velocity = source.Velocity.Rotated(source.Rot)
+// 		engine.Movement(source)
+// 	} else {
+// 		source.Velocity = source.Velocity.Rotated(source.Rot)
+// 		engine.Movement(source)
+// 	}
+// }
 
 func (s *GameScene) Update() error {
 	s.time += 1
@@ -177,22 +178,37 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 // 	}
 // }
 
-func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {
-	if MoveLeft() {
-		moveLeft := engine.Vec{X: source.Pos.X - float64(source.MovementSpeed), Y: source.Pos.Y}
-		source.Pos = &moveLeft
-	} else if MoveRight() {
-		moveRight := engine.Vec{X: source.Pos.X + float64(source.MovementSpeed), Y: source.Pos.Y}
-		source.Pos = &moveRight
-		engine.Movement(source)
+func (s *GameScene) behaviorMoveTankOnButton(source engine.Movable) {
+	for _, s := range source.GetSprites() {
+		if MoveLeft() {
+			moveLeft := engine.Vec{X: s.Pos.X - float64(s.MovementSpeed), Y: s.Pos.Y}
+			s.Pos = &moveLeft
+		} else if MoveRight() {
+			moveRight := engine.Vec{X: s.Pos.X + float64(s.MovementSpeed), Y: s.Pos.Y}
+			s.Pos = &moveRight
+			engine.Movement(source)
+		}
 	}
 }
 
-func (s *GameScene) behaviorRotateOnButton(source *engine.Sprite) {
-	if RotateLeft() {
-		source.Rot += engine.DegToRad(float64(source.RotationSpeed) * 360 * -1)
-	} else if RotateRight() {
-		source.Rot += engine.DegToRad(float64(source.RotationSpeed) * 360)
+// func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {
+// 	if MoveLeft() {
+// 		moveLeft := engine.Vec{X: source.Pos.X - float64(source.MovementSpeed), Y: source.Pos.Y}
+// 		source.Pos = moveLeft
+// 	} else if MoveRight() {
+// 		moveRight := engine.Vec{X: source.Pos.X + float64(source.MovementSpeed), Y: source.Pos.Y}
+// 		source.Pos = moveRight
+// 		engine.Movement(source)
+// 	}
+// }
+
+func (s *GameScene) behaviorRotateCannonOnButton(source engine.Movable) {
+	for _, s := range source.GetSprites() {
+		if RotateLeft() {
+			s.Rot += engine.DegToRad(float64(s.RotationSpeed) * 360 * -1)
+		} else if RotateRight() {
+			s.Rot += engine.DegToRad(float64(s.RotationSpeed) * 360)
+		}
 	}
 }
 

@@ -56,13 +56,13 @@ type Sprite struct {
 
 	// PreSteps is Behaviors to execute before Steps and
 	// PostSteps during an Update performed by sprites.
-	PreSteps Behaviors
+	PreSteps SpriteBehaviors
 	// Steps is Behaviors to execute before PostSteps and
 	// after PreSteps during an Update performed by sprites.
-	Steps Behaviors
+	Steps SpriteBehaviors
 	// PostSteps is Behaviors to execute after Steps during
 	// an Update performed by sprites.
-	PostSteps Behaviors
+	PostSteps SpriteBehaviors
 
 	// Meta is an arbitrary value used to hold miscellaneous
 	// information about this sprite.

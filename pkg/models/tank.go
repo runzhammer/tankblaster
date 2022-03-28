@@ -4,54 +4,50 @@ import (
 	_ "embed"
 
 	"github.com/runzhammer/gamedemo/pkg/engine"
-	r "github.com/runzhammer/gamedemo/resources"
 )
 
 type Tank struct {
-	Name      string
-	Sprites   *engine.Sprites
-	Position  *engine.Vec
-	Size      *engine.Vec
-	PreSteps  engine.Behavior
-	Steps     engine.Behavior
-	PostSteps engine.Behavior
+	Name        string
+	TankChassis *TankChassis
+	TankCannon  *TankCannon
+	Position    *engine.Vec
+	Size        *engine.Vec
+	PreSteps    engine.Behaviors
+	Steps       engine.Behaviors
+	PostSteps   engine.Behaviors
 }
 
-func NewTank(name string) Tank {
+func NewTank(name string) *Tank {
 
-	scaleFactor := float64(1)
+	t := Tank{
+		Name:        name,
+		TankChassis: NewTankChassis(),
+		TankCannon:  NewTankCannon(),
+	}
 
-	m := Tank{Name: name}
-	m.Sprites = engine.NewSprites()
+	t.Size = &t.TankChassis.Size
 
-	tankSprite := engine.NewSprite(r.TankSprite, r.TankSpec)
-	m.Position = &engine.Vec{X: 200, Y: 600} //core.Config().Screen.Height/2 - t.Sprite.Bounds().H()/2}
-	m.Size = &engine.Vec{X: tankSprite.Drawable.Bounds().W() * scaleFactor, Y: tankSprite.Drawable.Bounds().H() * scaleFactor}
+	return &t
+}
 
-	tankSprite.MovementSpeed = 2
-	tankSprite.RotationSpeed = 1
+func (t *Tank) SetPosition(vec engine.Vec) {
 
-	tankSprite.Tag = name
-	tankSprite.Pos = m.Position
-	tankSprite.Size = m.Size
+	t.Position = &vec
 
-	m.Sprites.Add(tankSprite)
+	// Position of tankchassis
+	t.TankChassis.SetPosition(vec)
 
-	cannonSprite := engine.NewSprite(r.CannonSprite, r.CannonSpec)
-	cannonSprite.MovementSpeed = 1
-	cannonSprite.RotationSpeed = 1
+	// Position of tankCannon
+	t.TankCannon.SetPosition(engine.Vec{X: vec.X + t.TankChassis.Sprite.Size.X/2, Y: vec.Y + 5})
 
-	cannonSprite.Tag = "cannon"
-	cannonSprite.Pos = &engine.Vec{X: m.Position.X + m.Size.X/2, Y: m.Position.Y + 5}
-	cannonSprite.Size = &engine.Vec{X: cannonSprite.Drawable.Bounds().W() * scaleFactor, Y: cannonSprite.Drawable.Bounds().H() * scaleFactor}
+	t.UpdateSprites()
+}
 
-	m.Sprites.Add(cannonSprite)
+func (t *Tank) GetSprites() []*engine.Sprite {
+	return []*engine.Sprite{t.TankChassis.Sprite, t.TankCannon.Sprite}
+}
 
-	//
-	// PostSteps: engine.MakeBehaviors(
-	// 	t.Sprite.reflectInBounds,
-	// 	t.Sprite.behaviorBlueHitsRedBullet,
-	// ),
-
-	return m
+func (t *Tank) UpdateSprites() {
+	t.TankChassis.Sprite.Pos = &t.TankChassis.Position
+	t.TankCannon.Sprite.Pos = &t.TankCannon.Position
 }
