@@ -1,6 +1,8 @@
 package tankblaster
 
 import (
+	"log"
+
 	"github.com/hajimehoshi/ebiten/v2"
 
 	_ "image/jpeg"
@@ -60,11 +62,12 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 
 	// t2 := models.NewTank("Player 2")
 
-	t1.TankCannon.Steps = engine.MakeBehaviors(
+	t1.TankCannon.Sprite.Steps = engine.MakeBehaviors(
 		s.behaviorRotateCannonOnButton,
+		s.behaviorMoveTankOnButton,
 	)
 
-	t1.Steps = engine.MakeBehaviors(
+	t1.TankChassis.Sprite.Steps = engine.MakeBehaviors(
 		s.behaviorMoveTankOnButton,
 	)
 
@@ -178,16 +181,15 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 // 	}
 // }
 
-func (s *GameScene) behaviorMoveTankOnButton(source engine.Movable) {
-	for _, s := range source.GetSprites() {
-		if MoveLeft() {
-			moveLeft := engine.Vec{X: s.Pos.X - float64(s.MovementSpeed), Y: s.Pos.Y}
-			s.Pos = &moveLeft
-		} else if MoveRight() {
-			moveRight := engine.Vec{X: s.Pos.X + float64(s.MovementSpeed), Y: s.Pos.Y}
-			s.Pos = &moveRight
-			engine.Movement(source)
-		}
+func (s *GameScene) behaviorMoveTankOnButton(source *engine.Sprite) {
+	if MoveLeft() {
+		log.Println("move left")
+		moveLeft := engine.Vec{X: source.Pos.X - float64(source.MovementSpeed), Y: source.Pos.Y}
+		source.Pos = &moveLeft
+	} else if MoveRight() {
+		moveRight := engine.Vec{X: source.Pos.X + float64(source.MovementSpeed), Y: source.Pos.Y}
+		source.Pos = &moveRight
+		engine.Movement(source)
 	}
 }
 
@@ -202,13 +204,13 @@ func (s *GameScene) behaviorMoveTankOnButton(source engine.Movable) {
 // 	}
 // }
 
-func (s *GameScene) behaviorRotateCannonOnButton(source engine.Movable) {
-	for _, s := range source.GetSprites() {
-		if RotateLeft() {
-			s.Rot += engine.DegToRad(float64(s.RotationSpeed) * 360 * -1)
-		} else if RotateRight() {
-			s.Rot += engine.DegToRad(float64(s.RotationSpeed) * 360)
-		}
+func (s *GameScene) behaviorRotateCannonOnButton(source *engine.Sprite) {
+	if RotateLeft() {
+		log.Println("rotate left")
+		source.Rot += engine.DegToRad(float64(source.RotationSpeed) * 360 * -1)
+	} else if RotateRight() {
+		log.Println("rotate right")
+		source.Rot += engine.DegToRad(float64(source.RotationSpeed) * 360)
 	}
 }
 

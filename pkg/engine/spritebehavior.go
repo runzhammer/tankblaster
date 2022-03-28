@@ -1,20 +1,20 @@
 package engine
 
-// SpriteBehavior is what happens when an object meets a condition for a given time delta
+// Behavior is what happens when an object meets a condition for a given time delta
 type SpriteBehavior func(source *Sprite)
 
-// SpriteReaction is what happens when two objects meet a condition for a given time delta.
+// Reaction is what happens when two objects meet a condition for a given time delta.
 // Source is the Sprite performing a behavior "with" is the object the source is
 // reacting with.
 type SpriteReaction func(source, with *Sprite)
 
-// SpriteBehaviors is a slice of Behavior that should happen in succession
+// Behaviors is a slice of Behavior that should happen in succession
 type SpriteBehaviors []SpriteBehavior
 
 // MakeBehaviors is a convenience function for turning a sequence
 // of Behaviors or Behavior functions into Behaviors
-func MakeSpriteBehaviors(behaviors ...SpriteBehavior) SpriteBehaviors {
-	return SpriteBehaviors(behaviors)
+func MakeSpriteBehaviors(behaviors ...Behavior) Behaviors {
+	return Behaviors(behaviors)
 }
 
 // Execute executes all behaviors for an object with a time delta
