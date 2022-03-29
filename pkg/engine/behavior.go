@@ -6,7 +6,7 @@ type Behavior func(source *Sprite)
 // Reaction is what happens when two objects meet a condition for a given time delta.
 // Source is the Sprite performing a behavior "with" is the object the source is
 // reacting with.
-type Reaction func(source, with Movable)
+type Reaction func(source, with *Sprite)
 
 // Behaviors is a slice of Behavior that should happen in succession
 type Behaviors []Behavior
