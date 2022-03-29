@@ -128,8 +128,6 @@ func NewSprite(sprite []byte, animations []byte) *Sprite {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 
-	s.MaxRange = []float64{-360, 360}
-
 	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.SpriteSpec.Still.Frames[0].W), float64(s.SpriteSpec.Still.Frames[0].H)))
 
 	return &s

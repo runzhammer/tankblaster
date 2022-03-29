@@ -3,7 +3,6 @@ package tankblaster
 import (
 	"github.com/hajimehoshi/ebiten/v2"
 
-	_ "image/jpeg"
 	_ "image/png"
 
 	"github.com/runzhammer/gamedemo/pkg/core"
@@ -138,7 +137,6 @@ func (s *GameScene) Update() error {
 }
 
 func (s *GameScene) Draw(screen *ebiten.Image) {
-
 	s.layers.Draw(nil, screen)
 
 	switch s.phase {
