@@ -215,18 +215,18 @@ func (s *GameScene) behaviorRotateCannonOnButton(source *engine.Sprite) {
 	// }
 
 	if RotateLeft() {
-		degL := -source.RotationSpeedPerSecond * 360
-		if engine.RadToDeg(source.Rot)+degL < source.MaxRange[1] {
-			degL = (source.MaxRange[1] - engine.RadToDeg(source.Rot) + degL) * -1
+		log.Printf("rotate left: Rot: %v - <= MaxRange: %v\n", source.Rot, source.MaxRange[1])
+		degL := engine.RadToDeg(source.Rot) + source.RotationSpeedPerSecond/60*360*-1
+		if degL > source.MaxRange[0] {
+			source.Rot = engine.DegToRad(degL)
 		}
 		log.Printf("rotate left: degL: %v - Rot: %v - <= MaxRange: %v\n", degL, source.Rot, source.MaxRange[1])
 	} else if RotateRight() {
-		degR := source.RotationSpeedPerSecond * 360
-		if engine.RadToDeg(source.Rot)+degR > source.MaxRange[0] {
-			degR = engine.RadToDeg(source.Rot) + degR - source.MaxRange[0]
+		degR := engine.RadToDeg(source.Rot) + source.RotationSpeedPerSecond/60*360
+		if degR < source.MaxRange[1] {
+			source.Rot = engine.DegToRad(degR)
 		}
 		log.Printf("rotate right: degR: %v - Rot: %v - <= MaxRange: %v\n", degR, source.Rot, source.MaxRange[0])
-		source.Rot += engine.DegToRad(degR)
 	}
 }
 

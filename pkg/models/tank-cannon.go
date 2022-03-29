@@ -27,12 +27,12 @@ func NewTankCannon() *TankCannon {
 	m.Size = engine.Vec{X: m.Sprite.Drawable.Bounds().W() * scaleFactor, Y: m.Sprite.Drawable.Bounds().H() * scaleFactor}
 
 	m.Sprite.MovementSpeed = 2
-	m.Sprite.RotationSpeedPerSecond = 0.01
+	m.Sprite.RotationSpeedPerSecond = 0.1
 
 	m.Sprite.Tag = "cannon"
 	m.Sprite.Pos = &m.Position
 	m.Sprite.Size = &m.Size
-	m.Sprite.MaxRange = []float64{180, 0}
+	m.Sprite.MaxRange = []float64{-180, 0}
 	m.Sprite.RotCenter = false
 
 	return &m
