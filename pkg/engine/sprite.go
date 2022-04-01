@@ -133,6 +133,42 @@ func NewSprite(sprite []byte, animations []byte) *Sprite {
 	return &s
 }
 
+func NewSpriteFromSprite(oldSprite *Sprite, image *ebiten.Image) *Sprite {
+
+	var err error
+	s := oldSprite
+
+	s.Image = image
+
+	s.DrawImageOptions = &ebiten.DrawImageOptions{}
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(oldSprite.SpriteSpec.Still.Frames[0].W), float64(oldSprite.SpriteSpec.Still.Frames[0].H)))
+
+	return s
+}
+
+func NewSpriteFromImage(image *ebiten.Image) *Sprite {
+
+	var err error
+	s := Sprite{}
+
+	s.Image = image
+
+	s.DrawImageOptions = &ebiten.DrawImageOptions{}
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(image.Bounds().Dx()), float64(image.Bounds().Dy())))
+
+	return &s
+}
+
 // Bounds gets the hitbox for this sprite. Any Drawable will be
 // scaled and translated to fit this box. Collision detection
 // can be performed using this Rect.

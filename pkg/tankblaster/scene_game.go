@@ -137,6 +137,7 @@ func (s *GameScene) Update() error {
 }
 
 func (s *GameScene) Draw(screen *ebiten.Image) {
+
 	s.layers.Draw(nil, screen)
 
 	switch s.phase {
