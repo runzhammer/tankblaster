@@ -5,7 +5,6 @@ import (
 	"image"
 	"image/color"
 	"log"
-	"math"
 	"math/rand"
 	"time"
 
@@ -32,7 +31,7 @@ func NewGround() Ground {
 
 	groundImage := ebiten.NewImage(int(m.Size.X), int(m.Size.Y))
 	groundImage.Fill(color.White)
-	m.drawWave(groundImage)
+	m.drawGround(groundImage)
 
 	m.Sprite.Tag = m.Name
 	m.Sprite.Pos = &m.Position
@@ -50,14 +49,24 @@ func (m *Ground) GetSprites() []*engine.Sprite {
 	return []*engine.Sprite{m.Sprite}
 }
 
-func (m *Ground) intRand(maxY int) int {
+type Number interface {
+	float64 | int | float32
+}
+
+func intRand[T Number](maxY T) T {
 	s1 := rand.NewSource(time.Now().UnixNano())
 	r1 := rand.New(s1)
-	return r1.Intn(maxY)
+	return T(r1.Intn(int(maxY)))
+}
+
+func float32Rand() float32 {
+	s1 := rand.NewSource(time.Now().UnixNano())
+	r1 := rand.New(s1)
+	return r1.Float32()
 }
 
 // returns highest Point of wave
-func (m *Ground) drawWave(destinationImage *ebiten.Image) {
+func (m *Ground) drawGround(destinationImage *ebiten.Image) {
 
 	emptyImage := ebiten.NewImage(3, 3)
 	emptyImage.Fill(color.White)
@@ -66,30 +75,56 @@ func (m *Ground) drawWave(destinationImage *ebiten.Image) {
 	maxWidth := float32(destinationImage.Bounds().Dx())
 	maxHeight := float32(destinationImage.Bounds().Dy()) // core.Config().Screen.Height / 2
 
-	log.Printf("%v", maxWidth)
-	log.Printf("%v", maxHeight)
+	log.Printf("x: %v, y: %v", maxWidth, maxHeight)
 
 	var path vector.Path
 
 	numPoints := 8
 
-	var npoints map[int]struct {
+	type npoint struct {
 		x float32
 		y float32
 	}
 
+	npoints := make(map[int]npoint)
+
 	indexToPoint := func(i int) (float32, float32) {
 
-		// f(x) = a ⋅ sin(b ⋅ (pi−c)) + d
-		// a = amplitude
-		// b = x compression
-		// c = x shift
-		// d = y shift
-
 		// log.Printf("maxCounter: %v", maxCounter(i))
-		x, y := float32(i)*maxWidth/float32(numPoints-1), maxHeight // *float32Rand()
-		// y += float32(maxCounter(i) * 10 * float32(math.Sin(float64((maxCounter(i)+1)*(float32(math.Pi)-maxCounter(i)*100))))) // / maxCounter(i)          // *30
-		y += float32(30*math.Sin(2*(math.Pi-1)) + 2)
+		// x, y := maxWidth*float32(i)/float32(numPoints-1), intRand(maxHeight)
+		var x, y float32
+
+		if i == 0 {
+			y = intRand(maxHeight)
+			x = 0
+		} else {
+
+			oldPoint := npoints[i-1]
+
+			// next max height
+			if oldPoint.y > maxHeight-maxHeight/4 {
+				y = oldPoint.y - intRand(maxHeight)
+				if y < 0 {
+					y = 0
+				}
+			} else {
+				y = maxHeight / 4
+			}
+
+			// distance to last point
+			x += oldPoint.x + intRand(float32(maxWidth))/float32(numPoints) - 1
+		}
+
+		// distance to last point
+		x += float32(intRand(200))
+
+		if x >= maxWidth {
+			x = maxWidth
+			return x, y
+		}
+
+		npoints[i] = npoint{x: x, y: y}
+
 		return x, y
 	}
 
@@ -103,20 +138,20 @@ func (m *Ground) drawWave(destinationImage *ebiten.Image) {
 
 		oldPoint := npoints[i-1]
 
-		cpx0, cpy0 := oldPoint.x, oldPoint.y
+		// cpx0, cpy0 := oldPoint.x, oldPoint.y
 
 		x, y := indexToPoint(i)
-		cpx1, cpy1 := x, y
+		// cpx1, cpy1 := x, y
 
-		curPoint := npoints[i]
-		curPoint.x = x
-		curPoint.y = y
+		// cpx0 += 30
+		// cpx1 -= 30
 
-		cpx0 += 30
-		cpx1 -= 30
+		log.Printf("old p: %v / %v", oldPoint.x, oldPoint.y)
+		log.Printf("new p: %v / %v ", x, y)
 
-		log.Printf("point: %v / %v ", x, y)
-		path.CubicTo(cpx0, cpy0, cpx1, cpy1, x, y)
+		// path.CubicTo(cpx0, cpy0, cpx1, cpy1, x, y)
+		path.LineTo(x, y)
+
 		if y > highestPoint {
 			highestPoint = y
 		}
@@ -142,12 +177,6 @@ func (m *Ground) drawWave(destinationImage *ebiten.Image) {
 	destinationImage.DrawTriangles(vs, is, emptySubImage, op)
 	m.Sprite = engine.NewSpriteFromImage(destinationImage)
 	m.MaxHeight = float64(highestPoint)
-}
-
-func float32Rand() float32 {
-	s1 := rand.NewSource(time.Now().UnixNano())
-	r1 := rand.New(s1)
-	return r1.Float32()
 }
 
 func maxCounter(index int) float32 {
