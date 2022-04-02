@@ -68,18 +68,20 @@ func float32Rand() float32 {
 // returns highest Point of wave
 func (m *Ground) drawGround(destinationImage *ebiten.Image) {
 
+	numPoints := 8
+
 	emptyImage := ebiten.NewImage(3, 3)
 	emptyImage.Fill(color.White)
 	emptySubImage := emptyImage.SubImage(image.Rect(1, 1, 2, 2)).(*ebiten.Image)
 
 	maxWidth := float32(destinationImage.Bounds().Dx())
-	maxHeight := float32(destinationImage.Bounds().Dy()) // core.Config().Screen.Height / 2
+	maxSegmentWidth := float32(destinationImage.Bounds().Dx() / numPoints)
+	maxHeight := float32(destinationImage.Bounds().Dy())
+	minHeight := float32(destinationImage.Bounds().Dy()) - (1 / 8 * float32(destinationImage.Bounds().Dy()))
 
 	log.Printf("x: %v, y: %v", maxWidth, maxHeight)
 
 	var path vector.Path
-
-	numPoints := 8
 
 	type npoint struct {
 		x float32
@@ -101,26 +103,19 @@ func (m *Ground) drawGround(destinationImage *ebiten.Image) {
 
 			oldPoint := npoints[i-1]
 
-			// next max height
-			if oldPoint.y > maxHeight-maxHeight/4 {
-				y = oldPoint.y - intRand(maxHeight)
-				if y < 0 {
-					y = 0
-				}
-			} else {
-				y = maxHeight / 4
-			}
+			y = maxHeight * float32Rand()
 
 			// distance to last point
-			x += oldPoint.x + intRand(float32(maxWidth))/float32(numPoints) - 1
+			x = oldPoint.x + intRand(maxSegmentWidth)
 		}
-
-		// distance to last point
-		x += float32(intRand(200))
 
 		if x >= maxWidth {
 			x = maxWidth
 			return x, y
+		}
+
+		if y > minHeight {
+			y = minHeight
 		}
 
 		npoints[i] = npoint{x: x, y: y}
@@ -129,8 +124,9 @@ func (m *Ground) drawGround(destinationImage *ebiten.Image) {
 	}
 
 	var highestPoint float32
+	var X, Y float32
 
-	for i := 0; i <= numPoints; i++ {
+	for i := 0; X < maxWidth; i++ {
 		if i == 0 {
 			path.MoveTo(indexToPoint(i))
 			continue
@@ -138,26 +134,28 @@ func (m *Ground) drawGround(destinationImage *ebiten.Image) {
 
 		oldPoint := npoints[i-1]
 
-		// cpx0, cpy0 := oldPoint.x, oldPoint.y
+		cpx0, cpy0 := oldPoint.x, oldPoint.y
 
-		x, y := indexToPoint(i)
-		// cpx1, cpy1 := x, y
+		X, Y = indexToPoint(i)
+		cpx1, cpy1 := X, Y
 
-		// cpx0 += 30
-		// cpx1 -= 30
+		cpx0 += 30
+		cpx1 -= 30
 
 		log.Printf("old p: %v / %v", oldPoint.x, oldPoint.y)
-		log.Printf("new p: %v / %v ", x, y)
+		log.Printf("new p: %v / %v ", X, Y)
 
-		// path.CubicTo(cpx0, cpy0, cpx1, cpy1, x, y)
-		path.LineTo(x, y)
+		path.CubicTo(cpx0, cpy0, cpx1, cpy1, X, Y)
+		//path.LineTo(X, Y)
 
-		if y > highestPoint {
-			highestPoint = y
+		if Y < highestPoint {
+			highestPoint = Y
 		}
 	}
 
-	log.Printf("highestPoint: %v", maxHeight)
+	highestPoint = maxHeight - highestPoint
+
+	log.Printf("highestPoint: %v", highestPoint)
 
 	path.LineTo(maxWidth, maxHeight)
 	path.LineTo(0, maxHeight)
@@ -178,13 +176,3 @@ func (m *Ground) drawGround(destinationImage *ebiten.Image) {
 	m.Sprite = engine.NewSpriteFromImage(destinationImage)
 	m.MaxHeight = float64(highestPoint)
 }
-
-func maxCounter(index int) float32 {
-	s1 := rand.NewSource(time.Now().UnixNano())
-	r1 := rand.New(s1)
-	return r1.Float32()
-}
-
-// func maxCounter(index int) float64 {
-// 	return float64(128 + (17*index+32)%64)
-// }
