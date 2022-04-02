@@ -56,6 +56,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 
 	t1 := models.NewTank("Player 1")
 	t1.SetPosition(engine.Vec{X: 0, Y: gr.Position.Y - t1.Size.Y})
+	// t1 := models.NewTank("Player 1", &gr)
 
 	// t2 := models.NewTank("Player 2")
 

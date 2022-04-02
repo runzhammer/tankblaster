@@ -12,6 +12,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/vector"
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
+	r "github.com/runzhammer/gamedemo/resources"
 )
 
 type Ground struct {
@@ -20,18 +21,25 @@ type Ground struct {
 	Position  engine.Vec
 	Size      engine.Vec
 	MaxHeight float64
+	Path      vector.Path
 }
 
 func NewGround() Ground {
 
 	m := Ground{Name: "ground"}
 
-	// m.Sprite = engine.NewSprite(r.GroundSprite, r.GroundSpec)
 	m.Size = engine.Vec{X: core.Config().Screen.Width, Y: core.Config().Screen.Height / 2}
 
-	groundImage := ebiten.NewImage(int(m.Size.X), int(m.Size.Y))
-	groundImage.Fill(color.White)
-	m.drawGround(groundImage)
+	emptyImage := ebiten.NewImage(int(core.Config().Screen.Width), int(core.Config().Screen.Height/2))
+	emptyImage.Fill(color.Transparent)
+	emptyGroundImage := emptyImage.SubImage(image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height/2))).(*ebiten.Image)
+
+	rawGroundImage := engine.NewSprite(r.GroundSprite, r.GroundSpec)
+	rawGroundImage.Size = &m.Size
+	rawGroundImage.Pos = &engine.Vec{X: 0, Y: 0}
+	rawGroundImage.Draw(nil, emptyGroundImage)
+
+	m.drawGroundAlpha(emptyGroundImage)
 
 	m.Sprite.Tag = m.Name
 	m.Sprite.Pos = &m.Position
@@ -40,7 +48,7 @@ func NewGround() Ground {
 	// log.Printf("%v", m.Sprite.Image)
 	// log.Printf("%v", groundSprite)
 
-	m.Position = engine.Vec{X: 0, Y: core.Config().Screen.Height - m.MaxHeight}
+	m.Position = engine.Vec{X: 0, Y: core.Config().Screen.Height / 2}
 
 	return m
 }
@@ -66,7 +74,7 @@ func float32Rand() float32 {
 }
 
 // returns highest Point of wave
-func (m *Ground) drawGround(destinationImage *ebiten.Image) {
+func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 
 	numPoints := 8
 
@@ -157,8 +165,13 @@ func (m *Ground) drawGround(destinationImage *ebiten.Image) {
 
 	log.Printf("highestPoint: %v", highestPoint)
 
-	path.LineTo(maxWidth, maxHeight)
-	path.LineTo(0, maxHeight)
+	// path.LineTo(maxWidth, maxHeight)
+	// path.LineTo(0, maxHeight)
+
+	scenery := path
+
+	path.LineTo(maxWidth, 0)
+	path.LineTo(0, 0)
 
 	op := &ebiten.DrawTrianglesOptions{
 		FillRule: ebiten.EvenOdd,
@@ -167,12 +180,14 @@ func (m *Ground) drawGround(destinationImage *ebiten.Image) {
 	for i := range vs {
 		vs[i].SrcX = 1
 		vs[i].SrcY = 1
-		vs[i].ColorR = 0x33 / float32(0xff)
-		vs[i].ColorG = 0x66 / float32(0xff)
-		vs[i].ColorB = 0xff / float32(0xff)
+		vs[i].ColorA = 0
 	}
 
+	op.CompositeMode = ebiten.CompositeModeCopy
+
 	destinationImage.DrawTriangles(vs, is, emptySubImage, op)
+
+	m.Path = scenery
 	m.Sprite = engine.NewSpriteFromImage(destinationImage)
 	m.MaxHeight = float64(highestPoint)
 }

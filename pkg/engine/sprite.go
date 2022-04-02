@@ -1,14 +1,11 @@
 package engine
 
 import (
-	"bytes"
 	_ "embed"
-	"image"
 	_ "image/png"
 	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"gopkg.in/yaml.v3"
 )
 
 type Sprite struct {
@@ -18,7 +15,7 @@ type Sprite struct {
 	DrawImageOptions *ebiten.DrawImageOptions
 
 	// Spec of sprite sheet
-	SpriteSpec spriteSpec
+	Spec SpriteSpec
 
 	// Tag is an optional identifier for this type of sprite.
 	// It can be retrieved as an spriteSet from an sprites by
@@ -81,54 +78,29 @@ type Sprite struct {
 	Meta interface{}
 }
 
-type spriteSpec struct {
-	Still struct {
-		Speed  float64 `yaml:"speed"`
-		Frames []frameSpec
-	} `yaml:"still"`
-	Stand struct {
-		Speed  float64 `yaml:"speed"`
-		Frames []frameSpec
-	} `yaml:"stand"`
-	Drive struct {
-		Speed  float64 `yaml:"speed"`
-		Frames []frameSpec
-	} `yaml:"drive"`
-}
+func NewSprite(imageFile []byte, specFile []byte) *Sprite {
 
-type frameSpec struct {
-	X int `yaml:"x"`
-	Y int `yaml:"y"`
-	W int `yaml:"w"`
-	H int `yaml:"h"`
-}
-
-func NewSprite(sprite []byte, animations []byte) *Sprite {
-
-	var err error
 	s := Sprite{}
 
-	// load sprite
-	spriteDecoded, _, err := image.Decode(bytes.NewReader(sprite))
-	if err != nil {
-		log.Fatal(err)
-	}
+	image := LoadImage(imageFile)
 
-	s.Image = ebiten.NewImageFromImage(spriteDecoded)
-
+	s.Image = ebiten.NewImageFromImage(image)
 	s.DrawImageOptions = &ebiten.DrawImageOptions{}
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	s.Spec = LoadFrames(specFile)
+	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.Spec.Still.Frames[0].W), float64(s.Spec.Still.Frames[0].H)))
 
-	// load frames
-	err = yaml.Unmarshal(animations, &s.SpriteSpec)
-	if err != nil {
-		log.Fatalf("Unmarshal: %v", err)
-	}
+	return &s
+}
 
-	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.SpriteSpec.Still.Frames[0].W), float64(s.SpriteSpec.Still.Frames[0].H)))
+func NewSpriteFromFile(imageFile []byte) *Sprite {
+
+	s := Sprite{}
+
+	image := LoadImage(imageFile)
+
+	s.Image = ebiten.NewImageFromImage(image)
+	s.DrawImageOptions = &ebiten.DrawImageOptions{}
 
 	return &s
 }
@@ -146,7 +118,7 @@ func NewSpriteFromSprite(oldSprite *Sprite, image *ebiten.Image) *Sprite {
 		log.Fatal(err)
 	}
 
-	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(oldSprite.SpriteSpec.Still.Frames[0].W), float64(oldSprite.SpriteSpec.Still.Frames[0].H)))
+	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(oldSprite.Spec.Still.Frames[0].W), float64(oldSprite.Spec.Still.Frames[0].H)))
 
 	return s
 }

@@ -15,9 +15,10 @@ type Tank struct {
 	PreSteps    engine.Behaviors
 	Steps       engine.Behaviors
 	PostSteps   engine.Behaviors
+	Ground      Ground
 }
 
-func NewTank(name string) *Tank {
+func NewTank(name string) *Tank { // , ground *Ground
 
 	t := Tank{
 		Name:        name,
@@ -30,7 +31,7 @@ func NewTank(name string) *Tank {
 	return &t
 }
 
-func (t *Tank) SetPosition(vec engine.Vec) {
+func (t *Tank) SetPosition(vec engine.Vec) { // xPos int
 
 	t.Position = &vec
 
