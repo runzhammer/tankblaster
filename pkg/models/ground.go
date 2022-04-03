@@ -21,7 +21,7 @@ type Ground struct {
 	Position  engine.Vec
 	Size      engine.Vec
 	MaxHeight float64
-	Path      vector.Path
+	Vertices  []ebiten.Vertex
 }
 
 func NewGround() Ground {
@@ -168,8 +168,6 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 	// path.LineTo(maxWidth, maxHeight)
 	// path.LineTo(0, maxHeight)
 
-	scenery := path
-
 	path.LineTo(maxWidth, 0)
 	path.LineTo(0, 0)
 
@@ -187,7 +185,7 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 
 	destinationImage.DrawTriangles(vs, is, emptySubImage, op)
 
-	m.Path = scenery
+	m.Vertices = vs
 	m.Sprite = engine.NewSpriteFromImage(destinationImage)
 	m.MaxHeight = float64(highestPoint)
 }

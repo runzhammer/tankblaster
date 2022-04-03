@@ -9,6 +9,7 @@ import (
 )
 
 type Sprite struct {
+
 	// The actual image loaded from resources
 	Image *ebiten.Image
 
@@ -158,6 +159,16 @@ func (s *Sprite) HitTest(v Vec) bool {
 		s.Pos.Y <= v.Y &&
 		s.Pos.Y+s.Size.Y >= v.Y
 }
+
+// func (s *Sprite) SetPosition(vec Vec) {
+// 	for _, v := range t.Ground.Vertices {
+// 		if v.SrcX == float32(vec.X) {
+// 			vec.Y = float64(v.SrcY) + t.Ground.Position.Y - t.Size.Y
+// 		}
+// 	}
+
+// 	log.Printf("vec: %v", vec)
+// }
 
 // Draw will render this sprite on a target if a Drawable is associated with
 // this sprite. The sprite's Drawable will be scaled and translated to fit
