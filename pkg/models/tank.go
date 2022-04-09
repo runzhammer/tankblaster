@@ -49,7 +49,7 @@ func (t *Tank) SetPosition(vec *engine.Vec) {
 	angle := math.Atan2(t.Ground.Coords[int(rightWheelPos.X)], rightWheelPos.X-leftWheelPos.X)
 
 	t.TankChassis.Sprite.Rot = angle
-	t.TankCannon.Sprite.Rot = angle
+	// t.TankCannon.Sprite.Rot = angle
 
 	t.Position = vec
 

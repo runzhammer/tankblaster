@@ -63,6 +63,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 
 	t1.Steps = models.MakeBehaviors(
 		s.behaviorMoveTankOnButton,
+		s.behaviorRotateCannonOnButton,
 	)
 
 	// t1.TankCannon.Sprite.Steps = engine.MakeBehaviors(
@@ -219,38 +220,17 @@ func behaviorMoveRight(pos *engine.Vec, sizeX float64, movementSpeed float64) *e
 	return pos
 }
 
-// func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {
-// 	if MoveLeft() {
-// 		moveLeft := engine.Vec{X: source.Pos.X - float64(source.MovementSpeed), Y: source.Pos.Y}
-// 		source.Pos = moveLeft
-// 	} else if MoveRight() {
-// 		moveRight := engine.Vec{X: source.Pos.X + float64(source.MovementSpeed), Y: source.Pos.Y}
-// 		source.Pos = moveRight
-// 		engine.Movement(source)
-// 	}
-// }
-
-func (s *GameScene) behaviorRotateCannonOnButton(source *engine.Sprite) {
-
-	// var rotate float64
-
-	// if RadToDeg() >= source.MaxRange[0] {
-	// 	rotate = DegToRad(source.MaxRange[0])
-	// }
-
-	// if engine.RadToDeg(source.Rot+source.RotNormal) <= source.MaxRange[1] {
-	// 	rotate = DegToRad(source.MaxRange[1])
-	// }
-
+func (s *GameScene) behaviorRotateCannonOnButton(t *models.Tank) {
 	if RotateLeft() {
-		degL := engine.RadToDeg(source.Rot) + source.RotationSpeedPerSecond/60*360*-1
-		if degL > source.MaxRange[0] {
-			source.Rot = engine.DegToRad(degL)
+		// log.Println("ROT LEFT")
+		degL := engine.RadToDeg(t.TankCannon.Sprite.Rot) + t.TankCannon.Sprite.RotationSpeedPerSecond/60*360*-1
+		if degL > t.TankCannon.Sprite.MaxRange[0] {
+			t.TankCannon.Sprite.Rot = engine.DegToRad(degL)
 		}
 	} else if RotateRight() {
-		degR := engine.RadToDeg(source.Rot) + source.RotationSpeedPerSecond/60*360
-		if degR < source.MaxRange[1] {
-			source.Rot = engine.DegToRad(degR)
+		degR := engine.RadToDeg(t.TankCannon.Sprite.Rot) + t.TankCannon.Sprite.RotationSpeedPerSecond/60*360
+		if degR < t.TankCannon.Sprite.MaxRange[1] {
+			t.TankCannon.Sprite.Rot = engine.DegToRad(degR)
 		}
 	}
 }
