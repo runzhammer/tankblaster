@@ -15,15 +15,16 @@ type Tank struct {
 	PreSteps    engine.Behaviors
 	Steps       engine.Behaviors
 	PostSteps   engine.Behaviors
-	Ground      Ground
+	Ground      *Ground
 }
 
-func NewTank(name string) *Tank { // , ground *Ground
+func NewTank(name string, ground *Ground) *Tank { // , ground *Ground
 
 	t := Tank{
 		Name:        name,
 		TankChassis: NewTankChassis(),
 		TankCannon:  NewTankCannon(),
+		Ground:      ground,
 	}
 
 	t.Size = &t.TankChassis.Size
@@ -32,6 +33,9 @@ func NewTank(name string) *Tank { // , ground *Ground
 }
 
 func (t *Tank) SetPosition(vec engine.Vec) { // xPos int
+
+	leftWheel := engine.Vec{X: 13.5, Y: t.Size.Y}
+	rightWheel := engine.Vec{X: t.Size.X - 13.5, Y: t.Size.Y}
 
 	t.Position = &vec
 

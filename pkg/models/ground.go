@@ -21,7 +21,7 @@ type Ground struct {
 	Position  engine.Vec
 	Size      engine.Vec
 	MaxHeight float64
-	Vertices  []ebiten.Vertex
+	Coords    []engine.Vec
 }
 
 func NewGround() Ground {
@@ -47,6 +47,8 @@ func NewGround() Ground {
 
 	// log.Printf("%v", m.Sprite.Image)
 	// log.Printf("%v", groundSprite)
+
+	log.Printf("len %v", len(m.Coords))
 
 	m.Position = engine.Vec{X: 0, Y: core.Config().Screen.Height / 2}
 
@@ -185,7 +187,19 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 
 	destinationImage.DrawTriangles(vs, is, emptySubImage, op)
 
-	m.Vertices = vs
+	// ground points
+	for _, i := range vs {
+		for p := 0; p <= int(core.Config().Screen.Width); p++ {
+			curVec := engine.Vec{X: float64(i.DstX), Y: float64(i.DstY)}
+			log.Printf("%v, %v", i.DstX, i.DstY)
+			if p == 0 || m.Coords[p-1] != curVec {
+				m.Coords[p] = curVec
+			} else {
+				m.Coords[p] = m.Coords[p-1]
+			}
+		}
+	}
+
 	m.Sprite = engine.NewSpriteFromImage(destinationImage)
 	m.MaxHeight = float64(highestPoint)
 }
