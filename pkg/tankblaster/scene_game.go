@@ -36,7 +36,8 @@ type GameScene struct {
 
 	// shot engine.Drawable
 
-	layers engine.Layers
+	layers  engine.Layers
+	tankSet models.TankSet
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -48,7 +49,8 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		// cannonSFX:   cannonSFX,
 		// messageFace: messageFace,
 		// shot:        shotDrawable,
-		layers: engine.NewLayers(numLayers),
+		layers:  engine.NewLayers(numLayers),
+		tankSet: *models.NewTankSet(),
 	}
 
 	b := models.NewBackground()
@@ -56,19 +58,21 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 
 	t1 := models.NewTank("Player 1", &gr)
 
-	t1.SetPosition(engine.Vec{X: 0, Y: gr.Position.Y - t1.Size.Y})
-	// t1 := models.NewTank("Player 1", &gr)
+	t1.SetPosition(&engine.Vec{X: 0, Y: gr.Position.Y - t1.Size.Y})
+	// t1.SetPosition(&engine.Vec{X: 0, Y: gr.Coords[0]})
 
-	// t2 := models.NewTank("Player 2")
-
-	t1.TankCannon.Sprite.Steps = engine.MakeBehaviors(
-		s.behaviorRotateCannonOnButton,
+	t1.Steps = models.MakeBehaviors(
 		s.behaviorMoveTankOnButton,
 	)
 
-	t1.TankChassis.Sprite.Steps = engine.MakeBehaviors(
-		s.behaviorMoveTankOnButton,
-	)
+	// t1.TankCannon.Sprite.Steps = engine.MakeBehaviors(
+	// 	s.behaviorRotateCannonOnButton,
+	// 	s.behaviorMoveTankOnButton,
+	// )
+
+	// t1.TankChassis.Sprite.Steps = engine.MakeBehaviors(
+	// 	s.behaviorMoveTankOnButton,
+	// )
 
 	s.layers[layerTanks].AddSprites(t1.GetSprites())
 	s.layers[layerGround].AddSprites(gr.GetSprites())
@@ -93,6 +97,8 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	// log.Printf("t2.Sprite: %v", t2.Sprite)
 	// log.Printf("gr.Sprite: %v", gr.Sprite)
 	// log.Printf("b.Sprite: %v", b.Sprite)
+
+	s.tankSet.Add(t1)
 
 	return s, nil
 }
@@ -127,6 +133,7 @@ func (s *GameScene) Update() error {
 	// s.message = &text
 	case phaseBattle:
 		s.layers.Update()
+		s.tankSet.Update()
 	case phaseBlueVictory:
 		fallthrough
 	case phaseRedVictory:
@@ -180,20 +187,36 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 // 	}
 // }
 
-func (s *GameScene) behaviorMoveTankOnButton(source *engine.Sprite) {
+func (s *GameScene) behaviorMoveTankOnButton(t *models.Tank) {
+
 	if MoveLeft() {
-		toLeft := source.Pos.X - source.MovementSpeed
-		if toLeft > 0 {
-			moveLeft := engine.Vec{X: toLeft, Y: source.Pos.Y}
-			source.Pos = &moveLeft
-		}
+		// t.TankChassis.Sprite.Pos = behaviorMoveLeft(t.TankChassis.Sprite.Pos, t.TankChassis.Sprite.MovementSpeed)
+		// t.TankCannon.Sprite.Pos = behaviorMoveLeft(t.TankCannon.Sprite.Pos, t.TankCannon.Sprite.MovementSpeed)
+		t.SetPosition(behaviorMoveLeft(t.TankChassis.Sprite.Pos, t.TankChassis.Sprite.MovementSpeed))
+		// t.TankCannon.Sprite.Pos = behaviorMoveLeft(t.TankCannon.Sprite.Pos, t.TankCannon.Sprite.MovementSpeed)
 	} else if MoveRight() {
-		toRight := source.Pos.X + source.MovementSpeed
-		if toRight+source.Size.X < core.Config().Screen.Width {
-			moveRight := engine.Vec{X: toRight, Y: source.Pos.Y}
-			source.Pos = &moveRight
-		}
+		// t.TankChassis.Sprite.Pos = behaviorMoveRight(t.TankChassis.Sprite.Pos, t.Size.X, t.TankChassis.Sprite.MovementSpeed)
+		// t.TankCannon.Sprite.Pos = behaviorMoveRight(t.TankCannon.Sprite.Pos, t.Size.X, t.TankCannon.Sprite.MovementSpeed)
+		t.SetPosition(behaviorMoveRight(t.TankChassis.Sprite.Pos, t.Size.X, t.TankChassis.Sprite.MovementSpeed))
 	}
+}
+
+func behaviorMoveLeft(pos *engine.Vec, movementSpeed float64) *engine.Vec {
+	toLeft := pos.X - movementSpeed
+	if toLeft > 0 {
+		moveLeft := engine.Vec{X: toLeft, Y: pos.Y}
+		return &moveLeft
+	}
+	return pos
+}
+
+func behaviorMoveRight(pos *engine.Vec, sizeX float64, movementSpeed float64) *engine.Vec {
+	toRight := pos.X + movementSpeed
+	if toRight+sizeX < core.Config().Screen.Width {
+		moveRight := engine.Vec{X: toRight, Y: pos.Y}
+		return &moveRight
+	}
+	return pos
 }
 
 // func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {

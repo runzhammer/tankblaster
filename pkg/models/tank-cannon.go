@@ -8,19 +8,21 @@ import (
 )
 
 type TankCannon struct {
-	Sprite    *engine.Sprite
-	Position  engine.Vec
-	Size      engine.Vec
-	PreSteps  engine.Behaviors
-	Steps     engine.Behaviors
-	PostSteps engine.Behaviors
+	Sprite        *engine.Sprite
+	Name          string
+	ChassisOffset engine.Vec
+	Position      engine.Vec
+	Size          engine.Vec
+	PreSteps      engine.Behaviors
+	Steps         engine.Behaviors
+	PostSteps     engine.Behaviors
 }
 
-func NewTankCannon() *TankCannon {
+func NewTankCannon(name string) *TankCannon {
 
 	scaleFactor := float64(1)
 
-	m := TankCannon{}
+	m := TankCannon{Name: name}
 
 	m.Sprite = engine.NewSprite(r.CannonSprite, r.CannonSpec)
 	// m.Position = engine.Vec{X: m.Position.X + m.Size.X/2, Y: m.Position.Y + 5}
@@ -39,5 +41,5 @@ func NewTankCannon() *TankCannon {
 }
 
 func (t *TankCannon) SetPosition(vec engine.Vec) {
-	t.Position = vec
+	t.Position = engine.Vec{X: vec.X + t.ChassisOffset.X, Y: vec.Y + t.ChassisOffset.Y}
 }

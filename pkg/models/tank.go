@@ -13,9 +13,11 @@ type Tank struct {
 	TankCannon  *TankCannon
 	Position    *engine.Vec
 	Size        *engine.Vec
-	PreSteps    engine.Behaviors
-	Steps       engine.Behaviors
-	PostSteps   engine.Behaviors
+	Rot         float64
+	Velocity    *engine.Vec
+	PreSteps    Behaviors
+	Steps       Behaviors
+	PostSteps   Behaviors
 	Ground      *Ground
 }
 
@@ -23,8 +25,8 @@ func NewTank(name string, ground *Ground) *Tank {
 
 	t := Tank{
 		Name:        name,
-		TankChassis: NewTankChassis(),
-		TankCannon:  NewTankCannon(),
+		TankChassis: NewTankChassis(name),
+		TankCannon:  NewTankCannon(name),
 		Ground:      ground,
 	}
 
@@ -33,7 +35,7 @@ func NewTank(name string, ground *Ground) *Tank {
 	return &t
 }
 
-func (t *Tank) SetPosition(vec engine.Vec) {
+func (t *Tank) SetPosition(vec *engine.Vec) {
 
 	leftWheelPos := engine.Vec{X: t.TankChassis.Sprite.Pos.X + t.TankChassis.LeftWheel.X, Y: t.TankChassis.Sprite.Pos.Y}
 	rightWheelPos := engine.Vec{X: t.TankChassis.Sprite.Pos.X + t.TankChassis.RightWheel.X, Y: t.TankChassis.Sprite.Pos.Y}
@@ -49,13 +51,14 @@ func (t *Tank) SetPosition(vec engine.Vec) {
 	t.TankChassis.Sprite.Rot = angle
 	t.TankCannon.Sprite.Rot = angle
 
-	t.Position = &vec
+	t.Position = vec
 
 	// Position of tankchassis
-	t.TankChassis.SetPosition(vec)
+	t.TankChassis.SetPosition(*vec)
 
 	// Position of tankCannon
-	t.TankCannon.SetPosition(engine.Vec{X: vec.X + t.TankChassis.Sprite.Size.X/2, Y: vec.Y + 5})
+	t.TankCannon.ChassisOffset = engine.Vec{X: t.TankChassis.Sprite.Size.X / 2, Y: 5}
+	t.TankCannon.SetPosition(*vec)
 
 	t.UpdateSprites()
 }

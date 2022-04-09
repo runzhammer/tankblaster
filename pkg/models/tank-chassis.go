@@ -9,6 +9,7 @@ import (
 
 type TankChassis struct {
 	Sprite     *engine.Sprite
+	Name       string
 	Position   engine.Vec
 	LeftWheel  engine.Vec
 	RightWheel engine.Vec
@@ -18,11 +19,11 @@ type TankChassis struct {
 	PostSteps  engine.Behaviors
 }
 
-func NewTankChassis() *TankChassis {
+func NewTankChassis(name string) *TankChassis {
 
 	scaleFactor := float64(1)
 
-	m := TankChassis{}
+	m := TankChassis{Name: name}
 
 	m.Sprite = engine.NewSprite(r.TankSprite, r.TankSpec)
 	// m.Position = engine.Vec{X: 200, Y: 700} //core.Config().Screen.Height/2 - t.Sprite.Bounds().H()/2}
