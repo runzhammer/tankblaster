@@ -182,11 +182,17 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 
 func (s *GameScene) behaviorMoveTankOnButton(source *engine.Sprite) {
 	if MoveLeft() {
-		moveLeft := engine.Vec{X: source.Pos.X - source.MovementSpeed, Y: source.Pos.Y}
-		source.Pos = &moveLeft
+		toLeft := source.Pos.X - source.MovementSpeed
+		if toLeft > 0 {
+			moveLeft := engine.Vec{X: toLeft, Y: source.Pos.Y}
+			source.Pos = &moveLeft
+		}
 	} else if MoveRight() {
-		moveRight := engine.Vec{X: source.Pos.X + source.MovementSpeed, Y: source.Pos.Y}
-		source.Pos = &moveRight
+		toRight := source.Pos.X + source.MovementSpeed
+		if toRight < core.Config().Screen.Width {
+			moveRight := engine.Vec{X: toRight, Y: source.Pos.Y}
+			source.Pos = &moveRight
+		}
 	}
 }
 

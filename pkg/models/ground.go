@@ -191,7 +191,7 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 	for _, i := range vs {
 		for p := 0; p <= int(core.Config().Screen.Width); p++ {
 			curVec := engine.Vec{X: float64(i.DstX), Y: float64(i.DstY)}
-			log.Printf("%v, %v", i.DstX, i.DstY)
+			// log.Printf("%v, %v", i.DstX, i.DstY)
 			if p == 0 || m.Coords[p-1] != curVec {
 				m.Coords[p] = curVec
 			} else {

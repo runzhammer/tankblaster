@@ -18,7 +18,7 @@ type Tank struct {
 	Ground      *Ground
 }
 
-func NewTank(name string, ground *Ground) *Tank { // , ground *Ground
+func NewTank(name string, ground *Ground) *Tank {
 
 	t := Tank{
 		Name:        name,
@@ -32,10 +32,16 @@ func NewTank(name string, ground *Ground) *Tank { // , ground *Ground
 	return &t
 }
 
-func (t *Tank) SetPosition(vec engine.Vec) { // xPos int
+func (t *Tank) SetPosition(vec engine.Vec) {
 
 	leftWheel := engine.Vec{X: 13.5, Y: t.Size.Y}
 	rightWheel := engine.Vec{X: t.Size.X - 13.5, Y: t.Size.Y}
+
+	// angle relative to the ground
+	// left wheel is the origin
+	// atan2
+	dstX := rightWheel.X - leftWheel.X
+	dstY := t.Ground.Coords[]
 
 	t.Position = &vec
 
