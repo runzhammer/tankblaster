@@ -189,7 +189,7 @@ func (s *GameScene) behaviorMoveTankOnButton(source *engine.Sprite) {
 		}
 	} else if MoveRight() {
 		toRight := source.Pos.X + source.MovementSpeed
-		if toRight < core.Config().Screen.Width {
+		if toRight+source.Size.X < core.Config().Screen.Width {
 			moveRight := engine.Vec{X: toRight, Y: source.Pos.Y}
 			source.Pos = &moveRight
 		}

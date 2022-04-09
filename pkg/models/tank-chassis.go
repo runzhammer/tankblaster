@@ -8,12 +8,14 @@ import (
 )
 
 type TankChassis struct {
-	Sprite    *engine.Sprite
-	Position  engine.Vec
-	Size      engine.Vec
-	PreSteps  engine.Behaviors
-	Steps     engine.Behaviors
-	PostSteps engine.Behaviors
+	Sprite     *engine.Sprite
+	Position   engine.Vec
+	LeftWheel  engine.Vec
+	RightWheel engine.Vec
+	Size       engine.Vec
+	PreSteps   engine.Behaviors
+	Steps      engine.Behaviors
+	PostSteps  engine.Behaviors
 }
 
 func NewTankChassis() *TankChassis {
@@ -25,6 +27,9 @@ func NewTankChassis() *TankChassis {
 	m.Sprite = engine.NewSprite(r.TankSprite, r.TankSpec)
 	// m.Position = engine.Vec{X: 200, Y: 700} //core.Config().Screen.Height/2 - t.Sprite.Bounds().H()/2}
 	m.Size = engine.Vec{X: m.Sprite.Drawable.Bounds().W() * scaleFactor, Y: m.Sprite.Drawable.Bounds().H() * scaleFactor}
+
+	m.LeftWheel = engine.Vec{X: 13.5, Y: m.Size.Y}
+	m.RightWheel = engine.Vec{X: m.Size.X - 13.5, Y: m.Size.Y}
 
 	m.Sprite.MovementSpeed = 2
 	m.Sprite.RotationSpeedPerSecond = 1

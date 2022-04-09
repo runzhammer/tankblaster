@@ -21,7 +21,7 @@ type Ground struct {
 	Position  engine.Vec
 	Size      engine.Vec
 	MaxHeight float64
-	Coords    []engine.Vec
+	Coords    []float64
 }
 
 func NewGround() Ground {
@@ -188,14 +188,15 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 	destinationImage.DrawTriangles(vs, is, emptySubImage, op)
 
 	// ground points
+	m.Coords = make([]float64, int(core.Config().Screen.Width))
 	for _, i := range vs {
-		for p := 0; p <= int(core.Config().Screen.Width); p++ {
+		for x := 0; x < int(core.Config().Screen.Width); x++ {
 			curVec := engine.Vec{X: float64(i.DstX), Y: float64(i.DstY)}
 			// log.Printf("%v, %v", i.DstX, i.DstY)
-			if p == 0 || m.Coords[p-1] != curVec {
-				m.Coords[p] = curVec
+			if x == 0 || m.Coords[x-1] != curVec.Y {
+				m.Coords[x] = curVec.Y
 			} else {
-				m.Coords[p] = m.Coords[p-1]
+				m.Coords[x] = m.Coords[x-1]
 			}
 		}
 	}

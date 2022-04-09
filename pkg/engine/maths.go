@@ -70,20 +70,20 @@ func Collision(r1, r2 Rect) bool {
 	return true
 }
 
-func RotationOnGround(source *Sprite) {
-  float s = sin(angle);
-  float c = cos(angle);
+// func RotationOnGround(source *Sprite) {
+//   float s = sin(angle);
+//   float c = cos(angle);
 
-  // translate point back to origin:
-  p.x -= cx;
-  p.y -= cy;
+//   // translate point back to origin:
+//   p.x -= cx;
+//   p.y -= cy;
 
-  // rotate point
-  float xnew = p.x * c - p.y * s;
-  float ynew = p.x * s + p.y * c;
+//   // rotate point
+//   float xnew = p.x * c - p.y * s;
+//   float ynew = p.x * s + p.y * c;
 
-  // translate point back:
-  p.x = xnew + cx;
-  p.y = ynew + cy;
-  return p;
-}
+//   // translate point back:
+//   p.x = xnew + cx;
+//   p.y = ynew + cy;
+//   return p;
+// }

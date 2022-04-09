@@ -2,6 +2,7 @@ package models
 
 import (
 	_ "embed"
+	"math"
 
 	"github.com/runzhammer/gamedemo/pkg/engine"
 )
@@ -34,14 +35,19 @@ func NewTank(name string, ground *Ground) *Tank {
 
 func (t *Tank) SetPosition(vec engine.Vec) {
 
-	leftWheel := engine.Vec{X: 13.5, Y: t.Size.Y}
-	rightWheel := engine.Vec{X: t.Size.X - 13.5, Y: t.Size.Y}
+	leftWheelPos := engine.Vec{X: t.TankChassis.Sprite.Pos.X + t.TankChassis.LeftWheel.X, Y: t.TankChassis.Sprite.Pos.Y}
+	rightWheelPos := engine.Vec{X: t.TankChassis.Sprite.Pos.X + t.TankChassis.RightWheel.X, Y: t.TankChassis.Sprite.Pos.Y}
 
 	// angle relative to the ground
 	// left wheel is the origin
-	// atan2
-	dstX := rightWheel.X - leftWheel.X
-	dstY := t.Ground.Coords[]
+	// dstLeftWheel := engine.Vec{X: leftWheelPos.X, Y: t.Ground.Coords[int(leftWheelPos.X)]}
+	// dstRightWheel := engine.Vec{X: rightWheelPos.X, Y: t.Ground.Coords[int(rightWheelPos.X)]}
+
+	// calculate rotation
+	angle := math.Atan2(t.Ground.Coords[int(rightWheelPos.X)], rightWheelPos.X-leftWheelPos.X)
+
+	t.TankChassis.Sprite.Rot = angle
+	t.TankCannon.Sprite.Rot = angle
 
 	t.Position = &vec
 
