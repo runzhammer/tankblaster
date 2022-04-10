@@ -58,7 +58,8 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 
 	t1 := models.NewTank("Player 1", &gr)
 
-	t1.SetPosition(&engine.Vec{X: 0, Y: t1.Ground.GetGroundY(0)})
+	randomX := engine.IntRand(core.Config().Screen.Width)
+	t1.SetPosition(&engine.Vec{X: randomX, Y: t1.Ground.GetGroundY(randomX)})
 	// t1.SetPosition(&engine.Vec{X: 0, Y: gr.Coords[0]})
 
 	t1.Steps = models.MakeBehaviors(

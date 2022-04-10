@@ -74,16 +74,6 @@ func (m *Ground) GetSprites() []*engine.Sprite {
 	return []*engine.Sprite{m.Sprite}
 }
 
-type Number interface {
-	float64 | int | float32
-}
-
-func intRand[T Number](maxY T) T {
-	s1 := rand.NewSource(time.Now().UnixNano())
-	r1 := rand.New(s1)
-	return T(r1.Intn(int(maxY)))
-}
-
 func float32Rand() float32 {
 	s1 := rand.NewSource(time.Now().UnixNano())
 	r1 := rand.New(s1)
@@ -122,7 +112,7 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 		var x, y float32
 
 		if i == 0 {
-			y = intRand(maxHeight)
+			y = engine.IntRand(maxHeight)
 			x = 0
 		} else {
 
@@ -131,7 +121,7 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 			y = maxHeight * float32Rand()
 
 			// distance to last point
-			x = oldPoint.x + intRand(maxSegmentWidth)
+			x = oldPoint.x + engine.IntRand(maxSegmentWidth)
 		}
 
 		if x >= maxWidth {
