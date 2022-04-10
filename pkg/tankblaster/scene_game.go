@@ -58,7 +58,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 
 	t1 := models.NewTank("Player 1", &gr)
 
-	t1.SetPosition(&engine.Vec{X: 0, Y: gr.Position.Y - t1.Size.Y})
+	t1.SetPosition(&engine.Vec{X: 0, Y: t1.Ground.GetGroundY(0)})
 	// t1.SetPosition(&engine.Vec{X: 0, Y: gr.Coords[0]})
 
 	t1.Steps = models.MakeBehaviors(
@@ -191,33 +191,18 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 func (s *GameScene) behaviorMoveTankOnButton(t *models.Tank) {
 
 	if MoveLeft() {
-		// t.TankChassis.Sprite.Pos = behaviorMoveLeft(t.TankChassis.Sprite.Pos, t.TankChassis.Sprite.MovementSpeed)
-		// t.TankCannon.Sprite.Pos = behaviorMoveLeft(t.TankCannon.Sprite.Pos, t.TankCannon.Sprite.MovementSpeed)
-		t.SetPosition(behaviorMoveLeft(t.TankChassis.Sprite.Pos, t.TankChassis.Sprite.MovementSpeed))
-		// t.TankCannon.Sprite.Pos = behaviorMoveLeft(t.TankCannon.Sprite.Pos, t.TankCannon.Sprite.MovementSpeed)
+		toLeft := t.Position.X - t.TankChassis.Sprite.MovementSpeed
+		if toLeft > 0 {
+			moveLeft := engine.Vec{X: toLeft, Y: t.Ground.GetGroundY(toLeft)}
+			t.SetPosition(&moveLeft)
+		}
 	} else if MoveRight() {
-		// t.TankChassis.Sprite.Pos = behaviorMoveRight(t.TankChassis.Sprite.Pos, t.Size.X, t.TankChassis.Sprite.MovementSpeed)
-		// t.TankCannon.Sprite.Pos = behaviorMoveRight(t.TankCannon.Sprite.Pos, t.Size.X, t.TankCannon.Sprite.MovementSpeed)
-		t.SetPosition(behaviorMoveRight(t.TankChassis.Sprite.Pos, t.Size.X, t.TankChassis.Sprite.MovementSpeed))
+		toRight := t.Position.X + t.TankChassis.Sprite.MovementSpeed
+		if toRight+t.Size.X < core.Config().Screen.Width {
+			moveRight := engine.Vec{X: toRight, Y: t.Ground.GetGroundY(toRight)}
+			t.SetPosition(&moveRight)
+		}
 	}
-}
-
-func behaviorMoveLeft(pos *engine.Vec, movementSpeed float64) *engine.Vec {
-	toLeft := pos.X - movementSpeed
-	if toLeft > 0 {
-		moveLeft := engine.Vec{X: toLeft, Y: pos.Y}
-		return &moveLeft
-	}
-	return pos
-}
-
-func behaviorMoveRight(pos *engine.Vec, sizeX float64, movementSpeed float64) *engine.Vec {
-	toRight := pos.X + movementSpeed
-	if toRight+sizeX < core.Config().Screen.Width {
-		moveRight := engine.Vec{X: toRight, Y: pos.Y}
-		return &moveRight
-	}
-	return pos
 }
 
 func (s *GameScene) behaviorRotateCannonOnButton(t *models.Tank) {

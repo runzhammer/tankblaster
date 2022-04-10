@@ -21,7 +21,7 @@ type Ground struct {
 	Position  engine.Vec
 	Size      engine.Vec
 	MaxHeight float64
-	Coords    []float64
+	Coords    []ebiten.Vertex
 }
 
 func NewGround() Ground {
@@ -48,11 +48,26 @@ func NewGround() Ground {
 	// log.Printf("%v", m.Sprite.Image)
 	// log.Printf("%v", groundSprite)
 
-	log.Printf("len %v", len(m.Coords))
-
 	m.Position = engine.Vec{X: 0, Y: core.Config().Screen.Height / 2}
 
 	return m
+}
+
+func (m *Ground) GetGroundY(x float64) float64 {
+	LowX := float32(0)
+	for _, v := range m.Coords {
+		if v.DstX == float32(x) {
+			return float64(v.DstY + float32(m.Position.Y))
+		}
+		if v.DstX < float32(x) {
+			LowX = v.DstY
+			continue
+		}
+		if v.DstX > float32(x) {
+			return float64(v.DstY - LowX + v.DstY + float32(m.Position.Y))
+		}
+	}
+	return float64(0)
 }
 
 func (m *Ground) GetSprites() []*engine.Sprite {
@@ -89,7 +104,7 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 	maxHeight := float32(destinationImage.Bounds().Dy())
 	minHeight := float32(destinationImage.Bounds().Dy()) - (1 / 8 * float32(destinationImage.Bounds().Dy()))
 
-	log.Printf("x: %v, y: %v", maxWidth, maxHeight)
+	// log.Printf("x: %v, y: %v", maxWidth, maxHeight)
 
 	var path vector.Path
 
@@ -152,8 +167,8 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 		cpx0 += 30
 		cpx1 -= 30
 
-		log.Printf("old p: %v / %v", oldPoint.x, oldPoint.y)
-		log.Printf("new p: %v / %v ", X, Y)
+		// log.Printf("old p: %v / %v", oldPoint.x, oldPoint.y)
+		// log.Printf("new p: %v / %v ", X, Y)
 
 		path.CubicTo(cpx0, cpy0, cpx1, cpy1, X, Y)
 		//path.LineTo(X, Y)
@@ -181,6 +196,7 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 		vs[i].SrcX = 1
 		vs[i].SrcY = 1
 		vs[i].ColorA = 0
+		log.Printf("%v, %v", vs[i].DstX, vs[i].DstY)
 	}
 
 	op.CompositeMode = ebiten.CompositeModeCopy
@@ -188,18 +204,11 @@ func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
 	destinationImage.DrawTriangles(vs, is, emptySubImage, op)
 
 	// ground points
-	m.Coords = make([]float64, int(core.Config().Screen.Width))
-	for _, i := range vs {
-		for x := 0; x < int(core.Config().Screen.Width); x++ {
-			curVec := engine.Vec{X: float64(i.DstX), Y: float64(i.DstY)}
-			// log.Printf("%v, %v", i.DstX, i.DstY)
-			if x == 0 || m.Coords[x-1] != curVec.Y {
-				m.Coords[x] = curVec.Y
-			} else {
-				m.Coords[x] = m.Coords[x-1]
-			}
-		}
-	}
+	m.Coords = vs
+
+	// for k, v := range m.Coords {
+	// 	log.Printf("%v -> %v", k, v)
+	// }
 
 	m.Sprite = engine.NewSpriteFromImage(destinationImage)
 	m.MaxHeight = float64(highestPoint)
