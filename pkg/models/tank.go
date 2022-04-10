@@ -13,6 +13,7 @@ type Tank struct {
 	TankChassis *TankChassis
 	TankCannon  *TankCannon
 	Position    *engine.Vec
+	Scale       float64
 	Size        *engine.Vec
 	Rot         float64
 	Velocity    *engine.Vec
@@ -24,13 +25,17 @@ type Tank struct {
 
 func NewTank(name string, ground *Ground) *Tank {
 
+	scaleFactor := float64(0.43)
+
 	t := Tank{
 		Name:        name,
-		TankChassis: NewTankChassis(name),
-		TankCannon:  NewTankCannon(name),
+		TankChassis: NewTankChassis(name, scaleFactor),
+		TankCannon:  NewTankCannon(name, scaleFactor),
 		Ground:      ground,
 	}
 
+	// Scale default
+	t.Scale = scaleFactor
 	t.Size = &t.TankChassis.Size
 
 	return &t

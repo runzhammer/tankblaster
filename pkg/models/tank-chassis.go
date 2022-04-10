@@ -14,20 +14,19 @@ type TankChassis struct {
 	LeftWheel  engine.Vec
 	RightWheel engine.Vec
 	Size       engine.Vec
+	Scale      float64
 	PreSteps   engine.Behaviors
 	Steps      engine.Behaviors
 	PostSteps  engine.Behaviors
 }
 
-func NewTankChassis(name string) *TankChassis {
+func NewTankChassis(name string, scale float64) *TankChassis {
 
-	scaleFactor := float64(1)
-
-	m := TankChassis{Name: name}
+	m := TankChassis{Name: name, Scale: scale}
 
 	m.Sprite = engine.NewSprite(r.TankSprite, r.TankSpec)
 	// m.Position = engine.Vec{X: 200, Y: 700} //core.Config().Screen.Height/2 - t.Sprite.Bounds().H()/2}
-	m.Size = engine.Vec{X: m.Sprite.Drawable.Bounds().W() * scaleFactor, Y: m.Sprite.Drawable.Bounds().H() * scaleFactor}
+	m.Size = engine.Vec{X: m.Sprite.Drawable.Bounds().W() * m.Scale, Y: m.Sprite.Drawable.Bounds().H() * m.Scale}
 
 	m.LeftWheel = engine.Vec{X: 13.5, Y: m.Size.Y}
 	m.RightWheel = engine.Vec{X: m.Size.X - 13.5, Y: m.Size.Y}

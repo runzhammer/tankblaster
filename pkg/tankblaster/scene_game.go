@@ -67,54 +67,14 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		s.behaviorRotateCannonOnButton,
 	)
 
-	// t1.TankCannon.Sprite.Steps = engine.MakeBehaviors(
-	// 	s.behaviorRotateCannonOnButton,
-	// 	s.behaviorMoveTankOnButton,
-	// )
-
-	// t1.TankChassis.Sprite.Steps = engine.MakeBehaviors(
-	// 	s.behaviorMoveTankOnButton,
-	// )
-
 	s.layers[layerTanks].AddSprites(t1.GetSprites())
 	s.layers[layerGround].AddSprites(gr.GetSprites())
 	s.layers[layerBackground].AddSprites(b.GetSprites())
-
-	// iter = t1.Sprites.All().Iterator()
-	// for obj, ok := iter(); ok; obj, ok = iter() {
-	// 	s.layers[layerTanks].Add(obj)
-	// }
-
-	// iter = gr.Sprites.All().Iterator()
-	// for obj, ok := iter(); ok; obj, ok = iter() {
-	// 	s.layers[layerGround].Add(obj)
-	// }
-
-	// iter = b.Sprites.All().Iterator()
-	// for obj, ok := iter(); ok; obj, ok = iter() {
-	// 	s.layers[layerBackground].Add(obj)
-	// }
-
-	// log.Printf("t1.Sprite: %v", t1.Sprite)
-	// log.Printf("t2.Sprite: %v", t2.Sprite)
-	// log.Printf("gr.Sprite: %v", gr.Sprite)
-	// log.Printf("b.Sprite: %v", b.Sprite)
 
 	s.tankSet.Add(t1)
 
 	return s, nil
 }
-
-// func (g *GameScene) Movement(source *engine.Sprite) {
-// 	if MoveLeft() {
-// 		// move left
-// 		source.Velocity = source.Velocity.Rotated(source.Rot)
-// 		engine.Movement(source)
-// 	} else {
-// 		source.Velocity = source.Velocity.Rotated(source.Rot)
-// 		engine.Movement(source)
-// 	}
-// }
 
 func (s *GameScene) Update() error {
 	s.time += 1
@@ -219,21 +179,6 @@ func (s *GameScene) behaviorRotateCannonOnButton(t *models.Tank) {
 			t.TankCannon.Sprite.Rot = engine.DegToRad(degR)
 		}
 	}
-}
-
-func (s *GameScene) behaviorRedRotateOnButton(source *engine.Sprite, dt float64) {
-	// if RedRotate() {
-	// 	// rotate
-	// 	source.Rot += engine.DegToRad(-tankRotatesPerSecond*360) * dt
-	// 	s.redShotDelay = 0
-	// } else {
-	// 	source.Velocity = engine.V(tankSpeed, 0).Rotated(source.Rot)
-	// 	engine.Movement(source, dt)
-	// 	if s.redShotDelay > 1.0/autoShotPerSecond {
-	// 		s.spawnRedShots()
-	// 		s.redShotDelay = 0
-	// 	}
-	// }
 }
 
 func (s *GameScene) spawnBlueShots() {

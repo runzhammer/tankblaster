@@ -13,20 +13,19 @@ type TankCannon struct {
 	ChassisOffset engine.Vec
 	Position      engine.Vec
 	Size          engine.Vec
+	Scale         float64
 	PreSteps      engine.Behaviors
 	Steps         engine.Behaviors
 	PostSteps     engine.Behaviors
 }
 
-func NewTankCannon(name string) *TankCannon {
+func NewTankCannon(name string, scale float64) *TankCannon {
 
-	scaleFactor := float64(1)
-
-	m := TankCannon{Name: name}
+	m := TankCannon{Name: name, Scale: scale}
 
 	m.Sprite = engine.NewSprite(r.CannonSprite, r.CannonSpec)
 	// m.Position = engine.Vec{X: m.Position.X + m.Size.X/2, Y: m.Position.Y + 5}
-	m.Size = engine.Vec{X: m.Sprite.Drawable.Bounds().W() * scaleFactor, Y: m.Sprite.Drawable.Bounds().H() * scaleFactor}
+	m.Size = engine.Vec{X: m.Sprite.Drawable.Bounds().W() * m.Scale, Y: m.Sprite.Drawable.Bounds().H() * m.Scale}
 
 	m.Sprite.MovementSpeed = 2
 	m.Sprite.RotationSpeedPerSecond = 0.1
