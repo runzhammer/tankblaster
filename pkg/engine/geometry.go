@@ -10,6 +10,10 @@ type Vec struct {
 	X, Y float64
 }
 
+type Point struct {
+	X, Y float32
+}
+
 func V(x, y float64) Vec {
 	return Vec{
 		X: x,

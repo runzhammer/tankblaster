@@ -25,7 +25,7 @@ type Tank struct {
 
 func NewTank(name string, ground *Ground) *Tank {
 
-	scaleFactor := float64(0.43)
+	scaleFactor := float64(0.35)
 
 	t := Tank{
 		Name:        name,
