@@ -25,7 +25,7 @@ type Ground struct {
 	Coords    []ebiten.Vertex
 }
 
-func NewGround() Ground {
+func NewGround(background *Background) Ground {
 
 	m := Ground{Name: "ground"}
 
@@ -35,7 +35,7 @@ func NewGround() Ground {
 	emptyImage.Fill(color.Transparent)
 	emptyGroundImage := emptyImage.SubImage(image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height/2))).(*ebiten.Image)
 
-	rawGroundImage := engine.NewSprite(r.GroundSprite, r.GroundSpec)
+	rawGroundImage := engine.NewSprite(r.GroundSprite, nil)
 	rawGroundImage.Size = &m.Size
 	rawGroundImage.Pos = &engine.Vec{X: 0, Y: 0}
 	rawGroundImage.Draw(nil, emptyGroundImage)
@@ -49,7 +49,7 @@ func NewGround() Ground {
 	// log.Printf("%v", m.Sprite.Image)
 	// log.Printf("%v", groundSprite)
 
-	m.Position = engine.Vec{X: 0, Y: core.Config().Screen.Height/2 + 2}
+	m.Position = engine.Vec{X: 0, Y: background.Size.Y / 2}
 
 	return m
 }

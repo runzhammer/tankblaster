@@ -88,8 +88,12 @@ func NewSprite(imageFile []byte, specFile []byte) *Sprite {
 	s.Image = ebiten.NewImageFromImage(image)
 	s.DrawImageOptions = &ebiten.DrawImageOptions{}
 
-	s.Spec = LoadFrames(specFile)
-	s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.Spec.Still.Frames[0].W), float64(s.Spec.Still.Frames[0].H)))
+	if specFile == nil {
+		s.Drawable = NewImageDrawable(s.Image)
+	} else {
+		s.Spec = LoadFrames(specFile)
+		s.Drawable = NewImageDrawableFrames(s.Image, R(0, 0, float64(s.Spec.Still.Frames[0].W), float64(s.Spec.Still.Frames[0].H)))
+	}
 
 	return &s
 }

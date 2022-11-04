@@ -25,6 +25,3 @@ var BackgroundSpec []byte
 
 //go:embed ground.png
 var GroundSprite []byte
-
-//go:embed ground.yaml
-var GroundSpec []byte

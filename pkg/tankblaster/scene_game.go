@@ -54,7 +54,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 
 	b := models.NewBackground()
-	gr := models.NewGround()
+	gr := models.NewGround(&b)
 
 	t1 := models.NewTank("Player 1", &gr)
 
