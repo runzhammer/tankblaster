@@ -49,7 +49,7 @@ func NewGround() Ground {
 	// log.Printf("%v", m.Sprite.Image)
 	// log.Printf("%v", groundSprite)
 
-	m.Position = engine.Vec{X: 0, Y: core.Config().Screen.Height / 2}
+	m.Position = engine.Vec{X: 0, Y: core.Config().Screen.Height/2 + 2}
 
 	return m
 }
