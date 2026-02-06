@@ -5,6 +5,7 @@ go 1.18
 require github.com/hajimehoshi/ebiten/v2 v2.2.5
 
 require (
+	github.com/aquilax/go-perlin v1.1.0 // indirect
 	github.com/cevaris/ordered_map v0.0.0-20190319150403-3adeae072e73 // indirect
 	github.com/davecgh/go-spew v1.1.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect

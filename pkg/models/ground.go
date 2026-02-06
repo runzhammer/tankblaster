@@ -1,13 +1,15 @@
 package models
 
 import (
+	"bytes"
 	_ "embed"
 	"image"
 	"image/color"
 	"log"
 	"math/rand"
-	"sort"
 	"time"
+
+	"github.com/aquilax/go-perlin"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
@@ -83,140 +85,76 @@ func float32Rand() float32 {
 
 // sets Coords, Sprite and MaxHeight of wave
 func (m *Ground) drawGroundAlpha(destinationImage *ebiten.Image) {
+	const (
+		numPoints   = 64   // feinere Kurve
+		amplitude   = 40.0 // maximale Höhenabweichung
+		frequency   = 0.1  // wie oft Berge/Täler wechseln
+		offset      = 10.0 // Kontrolle über Bezier-Krümmung
+		perlinAlpha = 2.0
+		perlinBeta  = 2.0
+		perlinN     = 3
+	)
 
-	numPoints := 8
+	imgDecoded, _, err := image.Decode(bytes.NewReader(r.GroundSprite))
+	if err != nil {
+		log.Fatal("could not decode r.GroundSprite:", err)
+	}
+	groundImage := ebiten.NewImageFromImage(imgDecoded)
 
-	emptyImage := ebiten.NewImage(3, 3)
-	emptyImage.Fill(color.White)
-	emptySubImage := emptyImage.SubImage(image.Rect(1, 1, 2, 2)).(*ebiten.Image)
+	width := float64(destinationImage.Bounds().Dx())
+	height := float64(destinationImage.Bounds().Dy())
+	baseHeight := height * 0.7
 
-	maxWidth := float32(destinationImage.Bounds().Dx())
-	maxSegmentWidth := float32(destinationImage.Bounds().Dx() / numPoints)
-	maxHeight := float32(destinationImage.Bounds().Dy())
-	minHeight := float32(destinationImage.Bounds().Dy()) - (float32(destinationImage.Bounds().Dy()) / 2)
+	p := perlin.NewPerlin(perlinAlpha, perlinBeta, perlinN, time.Now().UnixNano())
 
-	log.Printf("minHeight: %v", minHeight)
-	log.Printf("maxHeight: %v", maxHeight)
+	points := make([]engine.Point, numPoints)
+	for i := 0; i < numPoints; i++ {
+		x := (width / float64(numPoints-1)) * float64(i)
+		noise := p.Noise1D(float64(i) * frequency)
+		y := baseHeight + noise*amplitude
+		points[i] = engine.Point{X: float32(x), Y: float32(y)}
+	}
 
 	var path vector.Path
+	path.MoveTo(points[0].X, points[0].Y)
 
-	npoints := make(map[int]engine.Point)
+	for i := 1; i < len(points); i++ {
+		prev := points[i-1]
+		cur := points[i]
 
-	for i := 0; i < numPoints; i++ {
+		cpx0 := prev.X + float32(offset)
+		cpy0 := prev.Y
+		cpx1 := cur.X - float32(offset)
+		cpy1 := cur.Y
 
-		// log.Printf("maxCounter: %v", maxCounter(i))
-		// x, y := maxWidth*float32(i)/float32(numPoints-1), intRand(maxHeight)
-		var x, y float32
-
-		// first point, first index
-		if i == 0 {
-			// set starting point at random height
-			y = engine.IntRand(maxHeight)
-			x = 0
-		} else {
-			// second and forth coming points
-			oldPoint := npoints[i-1]
-
-			// y = engine.IntRand(maxHeight) // maxHeight * float32Rand()
-
-			// if we have same height, let's do it again..
-			for {
-				y = engine.IntRand(maxHeight)
-				if y != oldPoint.Y && y < maxHeight && y > minHeight {
-					break
-				}
-			}
-
-			// distance to last point
-			x = oldPoint.X + maxSegmentWidth
-		}
-
-		if x >= maxWidth {
-			x = maxWidth
-		}
-
-		if y < minHeight {
-			y = minHeight
-		}
-
-		npoints[i] = engine.Point{X: x, Y: y}
+		path.CubicTo(cpx0, cpy0, cpx1, cpy1, cur.X, cur.Y)
 	}
 
-	var highestPoint float32
+	// Fläche nach unten schließen (rechte Seite, Boden, linke Seite)
+	path.LineTo(float32(width), float32(height))
+	path.LineTo(0, float32(height))
+	path.LineTo(points[0].X, points[0].Y) // explizit zum Start zurück
 
-	segments := make([]int, 0, len(npoints))
-
-	for k := range npoints {
-		segments = append(segments, k)
-	}
-	sort.Ints(segments)
-
-	log.Printf(" -- SEGMENTS START -- ")
-	for _, i := range segments {
-		log.Printf("Segment %d -> %v", i, npoints[i])
-	}
-	log.Printf(" -- SEGMENTS END -- ")
-
-	for _, i := range segments {
-
-		curPoint := npoints[i]
-
-		if i == 0 {
-			path.MoveTo(curPoint.X, curPoint.Y)
-			continue
-		}
-
-		oldPoint := npoints[i-1]
-
-		cpx0, cpy0 := oldPoint.X, oldPoint.Y
-		cpx1, cpy1 := curPoint.X, curPoint.Y
-
-		cpx0 += 30
-		cpx1 -= 30
-
-		// log.Printf("old p: %v / %v", oldPoint.x, oldPoint.y)
-		// log.Printf("new p: %v / %v ", X, Y)
-
-		path.CubicTo(cpx0, cpy0, cpx1, cpy1, curPoint.X, curPoint.Y)
-		//path.LineTo(X, Y)
-
-		if curPoint.Y < highestPoint {
-			highestPoint = curPoint.Y
-		}
-	}
-
-	highestPoint = maxHeight - highestPoint
-
-	log.Printf("highestPoint: %v", highestPoint)
-
-	// path.LineTo(maxWidth, maxHeight)
-	// path.LineTo(0, maxHeight)
-
-	path.LineTo(maxWidth, 0)
-	path.LineTo(0, 0)
-
-	op := &ebiten.DrawTrianglesOptions{
-		FillRule: ebiten.EvenOdd,
-	}
+	// Zeichnen auf Zielbild
 	vs, is := path.AppendVerticesAndIndicesForFilling(nil, nil)
 	for i := range vs {
-		vs[i].SrcX = 1
-		vs[i].SrcY = 1
-		vs[i].ColorA = 0
-		// log.Printf("%v, %v", vs[i].DstX, vs[i].DstY)
+		// Wiederhole die Textur
+		vs[i].SrcX = float32(int(vs[i].DstX) % groundImage.Bounds().Dx())
+		vs[i].SrcY = float32(int(vs[i].DstY) % groundImage.Bounds().Dy())
+		vs[i].ColorR = 1
+		vs[i].ColorG = 1
+		vs[i].ColorB = 1
+		vs[i].ColorA = 1
 	}
 
-	op.CompositeMode = ebiten.CompositeModeCopy
+	op := &ebiten.DrawTrianglesOptions{
+		FillRule:      ebiten.EvenOdd,
+		CompositeMode: ebiten.CompositeModeSourceOver,
+	}
 
-	destinationImage.DrawTriangles(vs, is, emptySubImage, op)
+	destinationImage.DrawTriangles(vs, is, groundImage, op)
 
-	// ground points
 	m.Coords = vs
-
-	// for k, v := range m.Coords {
-	// 	log.Printf("%v -> %v", k, v)
-	// }
-
 	m.Sprite = engine.NewSpriteFromImage(destinationImage)
-	m.MaxHeight = float64(highestPoint)
+	m.MaxHeight = float64(height)
 }
