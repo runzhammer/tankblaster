@@ -39,9 +39,9 @@ func FitRotated(rot float64, source, dest Rect) ebiten.GeoM {
 	mat := ebiten.GeoM{}
 
 	// rotate about center of source
-	mat.Translate(-source.W()/2, -source.W()/2)
+	mat.Translate(-source.W()/2, -source.H()/2)
 	mat.Rotate(rot)
-	mat.Translate(source.W()/2, source.W()/2)
+	mat.Translate(source.W()/2, source.H()/2)
 
 	// scale
 	mat.Scale(scaleX, scaleY)

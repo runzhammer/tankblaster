@@ -55,3 +55,15 @@ func NewTank(name string) Tank {
 
 	return m
 }
+
+func (m Tank) Body() *engine.Sprite {
+	iter := m.Sprites.Tagged(m.Name).Iterator()
+	body, _ := iter()
+	return body
+}
+
+func (m Tank) Cannon() *engine.Sprite {
+	iter := m.Sprites.Tagged("cannon").Iterator()
+	cannon, _ := iter()
+	return cannon
+}

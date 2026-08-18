@@ -1,8 +1,8 @@
 package tankblaster
 
 import (
-	"github.com/explodes/tanks/go/core"
 	"github.com/hajimehoshi/ebiten"
+	"github.com/runzhammer/gamedemo/pkg/core"
 )
 
 func Begin() bool {

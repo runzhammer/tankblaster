@@ -56,14 +56,27 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	gr := models.NewGround()
 
 	t1 := models.NewTank("Player 1")
-	t1.Position = &engine.Vec{X: 0, Y: gr.Position.Y - t1.Size.Y}
+	t1.Position = &engine.Vec{X: 0, Y: gr.SurfaceY(t1.Size.X/2) - t1.Size.Y}
 
 	// t2 := models.NewTank("Player 2")
 
-	iter := t1.Sprites.Tagged("cannon").Iterator()
-	for obj, ok := iter(); ok; obj, ok = iter() {
-		obj.Steps = engine.MakeBehaviors(
+	tankBody := t1.Body()
+	if tankBody != nil {
+		tankBody.Pos = t1.Position
+		gr.AlignSpriteToSurface(tankBody)
+		tankBody.Steps = engine.MakeBehaviors(
+			s.behaviorMoveOnButton,
+			gr.AlignSpriteToSurface,
+		)
+	}
+
+	cannon := t1.Cannon()
+	if cannon != nil {
+		cannon.Steps = engine.MakeBehaviors(
 			s.behaviorRotateOnButton,
+		)
+		cannon.PostSteps = engine.MakeBehaviors(
+			s.behaviorAttachCannonToTank(tankBody),
 		)
 	}
 
@@ -184,7 +197,18 @@ func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {
 	} else if MoveRight() {
 		moveRight := engine.Vec{X: source.Pos.X + float64(source.MovementSpeed), Y: source.Pos.Y}
 		source.Pos = &moveRight
-		engine.Movement(source)
+	}
+}
+
+func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behavior {
+	return func(source *engine.Sprite) {
+		if tank == nil {
+			return
+		}
+		source.Pos = &engine.Vec{
+			X: tank.Pos.X + tank.Size.X/2 - source.Size.X/2,
+			Y: tank.Pos.Y + tank.Size.Y*0.28 - source.Size.Y/2,
+		}
 	}
 }
 
