@@ -2,6 +2,7 @@ package tankblaster
 
 import (
 	"errors"
+	"image/color"
 
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
@@ -26,12 +27,29 @@ var (
 	GameTermination    = errors.New("game over")
 )
 
+type PlayerKind uint8
+
+const (
+	PlayerNone PlayerKind = iota
+	PlayerHuman
+	PlayerComputer
+)
+
+type PlayerConfig struct {
+	Kind  PlayerKind
+	Name  string
+	Color color.RGBA
+}
+
 type GameLoop struct {
 	core.GameSceneLoop
 	context core.Context
 
 	redScore  int
 	blueScore int
+
+	rounds  int
+	players []PlayerConfig
 
 	// bgm *audio.Player
 }
@@ -46,9 +64,11 @@ func NewGame() (core.Game, error) {
 	// 	context: context,
 	// 	bgm: bgm,
 	// }
-	game := &GameLoop{}
+	game := &GameLoop{
+		rounds: 10,
+	}
 
-	if err := game.SetNewScene(NewGameScene); err != nil {
+	if err := game.SetNewScene(NewPlayerSelectionScene); err != nil {
 		return nil, err
 	}
 

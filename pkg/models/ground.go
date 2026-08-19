@@ -19,11 +19,15 @@ type Ground struct {
 }
 
 func NewGround() Ground {
+	return NewGroundWithWidth(core.Config().Screen.Width)
+}
+
+func NewGroundWithWidth(width float64) Ground {
 
 	m := Ground{Name: "ground"}
 	m.Sprites = engine.NewSprites()
 	m.Position = &engine.Vec{X: 0, Y: 0}
-	m.Size = &engine.Vec{X: core.Config().Screen.Width, Y: core.Config().Screen.Height}
+	m.Size = &engine.Vec{X: width, Y: core.Config().Screen.Height}
 
 	groundSprite := &engine.Sprite{}
 	groundSprite.Tag = m.Name
@@ -50,14 +54,29 @@ func (g Ground) SurfaceY(x float64) float64 {
 	}
 
 	t := x / width
-	base := g.Size.Y - 96
+	base := g.Size.Y - 118
 	y := base +
-		math.Sin(t*math.Pi*2.1+0.35)*28 +
-		math.Sin(t*math.Pi*6.4+1.2)*12
+		math.Sin(t*math.Pi*2.4+0.25)*46 +
+		math.Sin(t*math.Pi*5.7+1.1)*30 +
+		math.Sin(t*math.Pi*11.0+2.6)*12
 
-	minY := g.Size.Y - 168
-	maxY := g.Size.Y - 42
+	y += cartoonHill(t, 0.18, 0.11, -68)
+	y += cartoonHill(t, 0.36, 0.09, 58)
+	y += cartoonHill(t, 0.54, 0.12, -54)
+	y += cartoonHill(t, 0.76, 0.10, 64)
+	y += cartoonHill(t, 0.91, 0.08, -42)
+
+	minY := g.Size.Y - 245
+	maxY := g.Size.Y - 34
 	return math.Max(minY, math.Min(maxY, y))
+}
+
+func cartoonHill(t, center, width, height float64) float64 {
+	d := math.Abs(t-center) / width
+	if d >= 1 {
+		return 0
+	}
+	return math.Cos(d*math.Pi/2) * height
 }
 
 func (g Ground) AlignSpriteToSurface(source *engine.Sprite) {
@@ -87,15 +106,39 @@ func generateGroundImage(width, height float64) *ebiten.Image {
 	for x := 0; x < w; x++ {
 		surface := int(math.Round(ground.SurfaceY(float64(x))))
 		for y := surface; y < h; y++ {
-			shade := uint8(72 + math.Min(48, float64(y-surface)/2))
-			img.SetRGBA(x, y, color.RGBA{R: 52, G: shade, B: 42, A: 255})
+			depth := float64(y-surface) / math.Max(1, float64(h-surface))
+			img.SetRGBA(x, y, desertSandColor(depth))
 		}
 		for y := surface - 2; y <= surface+1; y++ {
 			if y >= 0 && y < h {
-				img.SetRGBA(x, y, color.RGBA{R: 95, G: 132, B: 68, A: 255})
+				img.SetRGBA(x, y, color.RGBA{R: 255, G: 250, B: 178, A: 255})
 			}
 		}
 	}
 
 	return ebiten.NewImageFromImage(img)
+}
+
+func desertSandColor(depth float64) color.RGBA {
+	depth = math.Max(0, math.Min(1, depth))
+
+	top := color.RGBA{R: 255, G: 251, B: 185, A: 255}
+	mid := color.RGBA{R: 226, G: 181, B: 111, A: 255}
+	bottom := color.RGBA{R: 196, G: 126, B: 67, A: 255}
+
+	if depth < 0.42 {
+		return blendRGBA(top, mid, depth/0.42)
+	}
+	return blendRGBA(mid, bottom, (depth-0.42)/0.58)
+}
+
+func blendRGBA(a, b color.RGBA, t float64) color.RGBA {
+	t = math.Max(0, math.Min(1, t))
+
+	return color.RGBA{
+		R: uint8(float64(a.R) + (float64(b.R)-float64(a.R))*t),
+		G: uint8(float64(a.G) + (float64(b.G)-float64(a.G))*t),
+		B: uint8(float64(a.B) + (float64(b.B)-float64(a.B))*t),
+		A: uint8(float64(a.A) + (float64(b.A)-float64(a.A))*t),
+	}
 }

@@ -28,3 +28,12 @@ var GroundSprite []byte
 
 //go:embed ground.yaml
 var GroundSpec []byte
+
+//go:embed player_selection_base.png
+var PlayerSelectionBase []byte
+
+//go:embed player_human.png
+var PlayerHuman []byte
+
+//go:embed player_computer.png
+var PlayerComputer []byte

@@ -14,6 +14,9 @@ type FileSettings struct {
 		Width  int `yaml:"width"`
 		Height int `yaml:"height"`
 	} `yaml:"window"`
+	Tanks struct {
+		Count int `yaml:"count"`
+	} `yaml:"tanks"`
 }
 
 type Settings struct {
@@ -21,6 +24,9 @@ type Settings struct {
 		Width  float64
 		Height float64
 		Bounds engine.Rect
+	}
+	Tanks struct {
+		Count int
 	}
 }
 
@@ -42,6 +48,10 @@ func init() {
 	s.Screen.Width = float64(fs.Window.Width)
 	s.Screen.Height = float64(fs.Window.Height)
 	s.Screen.Bounds = engine.R(0, 0, s.Screen.Width, s.Screen.Height)
+	s.Tanks.Count = fs.Tanks.Count
+	if s.Tanks.Count <= 0 {
+		s.Tanks.Count = 1
+	}
 	GameSettings = &s
 }
 

@@ -16,11 +16,15 @@ type Background struct {
 }
 
 func NewBackground() Background {
+	return NewBackgroundWithWidth(core.Config().Screen.Width)
+}
+
+func NewBackgroundWithWidth(width float64) Background {
 
 	m := Background{}
 	m.Sprites = engine.NewSprites()
 	m.Position = &engine.Vec{X: 0, Y: 0}
-	m.Size = &engine.Vec{X: core.Config().Screen.Width, Y: core.Config().Screen.Height}
+	m.Size = &engine.Vec{X: width, Y: core.Config().Screen.Height}
 
 	backgroundSprite := engine.NewSprite(r.BackgroundSprite, r.BackgroundSpec)
 	backgroundSprite.Tag = "background"
