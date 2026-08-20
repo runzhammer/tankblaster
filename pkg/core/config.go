@@ -22,6 +22,7 @@ type FileSettings struct {
 		SpawnLandingPauseSeconds float64 `yaml:"spawn_landing_pause_seconds"`
 		ImpactAnimationSeconds   float64 `yaml:"impact_animation_seconds"`
 		ImpactPauseSeconds       float64 `yaml:"impact_pause_seconds"`
+		TankHitPauseSeconds      float64 `yaml:"tank_hit_pause_seconds"`
 	} `yaml:"gameplay"`
 	Debug struct {
 		Enabled    bool   `yaml:"enabled"`
@@ -59,6 +60,7 @@ type Settings struct {
 		SpawnLandingPauseSeconds float64
 		ImpactAnimationSeconds   float64
 		ImpactPauseSeconds       float64
+		TankHitPauseSeconds      float64
 	}
 	Debug struct {
 		Enabled    bool
@@ -103,6 +105,10 @@ func init() {
 	s.Gameplay.ImpactPauseSeconds = fs.Gameplay.ImpactPauseSeconds
 	if s.Gameplay.ImpactPauseSeconds < 0 {
 		s.Gameplay.ImpactPauseSeconds = 0
+	}
+	s.Gameplay.TankHitPauseSeconds = fs.Gameplay.TankHitPauseSeconds
+	if s.Gameplay.TankHitPauseSeconds < 0 {
+		s.Gameplay.TankHitPauseSeconds = 0
 	}
 	s.Debug.Enabled = fs.Debug.Enabled
 	s.Debug.StartScene = fs.Debug.StartScene

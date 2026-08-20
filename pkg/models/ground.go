@@ -21,6 +21,13 @@ type Ground struct {
 	surface  []float64
 }
 
+type SandFallPixel struct {
+	X     int
+	FromY int
+	ToY   int
+	Color color.RGBA
+}
+
 func NewGround() Ground {
 	return NewGroundWithWidth(core.Config().Screen.Width)
 }
@@ -92,9 +99,9 @@ func (g Ground) SurfaceY(x float64) float64 {
 	return math.Max(minY, math.Min(maxY, y))
 }
 
-func (g Ground) ApplyCrater(cx, cy, radius float64) {
+func (g Ground) ApplyCrater(cx, cy, radius float64) []SandFallPixel {
 	if g.pixels == nil || g.Image == nil || radius <= 0 {
-		return
+		return nil
 	}
 
 	bounds := g.pixels.Bounds()
@@ -114,8 +121,38 @@ func (g Ground) ApplyCrater(cx, cy, radius float64) {
 		}
 	}
 
+	falls := g.settleSandRange(minX, maxX, maxY)
 	g.refreshSurfaceRange(minX, maxX)
 	g.Image.WritePixels(g.pixels.Pix)
+	return falls
+}
+
+func (g Ground) settleSandRange(minX, maxX, maxY int) []SandFallPixel {
+	if g.pixels == nil {
+		return nil
+	}
+
+	bounds := g.pixels.Bounds()
+	maxY = minInt(maxY, bounds.Dy()-1)
+	falls := make([]SandFallPixel, 0)
+
+	for x := minX; x <= maxX; x++ {
+		writeY := maxY
+		for y := maxY; y >= 0; y-- {
+			c := g.pixels.RGBAAt(x, y)
+			if c.A == 0 {
+				continue
+			}
+			if y != writeY {
+				g.pixels.SetRGBA(x, writeY, c)
+				g.pixels.SetRGBA(x, y, color.RGBA{})
+				falls = append(falls, SandFallPixel{X: x, FromY: y, ToY: writeY, Color: c})
+			}
+			writeY--
+		}
+	}
+
+	return falls
 }
 
 func (g Ground) refreshSurfaceRange(minX, maxX int) {

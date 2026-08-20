@@ -46,6 +46,9 @@ const gameHUDHeight = 132
 const (
 	projectileRadius       = 4
 	impactRadiusMultiplier = 4
+	sandFallFrames         = 12
+	fallDamageStepPixels   = 20
+	fallDamagePerStep      = 10
 )
 
 type battleTank struct {
@@ -54,7 +57,11 @@ type battleTank struct {
 	cannon         *engine.Sprite
 	landed         bool
 	falling        bool
+	fallStartY     float64
+	fallTargetY    float64
+	fallDamage     bool
 	power          int
+	tint           color.RGBA
 	selectedWeapon int
 	shotStrength   int
 }
@@ -84,6 +91,12 @@ type impactAnimation struct {
 	duration int
 }
 
+type sandFallAnimation struct {
+	pixels   []models.SandFallPixel
+	age      int
+	duration int
+}
+
 type GameScene struct {
 	g    *GameLoop
 	time float64
@@ -107,6 +120,7 @@ type GameScene struct {
 	windDirection     int
 	projectile        *projectile
 	impacts           []impactAnimation
+	sandFalls         []sandFallAnimation
 	turnAdvanceDelay  int
 }
 
@@ -144,6 +158,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		battleTank := &battleTank{
 			player:         player,
 			power:          100,
+			tint:           player.Color,
 			selectedWeapon: 1,
 			shotStrength:   20,
 		}
@@ -280,8 +295,9 @@ func (s *GameScene) Update() error {
 	// s.message = &text
 	case phaseBattle:
 		s.updateSpawnSequence()
+		s.updateImpacts()
+		s.updateSandFalls()
 		if s.allTanksLanded() {
-			s.updateImpacts()
 			if s.turnAdvanceDelay > 0 {
 				s.updateTurnAdvanceDelay()
 			} else {
@@ -316,7 +332,7 @@ func (s *GameScene) updateSpawnSequence() {
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.08, 0.35)
 
 	tank := s.tanks[s.spawnIndex]
-	if tank == nil || tank.body == nil || tank.falling {
+	if tank == nil || tank.body == nil || tank.falling || tank.landed {
 		return
 	}
 	if math.Abs(s.cameraX-s.cameraGoal) > 1 {
@@ -324,8 +340,9 @@ func (s *GameScene) updateSpawnSequence() {
 	}
 
 	tank.falling = true
+	tank.fallDamage = false
 	tank.body.Steps = engine.MakeBehaviors(
-		s.behaviorFallOntoGround(s.ground, tank),
+		s.behaviorFallOntoGround(s.ground, tank, true),
 	)
 }
 
@@ -373,6 +390,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 
 	s.layers.Draw(&camera, screen)
 	s.drawImpacts(screen, &camera)
+	s.drawSandFalls(screen, &camera)
 	s.drawProjectile(screen, &camera)
 	s.drawGameHUD(screen)
 	s.drawDebugScrollBar(screen)
@@ -442,7 +460,7 @@ func (s *GameScene) handleBattleInput() {
 		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+1)
 	}
 	if shouldAdjustStrength(ebiten.KeyArrowDown) {
-		tank.shotStrength = maxInt(1, tank.shotStrength-1)
+		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-1)
 	}
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
@@ -476,7 +494,7 @@ func (s *GameScene) fireActiveWeapon() {
 
 	bounds := tank.cannon.Bounds()
 	muzzle := bounds.Center().Add(engine.V(bounds.W()/2+7, 0).Rotated(tank.cannon.Rot))
-	speed := 4.5 + float64(tank.shotStrength)*0.28
+	speed := 1.4 + float64(tank.shotStrength)*0.32
 	s.projectile = &projectile{
 		pos:         *muzzle,
 		prev:        *muzzle,
@@ -525,16 +543,17 @@ func (s *GameScene) updateProjectile() {
 	}
 
 	hitBounds := engine.R(p.pos.X-3, p.pos.Y-3, p.pos.X+3, p.pos.Y+3)
-	for i, tank := range s.tanks {
-		if i == s.activePlayerIndex || tank == nil || tank.body == nil {
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil {
 			continue
 		}
 		if engine.Collision(hitBounds, tank.body.Bounds().ScaledAtCenter(0.78)) {
 			if damage := gameWeapons()[p.weaponIndex].damage; damage > 0 {
-				tank.power = maxInt(0, tank.power-damage)
-				tank.shotStrength = minInt(tank.shotStrength, maxInt(1, tank.power))
+				s.damageTank(tank, damage)
+				s.darkenTank(tank, 0.10)
 			}
-			s.finishProjectile()
+			s.projectile = nil
+			s.delayTurnAdvance(s.tankHitPauseFrames())
 			return
 		}
 	}
@@ -557,6 +576,14 @@ func (s *GameScene) advanceActivePlayer() {
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
 }
 
+func (s *GameScene) delayTurnAdvance(frames int) {
+	if frames <= 0 {
+		s.advanceActivePlayer()
+		return
+	}
+	s.turnAdvanceDelay = frames
+}
+
 func (s *GameScene) onGroundImpact(p *projectile) bool {
 	if p == nil {
 		return false
@@ -567,7 +594,14 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	}
 
 	radius := float64(projectileRadius * impactRadiusMultiplier)
-	s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
+	falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
+	if len(falls) > 0 {
+		s.sandFalls = append(s.sandFalls, sandFallAnimation{
+			pixels:   falls,
+			duration: sandFallFrames,
+		})
+	}
+	s.dropUnsupportedTanks()
 	s.impacts = append(s.impacts, impactAnimation{
 		pos:      p.pos,
 		radius:   radius,
@@ -589,6 +623,20 @@ func (s *GameScene) updateImpacts() {
 		}
 	}
 	s.impacts = active
+}
+
+func (s *GameScene) updateSandFalls() {
+	if len(s.sandFalls) == 0 {
+		return
+	}
+	active := s.sandFalls[:0]
+	for _, fall := range s.sandFalls {
+		fall.age++
+		if fall.age < fall.duration {
+			active = append(active, fall)
+		}
+	}
+	s.sandFalls = active
 }
 
 func (s *GameScene) updateTurnAdvanceDelay() {
@@ -617,10 +665,17 @@ func (s *GameScene) activeTank() *battleTank {
 
 func (s *GameScene) maxShotStrength() int {
 	tank := s.activeTank()
-	if tank == nil || tank.power <= 0 {
-		return 1
+	if tank == nil {
+		return 0
 	}
-	return tank.power
+	return maxInt(0, tank.power)
+}
+
+func (s *GameScene) minShotStrength() int {
+	if s.maxShotStrength() <= 0 {
+		return 0
+	}
+	return 1
 }
 
 func (s *GameScene) clampActiveShotStrength() {
@@ -629,7 +684,106 @@ func (s *GameScene) clampActiveShotStrength() {
 		return
 	}
 	tank.shotStrength = minInt(tank.shotStrength, s.maxShotStrength())
-	tank.shotStrength = maxInt(1, tank.shotStrength)
+	tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength)
+}
+
+func (s *GameScene) damageTank(tank *battleTank, damage int) {
+	if tank == nil || damage <= 0 {
+		return
+	}
+	tank.power = maxInt(0, tank.power-damage)
+	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
+}
+
+func (s *GameScene) dropUnsupportedTanks() {
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || !tank.landed || tank.falling {
+			continue
+		}
+		targetY, stable := s.tankSupportState(tank.body)
+		currentBottom := tank.body.Pos.Y + tank.body.Size.Y
+		if stable {
+			targetY = s.alignedTankBottomY(tank.body)
+		}
+		if targetY <= currentBottom+1 {
+			startY := tank.body.Pos.Y
+			s.ground.AlignSpriteToSurface(tank.body)
+			s.applyFallDamage(tank, tank.body.Pos.Y-startY)
+			continue
+		}
+
+		tank.landed = false
+		tank.falling = true
+		tank.fallDamage = true
+		tank.fallStartY = tank.body.Pos.Y
+		tank.fallTargetY = targetY
+		tank.body.Velocity = engine.Vec{}
+		tank.body.Steps = engine.MakeBehaviors(
+			s.behaviorFallOntoGround(s.ground, tank, false),
+		)
+	}
+}
+
+func (s *GameScene) alignedTankBottomY(tank *engine.Sprite) float64 {
+	if tank == nil {
+		return 0
+	}
+	copy := *tank
+	pos := *tank.Pos
+	copy.Pos = &pos
+	s.ground.AlignSpriteToSurface(&copy)
+	return copy.Pos.Y + copy.Size.Y
+}
+
+func (s *GameScene) tankSupportState(tank *engine.Sprite) (float64, bool) {
+	if tank == nil {
+		return 0, true
+	}
+	const (
+		samples           = 9
+		requiredSupport   = 4
+		footprintCoverage = 0.76
+		supportTolerance  = 2
+	)
+
+	centerX := tank.Pos.X + tank.Size.X/2
+	leftX := centerX - tank.Size.X*footprintCoverage/2
+	step := tank.Size.X * footprintCoverage / float64(samples-1)
+	currentBottom := tank.Pos.Y + tank.Size.Y
+	targetY := currentBottom
+	supported := 0
+	centerSupported := false
+
+	for i := 0; i < samples; i++ {
+		x := leftX + float64(i)*step
+		surfaceY := s.ground.SurfaceY(x)
+		if surfaceY > targetY {
+			targetY = surfaceY
+		}
+		if surfaceY <= currentBottom+supportTolerance {
+			supported++
+			if i == samples/2 {
+				centerSupported = true
+			}
+		}
+	}
+
+	return targetY, centerSupported && supported >= requiredSupport
+}
+
+func (s *GameScene) darkenTank(tank *battleTank, amount float64) {
+	if tank == nil {
+		return
+	}
+	factor := math.Max(0, 1-amount)
+	tank.tint = color.RGBA{
+		R: uint8(float64(tank.tint.R) * factor),
+		G: uint8(float64(tank.tint.G) * factor),
+		B: uint8(float64(tank.tint.B) * factor),
+		A: tank.tint.A,
+	}
+	models.RecolorTankBody(tank.body, tank.tint)
+	models.RecolorCannon(tank.cannon, tank.tint)
 }
 
 func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
@@ -668,6 +822,17 @@ func (s *GameScene) drawImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
 			radius := float32(impact.radius * t)
 			red := uint8(255 * math.Pow(t, 0.7) * cycleProgress)
 			vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), radius, color.RGBA{R: red, G: 0, B: 0, A: 220}, true)
+		}
+	}
+}
+
+func (s *GameScene) drawSandFalls(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, fall := range s.sandFalls {
+		progress := float64(fall.age) / math.Max(1, float64(fall.duration))
+		for _, pixel := range fall.pixels {
+			y := float64(pixel.FromY) + (float64(pixel.ToY)-float64(pixel.FromY))*progress
+			projected := engine.V(float64(pixel.X), y).Project(camera)
+			drawFilledRect(screen, image.Rect(int(projected.X), int(projected.Y), int(projected.X)+1, int(projected.Y)+1), pixel.Color)
 		}
 	}
 }
@@ -794,7 +959,7 @@ func (s *GameScene) cannonAngleDegrees() float64 {
 func gameWeapons() []weapon {
 	return []weapon{
 		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 0, unlocked: true, showTrail: true},
-		{name: "Blaster", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 20, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
+		{name: "Blaster", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 30, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
 	}
 }
 
@@ -856,7 +1021,7 @@ func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {
 	}
 }
 
-func (s *GameScene) behaviorFallOntoGround(ground models.Ground, tank *battleTank) engine.Behavior {
+func (s *GameScene) behaviorFallOntoGround(ground models.Ground, tank *battleTank, spawnPause bool) engine.Behavior {
 	return func(source *engine.Sprite) {
 		const gravity = 0.38
 		const maxFallSpeed = 12.0
@@ -866,18 +1031,46 @@ func (s *GameScene) behaviorFallOntoGround(ground models.Ground, tank *battleTan
 
 		centerX := source.Pos.X + source.Size.X/2
 		landingY := ground.SurfaceY(centerX)
+		if tank != nil && tank.fallDamage {
+			landingY = math.Max(landingY, tank.fallTargetY)
+		}
 		if source.Pos.Y+source.Size.Y < landingY {
 			return
 		}
 
 		source.Velocity = engine.Vec{}
-		ground.AlignSpriteToSurface(source)
 		if tank != nil {
+			if tank.fallDamage {
+				source.Pos = &engine.Vec{X: source.Pos.X, Y: landingY - source.Size.Y}
+				source.Rot = 0
+			} else {
+				ground.AlignSpriteToSurface(source)
+			}
 			tank.landed = true
-			s.spawnPauseFrames = s.spawnLandingPauseFrames()
+			tank.falling = false
+			if tank.fallDamage {
+				fallDistance := source.Pos.Y - tank.fallStartY
+				s.applyFallDamage(tank, fallDistance)
+				tank.fallDamage = false
+				tank.fallTargetY = 0
+			}
+			if spawnPause {
+				s.spawnPauseFrames = s.spawnLandingPauseFrames()
+			}
+		} else {
+			ground.AlignSpriteToSurface(source)
 		}
 		source.Steps = nil
 	}
+}
+
+func (s *GameScene) applyFallDamage(tank *battleTank, fallDistance float64) {
+	if tank == nil || fallDistance <= 0 {
+		return
+	}
+	damage := int(fallDistance * float64(fallDamagePerStep) / float64(fallDamageStepPixels))
+	damage = maxInt(1, damage)
+	s.damageTank(tank, damage)
 }
 
 func (s *GameScene) spawnLandingPauseFrames() int {
@@ -890,6 +1083,10 @@ func (s *GameScene) impactAnimationFrames() int {
 
 func (s *GameScene) impactPauseFrames() int {
 	return secondsToFrames(core.Config().Gameplay.ImpactPauseSeconds)
+}
+
+func (s *GameScene) tankHitPauseFrames() int {
+	return secondsToFrames(core.Config().Gameplay.TankHitPauseSeconds)
 }
 
 func secondsToFrames(seconds float64) int {

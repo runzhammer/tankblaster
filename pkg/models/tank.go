@@ -88,6 +88,24 @@ func colorizedSpriteImage(sprite []byte, tint color.RGBA) *ebiten.Image {
 	return ebiten.NewImageFromImage(img)
 }
 
+func RecolorTankBody(body *engine.Sprite, tankColor color.RGBA) {
+	if body == nil || body.Drawable == nil {
+		return
+	}
+	bounds := body.Drawable.Bounds()
+	body.Image = colorizedSpriteImage(r.TankSprite, tankColor)
+	body.Drawable = engine.NewImageDrawableFrames(body.Image, engine.R(0, 0, bounds.W(), bounds.H()))
+}
+
+func RecolorCannon(cannon *engine.Sprite, tankColor color.RGBA) {
+	if cannon == nil || cannon.Drawable == nil {
+		return
+	}
+	bounds := cannon.Drawable.Bounds()
+	cannon.Image = generateCannonImage(int(bounds.W()), int(bounds.H()), tankColor)
+	cannon.Drawable = engine.NewImageDrawable(cannon.Image)
+}
+
 func generateCannonImage(width, height int, tankColor color.RGBA) *ebiten.Image {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 

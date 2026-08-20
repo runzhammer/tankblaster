@@ -7,6 +7,7 @@ gameplay:
   spawn_landing_pause_seconds: 1
   impact_animation_seconds: 0.6
   impact_pause_seconds: 1
+  tank_hit_pause_seconds: 0.6
 debug:
   enabled: true
   start_scene: game
