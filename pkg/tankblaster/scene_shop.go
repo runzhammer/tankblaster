@@ -62,7 +62,7 @@ func shopItems() []shopItem {
 		{name: "Maulwürfe", price: 1450, stock: 3, screenIndex: 9},
 		{name: "MFS 3-fach", price: 3000, stock: 3, screenIndex: 10},
 		{name: "Brösler, klein", price: 300, stock: 8, screenIndex: 11},
-		{name: "Bröler, gross", price: 900, stock: 2, screenIndex: 12},
+		{name: "Brösler, groß", price: 900, stock: 2, screenIndex: 12},
 		{name: "Überraschungsei", price: 1000, stock: 1, screenIndex: 13},
 		{name: "Moskitos", price: 3750, stock: 1, screenIndex: 14},
 		{name: "Schockwelle", price: 7600, stock: 2, screenIndex: 15},
@@ -254,16 +254,14 @@ func (s *GameScene) drawShopList(screen *ebiten.Image) {
 }
 
 func (s *GameScene) drawDynamicShopList(screen *ebiten.Image, indexes []int) {
-	titleRect := s.shopScaledRect(image.Rect(490, 84, 970, 136))
-	title := "- Klasse A -"
-	if s.shopMode == shopModeClassB {
-		title = "- Schnaeppchen -"
+	if s.shopMode == shopModeClassA {
+		return
 	}
-	drawFilledRect(screen, titleRect, color.RGBA{R: 250, G: 250, B: 224, A: 235})
-	drawCenteredText(screen, title, titleRect, colornames.Black)
+
+	titleRect := s.shopScaledRect(image.Rect(490, 84, 970, 136))
+	drawCenteredText(screen, "- Schnäppchen -", titleRect, colornames.Black)
 
 	listRect := s.shopListRect()
-	drawFilledRect(screen, listRect, color.RGBA{R: 250, G: 250, B: 224, A: 238})
 	rowH := s.shopListRowHeight()
 	visibleRows := s.shopVisibleRows(len(indexes))
 	offset := s.shopListScrollOffset(len(indexes))

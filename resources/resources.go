@@ -41,6 +41,9 @@ var PlayerComputer []byte
 //go:embed zero_power_smoke.gif
 var ZeroPowerSmokeGIF []byte
 
+//go:embed fonts/DejaVuSansMono.ttf
+var DejaVuSansMono []byte
+
 //go:embed shop_entry.png
 var ShopEntry []byte
 

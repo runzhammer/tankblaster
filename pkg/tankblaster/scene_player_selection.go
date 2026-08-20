@@ -8,6 +8,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/golang/freetype/truetype"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -16,6 +17,7 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/engine/tinge"
 	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/colornames"
+	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 )
 
@@ -37,6 +39,19 @@ var defaultPlayerColors = []color.RGBA{
 	{R: 185, G: 80, B: 25, A: 255},
 	{R: 235, G: 85, B: 170, A: 255},
 	{R: 40, G: 40, B: 40, A: 255},
+}
+
+var uiTextFace font.Face = loadUITextFace()
+
+func loadUITextFace() font.Face {
+	f, err := truetype.Parse(r.DejaVuSansMono)
+	if err != nil {
+		return basicfont.Face7x13
+	}
+	return truetype.NewFace(f, &truetype.Options{
+		Size:              15,
+		GlyphCacheEntries: 128,
+	})
 }
 
 var paletteColors = []color.RGBA{
@@ -427,11 +442,11 @@ func drawFilledRect(screen *ebiten.Image, r image.Rectangle, c color.Color) {
 }
 
 func drawText(screen *ebiten.Image, value string, x, y int, c color.Color) {
-	text.Draw(screen, value, basicfont.Face7x13, x, y, c)
+	text.Draw(screen, value, uiTextFace, x, y, c)
 }
 
 func drawCenteredText(screen *ebiten.Image, value string, r image.Rectangle, c color.Color) {
-	b := text.BoundString(basicfont.Face7x13, value)
+	b := text.BoundString(uiTextFace, value)
 	x := r.Min.X + (r.Dx()-b.Dx())/2
 	y := r.Min.Y + (r.Dy()+b.Dy())/2
 	drawText(screen, value, x, y, c)
