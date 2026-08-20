@@ -1,8 +1,10 @@
 package tankblaster
 
 import (
+	"bytes"
 	"image"
 	"image/color"
+	"image/gif"
 	"math"
 	"math/rand"
 	"strconv"
@@ -18,6 +20,7 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
 	"github.com/runzhammer/gamedemo/pkg/models"
+	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/colornames"
 )
 
@@ -49,6 +52,7 @@ const (
 	sandFallFrames         = 12
 	fallDamageStepPixels   = 20
 	fallDamagePerStep      = 10
+	zeroPowerFrames        = 216
 )
 
 type battleTank struct {
@@ -62,6 +66,7 @@ type battleTank struct {
 	fallDamage     bool
 	power          int
 	tint           color.RGBA
+	zeroPowerShown bool
 	selectedWeapon int
 	shotStrength   int
 }
@@ -97,6 +102,20 @@ type sandFallAnimation struct {
 	duration int
 }
 
+type zeroPowerAnimation struct {
+	tank     *battleTank
+	age      int
+	duration int
+}
+
+type gifAnimation struct {
+	frames     []*ebiten.Image
+	delays     []int
+	totalTicks int
+	width      int
+	height     int
+}
+
 type GameScene struct {
 	g    *GameLoop
 	time float64
@@ -121,6 +140,8 @@ type GameScene struct {
 	projectile        *projectile
 	impacts           []impactAnimation
 	sandFalls         []sandFallAnimation
+	zeroPowerEffects  []zeroPowerAnimation
+	zeroPowerSmoke    gifAnimation
 	turnAdvanceDelay  int
 }
 
@@ -138,6 +159,11 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		// shot:        shotDrawable,
 		layers: engine.NewLayers(numLayers),
 	}
+	smoke, err := loadGIFAnimation(r.ZeroPowerSmokeGIF)
+	if err != nil {
+		return nil, err
+	}
+	s.zeroPowerSmoke = smoke
 	s.wind = s.rng.Intn(101)
 	if s.rng.Intn(2) == 0 {
 		s.windDirection = -1
@@ -297,6 +323,7 @@ func (s *GameScene) Update() error {
 		s.updateSpawnSequence()
 		s.updateImpacts()
 		s.updateSandFalls()
+		s.updateZeroPowerEffects()
 		if s.allTanksLanded() {
 			if s.turnAdvanceDelay > 0 {
 				s.updateTurnAdvanceDelay()
@@ -384,6 +411,53 @@ func approach(current, target, smoothing, minStep float64) float64 {
 	return current + delta*smoothing
 }
 
+func loadGIFAnimation(data []byte) (gifAnimation, error) {
+	decoded, err := gif.DecodeAll(bytes.NewReader(data))
+	if err != nil {
+		return gifAnimation{}, err
+	}
+
+	animation := gifAnimation{
+		frames: make([]*ebiten.Image, 0, len(decoded.Image)),
+		delays: make([]int, 0, len(decoded.Image)),
+	}
+	for i, frame := range decoded.Image {
+		ticks := 4
+		if i < len(decoded.Delay) && decoded.Delay[i] > 0 {
+			ticks = maxInt(1, int(math.Round(float64(decoded.Delay[i])*60/100)))
+		}
+		animation.frames = append(animation.frames, ebiten.NewImageFromImage(frame))
+		animation.delays = append(animation.delays, ticks)
+		animation.totalTicks += ticks
+		if frame.Bounds().Dx() > animation.width {
+			animation.width = frame.Bounds().Dx()
+		}
+		if frame.Bounds().Dy() > animation.height {
+			animation.height = frame.Bounds().Dy()
+		}
+	}
+	if animation.totalTicks <= 0 {
+		animation.totalTicks = zeroPowerFrames
+	}
+	return animation, nil
+}
+
+func (a gifAnimation) frameAt(tick int) *ebiten.Image {
+	if len(a.frames) == 0 {
+		return nil
+	}
+	if a.totalTicks > 0 && tick >= a.totalTicks {
+		tick = a.totalTicks - 1
+	}
+	for i, delay := range a.delays {
+		if tick < delay {
+			return a.frames[i]
+		}
+		tick -= delay
+	}
+	return a.frames[len(a.frames)-1]
+}
+
 func (s *GameScene) Draw(screen *ebiten.Image) {
 	camera := ebiten.GeoM{}
 	camera.Translate(-s.cameraX, 0)
@@ -391,6 +465,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.layers.Draw(&camera, screen)
 	s.drawImpacts(screen, &camera)
 	s.drawSandFalls(screen, &camera)
+	s.drawZeroPowerEffects(screen, &camera)
 	s.drawProjectile(screen, &camera)
 	s.drawGameHUD(screen)
 	s.drawDebugScrollBar(screen)
@@ -639,9 +714,24 @@ func (s *GameScene) updateSandFalls() {
 	s.sandFalls = active
 }
 
+func (s *GameScene) updateZeroPowerEffects() {
+	if len(s.zeroPowerEffects) == 0 {
+		return
+	}
+	active := s.zeroPowerEffects[:0]
+	for _, effect := range s.zeroPowerEffects {
+		effect.age++
+		if effect.age < effect.duration {
+			active = append(active, effect)
+		}
+	}
+	s.zeroPowerEffects = active
+}
+
 func (s *GameScene) updateTurnAdvanceDelay() {
 	s.turnAdvanceDelay--
 	if s.turnAdvanceDelay > 0 {
+		s.updateZeroPowerCamera()
 		return
 	}
 	s.turnAdvanceDelay = 0
@@ -649,11 +739,29 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 }
 
 func (s *GameScene) updateBattleCamera() {
+	if s.updateZeroPowerCamera() {
+		return
+	}
 	if s.projectile != nil || s.activePlayerIndex < 0 {
 		return
 	}
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.08, 0.35)
+}
+
+func (s *GameScene) updateZeroPowerCamera() bool {
+	if len(s.zeroPowerEffects) == 0 {
+		return false
+	}
+	effect := s.zeroPowerEffects[0]
+	for index, tank := range s.tanks {
+		if tank == effect.tank {
+			s.cameraGoal = s.cameraTargetForTank(index)
+			s.cameraX = approach(s.cameraX, s.cameraGoal, 0.12, 0.4)
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GameScene) activeTank() *battleTank {
@@ -691,8 +799,30 @@ func (s *GameScene) damageTank(tank *battleTank, damage int) {
 	if tank == nil || damage <= 0 {
 		return
 	}
+	previousPower := tank.power
 	tank.power = maxInt(0, tank.power-damage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
+	if previousPower > 0 && tank.power == 0 {
+		s.startZeroPowerAnimation(tank)
+	}
+}
+
+func (s *GameScene) startZeroPowerAnimation(tank *battleTank) {
+	if tank == nil || tank.zeroPowerShown {
+		return
+	}
+	tank.zeroPowerShown = true
+	tank.tint = color.RGBA{A: 255}
+	models.RecolorTankBody(tank.body, tank.tint)
+	models.RecolorCannon(tank.cannon, tank.tint)
+	duration := maxInt(1, s.zeroPowerSmoke.totalTicks)
+	s.zeroPowerEffects = append(s.zeroPowerEffects, zeroPowerAnimation{
+		tank:     tank,
+		duration: duration,
+	})
+	if s.turnAdvanceDelay < duration {
+		s.turnAdvanceDelay = duration
+	}
 }
 
 func (s *GameScene) dropUnsupportedTanks() {
@@ -834,6 +964,30 @@ func (s *GameScene) drawSandFalls(screen *ebiten.Image, camera *ebiten.GeoM) {
 			projected := engine.V(float64(pixel.X), y).Project(camera)
 			drawFilledRect(screen, image.Rect(int(projected.X), int(projected.Y), int(projected.X)+1, int(projected.Y)+1), pixel.Color)
 		}
+	}
+}
+
+func (s *GameScene) drawZeroPowerEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
+	if len(s.zeroPowerSmoke.frames) == 0 {
+		return
+	}
+	for _, effect := range s.zeroPowerEffects {
+		if effect.tank == nil || effect.tank.body == nil {
+			continue
+		}
+		body := effect.tank.body.Bounds()
+		center := body.Center()
+		frame := s.zeroPowerSmoke.frameAt(effect.age)
+		if frame == nil {
+			continue
+		}
+		anchor := engine.V(center.X, body.Min.Y-26).Project(camera)
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(
+			anchor.X-float64(s.zeroPowerSmoke.width)/2,
+			anchor.Y-float64(s.zeroPowerSmoke.height)/2,
+		)
+		screen.DrawImage(frame, op)
 	}
 }
 

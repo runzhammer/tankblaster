@@ -37,3 +37,6 @@ var PlayerHuman []byte
 
 //go:embed player_computer.png
 var PlayerComputer []byte
+
+//go:embed zero_power_smoke.gif
+var ZeroPowerSmokeGIF []byte
