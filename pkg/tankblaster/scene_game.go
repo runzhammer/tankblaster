@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	_ "image/jpeg"
 	_ "image/png"
@@ -33,18 +34,38 @@ const (
 	layerBackground = iota
 	layerGround
 	layerTanks
-	// layerBullets
+	layerProjectiles
 	numLayers
 )
 
 const debugScrollMode = true
 
+const gameHUDHeight = 132
+
 type battleTank struct {
-	player  PlayerConfig
-	body    *engine.Sprite
-	cannon  *engine.Sprite
-	landed  bool
-	falling bool
+	player         PlayerConfig
+	body           *engine.Sprite
+	cannon         *engine.Sprite
+	landed         bool
+	falling        bool
+	power          int
+	selectedWeapon int
+	shotStrength   int
+}
+
+type weapon struct {
+	name     string
+	color    color.RGBA
+	damage   int
+	unlocked bool
+}
+
+type projectile struct {
+	pos         engine.Vec
+	prev        engine.Vec
+	velocity    engine.Vec
+	weaponIndex int
+	trail       []engine.Vec
 }
 
 type GameScene struct {
@@ -65,6 +86,9 @@ type GameScene struct {
 	tanks             []*battleTank
 	spawnIndex        int
 	activePlayerIndex int
+	wind              int
+	windDirection     int
+	projectile        *projectile
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -81,20 +105,32 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		// shot:        shotDrawable,
 		layers: engine.NewLayers(numLayers),
 	}
+	s.wind = s.rng.Intn(101)
+	if s.rng.Intn(2) == 0 {
+		s.windDirection = -1
+	} else {
+		s.windDirection = 1
+	}
 
 	players := s.playersForRound()
 	s.worldWidth = worldWidthForPlayers(len(players))
 
-	b := models.NewBackgroundWithWidth(s.worldWidth)
-	gr := models.NewGroundWithWidth(s.worldWidth)
+	battlefieldHeight := s.battlefieldHeight()
+	b := models.NewBackgroundWithSize(s.worldWidth, battlefieldHeight)
+	gr := models.NewGroundWithSize(s.worldWidth, battlefieldHeight)
 	s.ground = gr
 
 	for tankIndex, player := range players {
 		tank := models.NewTank(player.Name, player.Color)
-		battleTank := &battleTank{player: player}
+		battleTank := &battleTank{
+			player:         player,
+			power:          100,
+			selectedWeapon: 1,
+			shotStrength:   20,
+		}
 		tankBody := tank.Body()
 		if tankBody != nil {
-			tankBody.Pos = randomTankDropPosition(s.rng, tankIndex, len(players), tankBody.Size, s.worldWidth)
+			tankBody.Pos = randomTankDropPosition(s.rng, tankIndex, len(players), tankBody.Size, s.worldWidth, battlefieldHeight)
 			tankBody.Velocity = engine.Vec{Y: 2 + s.rng.Float64()*4}
 			battleTank.body = tankBody
 		}
@@ -176,7 +212,7 @@ func worldWidthForPlayers(playerCount int) float64 {
 	return screen.Width + float64(playerCount)*screen.Width*0.75
 }
 
-func randomTankDropPosition(rng *rand.Rand, index, count int, size *engine.Vec, worldWidth float64) *engine.Vec {
+func randomTankDropPosition(rng *rand.Rand, index, count int, size *engine.Vec, worldWidth, battlefieldHeight float64) *engine.Vec {
 	screen := core.Config().Screen
 	laneWidth := worldWidth / float64(count)
 	laneCenter := laneWidth*float64(index) + laneWidth/2
@@ -188,7 +224,7 @@ func randomTankDropPosition(rng *rand.Rand, index, count int, size *engine.Vec, 
 
 	return &engine.Vec{
 		X: x,
-		Y: -size.Y - rng.Float64()*screen.Height*0.55,
+		Y: -size.Y - rng.Float64()*battlefieldHeight*0.55,
 	}
 }
 
@@ -225,6 +261,12 @@ func (s *GameScene) Update() error {
 	// s.message = &text
 	case phaseBattle:
 		s.updateSpawnSequence()
+		if s.allTanksLanded() {
+			s.clampActiveShotStrength()
+			s.handleBattleInput()
+			s.updateProjectile()
+			s.updateBattleCamera()
+		}
 		s.layers.Update()
 		s.advanceSpawnSequence()
 		s.chooseStartingPlayerAfterLanding()
@@ -300,6 +342,8 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	camera.Translate(-s.cameraX, 0)
 
 	s.layers.Draw(&camera, screen)
+	s.drawProjectile(screen, &camera)
+	s.drawGameHUD(screen)
 	s.drawDebugScrollBar(screen)
 
 	switch s.phase {
@@ -354,9 +398,327 @@ func (s *GameScene) drawDebugScrollBar(screen *ebiten.Image) {
 	drawFrame(screen, handle, color.RGBA{R: 230, G: 230, B: 230, A: 240}, colornames.White)
 }
 
+func (s *GameScene) handleBattleInput() {
+	if s.projectile != nil || s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
+		return
+	}
+	tank := s.activeTank()
+	if tank == nil {
+		return
+	}
+
+	if shouldAdjustStrength(ebiten.KeyArrowUp) {
+		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+1)
+	}
+	if shouldAdjustStrength(ebiten.KeyArrowDown) {
+		tank.shotStrength = maxInt(1, tank.shotStrength-1)
+	}
+
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		x, y := ebiten.CursorPosition()
+		for i := 0; i < 2; i++ {
+			if image.Pt(x, y).In(s.weaponSlotRect(i)) {
+				tank.selectedWeapon = i
+				break
+			}
+		}
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
+		s.fireActiveWeapon()
+	}
+}
+
+func shouldAdjustStrength(key ebiten.Key) bool {
+	if inpututil.IsKeyJustPressed(key) {
+		return true
+	}
+	held := inpututil.KeyPressDuration(key)
+	return held > 18 && held%4 == 0
+}
+
+func (s *GameScene) fireActiveWeapon() {
+	tank := s.activeTank()
+	if tank == nil || tank.cannon == nil {
+		return
+	}
+
+	bounds := tank.cannon.Bounds()
+	muzzle := bounds.Center().Add(engine.V(bounds.W()/2+7, 0).Rotated(tank.cannon.Rot))
+	speed := 4.5 + float64(tank.shotStrength)*0.28
+	s.projectile = &projectile{
+		pos:         *muzzle,
+		prev:        *muzzle,
+		velocity:    engine.V(speed, 0).Rotated(tank.cannon.Rot),
+		weaponIndex: tank.selectedWeapon,
+		trail:       []engine.Vec{*muzzle},
+	}
+}
+
+func (s *GameScene) updateProjectile() {
+	if s.projectile == nil {
+		return
+	}
+
+	const gravity = 0.16
+	windAcceleration := float64(s.windDirection*s.wind) * 0.00065
+
+	p := s.projectile
+	p.prev = p.pos
+	p.velocity.X += windAcceleration
+	p.velocity.Y += gravity
+	p.pos = *p.pos.Add(p.velocity)
+	p.trail = append(p.trail, p.pos)
+	if len(p.trail) > 260 {
+		p.trail = p.trail[len(p.trail)-260:]
+	}
+
+	if p.pos.X >= 0 && p.pos.X <= s.worldWidth {
+		s.cameraGoal = math.Max(0, math.Min(s.worldWidth-core.Config().Screen.Width, p.pos.X-core.Config().Screen.Width/2))
+		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.12, 0.4)
+	}
+
+	battlefieldHeight := s.battlefieldHeight()
+	if p.pos.X < -80 || p.pos.X > s.worldWidth+80 || p.pos.Y > battlefieldHeight+80 || p.pos.Y < -battlefieldHeight {
+		s.finishProjectile()
+		return
+	}
+
+	if p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
+		s.finishProjectile()
+		return
+	}
+
+	hitBounds := engine.R(p.pos.X-3, p.pos.Y-3, p.pos.X+3, p.pos.Y+3)
+	for i, tank := range s.tanks {
+		if i == s.activePlayerIndex || tank == nil || tank.body == nil {
+			continue
+		}
+		if engine.Collision(hitBounds, tank.body.Bounds().ScaledAtCenter(0.78)) {
+			if damage := gameWeapons()[p.weaponIndex].damage; damage > 0 {
+				tank.power = maxInt(0, tank.power-damage)
+				tank.shotStrength = minInt(tank.shotStrength, maxInt(1, tank.power))
+			}
+			s.finishProjectile()
+			return
+		}
+	}
+}
+
+func (s *GameScene) finishProjectile() {
+	s.projectile = nil
+	if len(s.tanks) == 0 {
+		return
+	}
+	s.activePlayerIndex = (s.activePlayerIndex + 1) % len(s.tanks)
+	s.clampActiveShotStrength()
+	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+}
+
+func (s *GameScene) updateBattleCamera() {
+	if s.projectile != nil || s.activePlayerIndex < 0 {
+		return
+	}
+	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.08, 0.35)
+}
+
+func (s *GameScene) activeTank() *battleTank {
+	if s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
+		return nil
+	}
+	return s.tanks[s.activePlayerIndex]
+}
+
+func (s *GameScene) maxShotStrength() int {
+	tank := s.activeTank()
+	if tank == nil || tank.power <= 0 {
+		return 1
+	}
+	return tank.power
+}
+
+func (s *GameScene) clampActiveShotStrength() {
+	tank := s.activeTank()
+	if tank == nil {
+		return
+	}
+	tank.shotStrength = minInt(tank.shotStrength, s.maxShotStrength())
+	tank.shotStrength = maxInt(1, tank.shotStrength)
+}
+
+func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
+	if s.projectile == nil {
+		return
+	}
+
+	weapons := gameWeapons()
+	c := weapons[s.projectile.weaponIndex].color
+	for i, point := range s.projectile.trail {
+		projected := point.Project(camera)
+		alpha := uint8(70 + minInt(185, i*4))
+		drawFilledRect(screen, image.Rect(int(projected.X)-2, int(projected.Y)-2, int(projected.X)+2, int(projected.Y)+2), color.RGBA{R: c.R, G: c.G, B: c.B, A: alpha})
+	}
+	projected := s.projectile.pos.Project(camera)
+	drawFilledRect(screen, image.Rect(int(projected.X)-4, int(projected.Y)-4, int(projected.X)+4, int(projected.Y)+4), c)
+}
+
+func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
+	screenCfg := core.Config().Screen
+	hud := image.Rect(0, int(s.battlefieldHeight()), int(screenCfg.Width), int(screenCfg.Height))
+	drawFilledRect(screen, hud, color.RGBA{R: 5, G: 7, B: 10, A: 242})
+	drawFilledRect(screen, image.Rect(hud.Min.X, hud.Min.Y, hud.Max.X, hud.Min.Y+2), color.RGBA{R: 245, G: 246, B: 214, A: 255})
+
+	active := s.activeTank()
+	playerName := "Spieler"
+	playerColor := color.RGBA{R: 255, G: 160, B: 28, A: 255}
+	power := 100
+	shotStrength := 20
+	if active != nil {
+		playerName = active.player.Name
+		playerColor = active.player.Color
+		power = active.power
+		shotStrength = active.shotStrength
+	}
+
+	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+14, 112, hud.Min.Y+44), "Staerke", shotStrength)
+	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+50, 122, hud.Min.Y+80), "Winkel", int(math.Round(s.cannonAngleDegrees())))
+
+	centerX := int(screenCfg.Width) / 2
+	drawText(screen, playerName, centerX-42, hud.Min.Y+30, playerColor)
+	drawButton(screen, image.Rect(centerX-64, hud.Min.Y+44, centerX+64, hud.Min.Y+76), "Feuer!")
+
+	windArrow := "->"
+	if s.windDirection < 0 {
+		windArrow = "<-"
+	}
+	rightX := int(screenCfg.Width) - 170
+	drawText(screen, "Wind: "+strconv.Itoa(s.wind)+" ("+windArrow+")", rightX, hud.Min.Y+30, colornames.White)
+	drawText(screen, "Power: "+strconv.Itoa(power), rightX, hud.Min.Y+55, colornames.White)
+
+	for i := 0; i < 12; i++ {
+		s.drawWeaponSlot(screen, i)
+	}
+}
+
+func (s *GameScene) drawHUDStepper(screen *ebiten.Image, r image.Rectangle, label string, value int) {
+	buttonW := 24
+	drawButton(screen, image.Rect(r.Min.X, r.Min.Y, r.Min.X+buttonW, r.Min.Y+22), "-")
+	drawButton(screen, image.Rect(r.Min.X+buttonW+4, r.Min.Y, r.Min.X+buttonW*2+4, r.Min.Y+22), "+")
+	drawText(screen, label+": "+strconv.Itoa(value), r.Min.X+buttonW*2+12, r.Min.Y+17, colornames.White)
+}
+
+func (s *GameScene) drawWeaponSlot(screen *ebiten.Image, index int) {
+	r := s.weaponSlotRect(index)
+	weapons := gameWeapons()
+	unlocked := index < len(weapons) && weapons[index].unlocked
+	fill := color.RGBA{R: 28, G: 32, B: 37, A: 255}
+	border := color.RGBA{R: 94, G: 101, B: 110, A: 255}
+	if !unlocked {
+		fill = color.RGBA{R: 34, G: 35, B: 37, A: 255}
+		border = color.RGBA{R: 52, G: 55, B: 60, A: 255}
+	}
+	active := s.activeTank()
+	if unlocked && active != nil && index == active.selectedWeapon {
+		border = color.RGBA{R: 236, G: 58, B: 63, A: 255}
+	}
+
+	drawFrame(screen, r, fill, border)
+	inner := image.Rect(r.Min.X+7, r.Min.Y+7, r.Max.X-7, r.Max.Y-7)
+	if unlocked {
+		drawWeaponIcon(screen, inner, weapons[index])
+		return
+	}
+	drawLockedWeaponIcon(screen, inner, index)
+}
+
+func (s *GameScene) weaponSlotRect(index int) image.Rectangle {
+	screenCfg := core.Config().Screen
+	slot := 42
+	gap := 9
+	total := 12*slot + 11*gap
+	x := int(screenCfg.Width)/2 - total/2 + index*(slot+gap)
+	y := int(screenCfg.Height) - 52
+	return image.Rect(x, y, x+slot, y+slot)
+}
+
+func drawWeaponIcon(screen *ebiten.Image, r image.Rectangle, weapon weapon) {
+	switch weapon.name {
+	case "Training":
+		drawFilledRect(screen, image.Rect(r.Min.X+11, r.Min.Y+11, r.Max.X-11, r.Max.Y-11), weapon.color)
+	case "Blaster":
+		drawFilledRect(screen, image.Rect(r.Min.X+4, r.Min.Y+18, r.Max.X-4, r.Min.Y+23), weapon.color)
+		drawFilledRect(screen, image.Rect(r.Max.X-12, r.Min.Y+13, r.Max.X-5, r.Min.Y+28), color.RGBA{R: 255, G: 222, B: 76, A: 255})
+	default:
+		drawFilledRect(screen, r, weapon.color)
+	}
+}
+
+func drawLockedWeaponIcon(screen *ebiten.Image, r image.Rectangle, index int) {
+	c := color.RGBA{R: 77, G: 80, B: 84, A: 255}
+	switch index % 5 {
+	case 0:
+		drawFilledRect(screen, image.Rect(r.Min.X+5, r.Min.Y+16, r.Max.X-5, r.Min.Y+21), c)
+	case 1:
+		drawFilledRect(screen, image.Rect(r.Min.X+13, r.Min.Y+4, r.Min.X+19, r.Max.Y-4), c)
+		drawFilledRect(screen, image.Rect(r.Min.X+4, r.Min.Y+13, r.Max.X-4, r.Min.Y+19), c)
+	case 2:
+		drawFilledRect(screen, image.Rect(r.Min.X+7, r.Min.Y+7, r.Max.X-7, r.Max.Y-7), c)
+	case 3:
+		drawFilledRect(screen, image.Rect(r.Min.X+3, r.Min.Y+22, r.Max.X-3, r.Min.Y+27), c)
+		drawFilledRect(screen, image.Rect(r.Min.X+8, r.Min.Y+15, r.Max.X-8, r.Min.Y+20), c)
+	default:
+		drawFilledRect(screen, image.Rect(r.Min.X+15, r.Min.Y+3, r.Min.X+21, r.Max.Y-3), c)
+	}
+}
+
+func (s *GameScene) cannonAngleDegrees() float64 {
+	tank := s.activeTank()
+	if tank == nil || tank.cannon == nil {
+		return 0
+	}
+	angle := -engine.RadToDeg(tank.cannon.Rot)
+	for angle < 0 {
+		angle += 360
+	}
+	for angle >= 360 {
+		angle -= 360
+	}
+	if angle > 180 {
+		angle = 360 - angle
+	}
+	return angle
+}
+
+func gameWeapons() []weapon {
+	return []weapon{
+		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 0, unlocked: true},
+		{name: "Blaster", color: color.RGBA{R: 235, G: 49, B: 55, A: 255}, damage: 20, unlocked: true},
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func debugScrollBarRect() image.Rectangle {
 	screen := core.Config().Screen
-	return image.Rect(12, int(screen.Height)-22, int(screen.Width)-12, int(screen.Height)-6)
+	y := int(screen.Height) - gameHUDHeight - 20
+	return image.Rect(12, y, int(screen.Width)-12, y+16)
+}
+
+func (s *GameScene) battlefieldHeight() float64 {
+	return math.Max(120, core.Config().Screen.Height-gameHUDHeight)
 }
 
 // func (s *GameScene) reflectInBounds(source *engine.Sprite, dt float64) {
@@ -459,10 +821,24 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 	if s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
 		return
 	}
-	if s.tanks[s.activePlayerIndex].cannon != source {
+	tank := s.tanks[s.activePlayerIndex]
+	if tank == nil || tank.cannon != source {
+		return
+	}
+	if s.projectile != nil {
 		return
 	}
 	s.behaviorRotateOnButton(source)
+	s.clampCannonRotationToTank(source, tank.body)
+}
+
+func (s *GameScene) clampCannonRotationToTank(cannon, tank *engine.Sprite) {
+	if cannon == nil || tank == nil {
+		return
+	}
+	minRot := tank.Rot - math.Pi
+	maxRot := tank.Rot
+	cannon.Rot = math.Max(minRot, math.Min(maxRot, cannon.Rot))
 }
 
 func (s *GameScene) behaviorRedRotateOnButton(source *engine.Sprite, dt float64) {

@@ -23,11 +23,15 @@ func NewGround() Ground {
 }
 
 func NewGroundWithWidth(width float64) Ground {
+	return NewGroundWithSize(width, core.Config().Screen.Height)
+}
+
+func NewGroundWithSize(width, height float64) Ground {
 
 	m := Ground{Name: "ground"}
 	m.Sprites = engine.NewSprites()
 	m.Position = &engine.Vec{X: 0, Y: 0}
-	m.Size = &engine.Vec{X: width, Y: core.Config().Screen.Height}
+	m.Size = &engine.Vec{X: width, Y: height}
 
 	groundSprite := &engine.Sprite{}
 	groundSprite.Tag = m.Name

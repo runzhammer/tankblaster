@@ -20,11 +20,15 @@ func NewBackground() Background {
 }
 
 func NewBackgroundWithWidth(width float64) Background {
+	return NewBackgroundWithSize(width, core.Config().Screen.Height)
+}
+
+func NewBackgroundWithSize(width, height float64) Background {
 
 	m := Background{}
 	m.Sprites = engine.NewSprites()
 	m.Position = &engine.Vec{X: 0, Y: 0}
-	m.Size = &engine.Vec{X: width, Y: core.Config().Screen.Height}
+	m.Size = &engine.Vec{X: width, Y: height}
 
 	backgroundSprite := engine.NewSprite(r.BackgroundSprite, r.BackgroundSpec)
 	backgroundSprite.Tag = "background"
