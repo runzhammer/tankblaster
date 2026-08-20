@@ -10,6 +10,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	_ "image/jpeg"
 	_ "image/png"
@@ -42,6 +43,11 @@ const debugScrollMode = true
 
 const gameHUDHeight = 132
 
+const (
+	projectileRadius       = 4
+	impactRadiusMultiplier = 4
+)
+
 type battleTank struct {
 	player         PlayerConfig
 	body           *engine.Sprite
@@ -54,10 +60,13 @@ type battleTank struct {
 }
 
 type weapon struct {
-	name     string
-	color    color.RGBA
-	damage   int
-	unlocked bool
+	name            string
+	color           color.RGBA
+	damage          int
+	unlocked        bool
+	showTrail       bool
+	roundProjectile bool
+	damagesTerrain  bool
 }
 
 type projectile struct {
@@ -66,6 +75,13 @@ type projectile struct {
 	velocity    engine.Vec
 	weaponIndex int
 	trail       []engine.Vec
+}
+
+type impactAnimation struct {
+	pos      engine.Vec
+	radius   float64
+	age      int
+	duration int
 }
 
 type GameScene struct {
@@ -85,10 +101,13 @@ type GameScene struct {
 
 	tanks             []*battleTank
 	spawnIndex        int
+	spawnPauseFrames  int
 	activePlayerIndex int
 	wind              int
 	windDirection     int
 	projectile        *projectile
+	impacts           []impactAnimation
+	turnAdvanceDelay  int
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -262,10 +281,17 @@ func (s *GameScene) Update() error {
 	case phaseBattle:
 		s.updateSpawnSequence()
 		if s.allTanksLanded() {
-			s.clampActiveShotStrength()
-			s.handleBattleInput()
-			s.updateProjectile()
-			s.updateBattleCamera()
+			s.updateImpacts()
+			if s.turnAdvanceDelay > 0 {
+				s.updateTurnAdvanceDelay()
+			} else {
+				s.clampActiveShotStrength()
+				s.handleBattleInput()
+				s.updateProjectile()
+				if s.turnAdvanceDelay == 0 {
+					s.updateBattleCamera()
+				}
+			}
 		}
 		s.layers.Update()
 		s.advanceSpawnSequence()
@@ -311,6 +337,10 @@ func (s *GameScene) advanceSpawnSequence() {
 	if tank == nil || !tank.landed {
 		return
 	}
+	if s.spawnPauseFrames > 0 {
+		s.spawnPauseFrames--
+		return
+	}
 
 	s.spawnIndex++
 	if s.spawnIndex < len(s.tanks) {
@@ -342,6 +372,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	camera.Translate(-s.cameraX, 0)
 
 	s.layers.Draw(&camera, screen)
+	s.drawImpacts(screen, &camera)
 	s.drawProjectile(screen, &camera)
 	s.drawGameHUD(screen)
 	s.drawDebugScrollBar(screen)
@@ -485,6 +516,10 @@ func (s *GameScene) updateProjectile() {
 	}
 
 	if p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
+		if s.onGroundImpact(p) {
+			s.projectile = nil
+			return
+		}
 		s.finishProjectile()
 		return
 	}
@@ -510,9 +545,59 @@ func (s *GameScene) finishProjectile() {
 	if len(s.tanks) == 0 {
 		return
 	}
+	s.advanceActivePlayer()
+}
+
+func (s *GameScene) advanceActivePlayer() {
+	if len(s.tanks) == 0 {
+		return
+	}
 	s.activePlayerIndex = (s.activePlayerIndex + 1) % len(s.tanks)
 	s.clampActiveShotStrength()
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+}
+
+func (s *GameScene) onGroundImpact(p *projectile) bool {
+	if p == nil {
+		return false
+	}
+	weapons := gameWeapons()
+	if p.weaponIndex < 0 || p.weaponIndex >= len(weapons) || !weapons[p.weaponIndex].damagesTerrain {
+		return false
+	}
+
+	radius := float64(projectileRadius * impactRadiusMultiplier)
+	s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
+	s.impacts = append(s.impacts, impactAnimation{
+		pos:      p.pos,
+		radius:   radius,
+		duration: s.impactAnimationFrames(),
+	})
+	s.turnAdvanceDelay = s.impactAnimationFrames() + s.impactPauseFrames()
+	return true
+}
+
+func (s *GameScene) updateImpacts() {
+	if len(s.impacts) == 0 {
+		return
+	}
+	active := s.impacts[:0]
+	for _, impact := range s.impacts {
+		impact.age++
+		if impact.age < impact.duration {
+			active = append(active, impact)
+		}
+	}
+	s.impacts = active
+}
+
+func (s *GameScene) updateTurnAdvanceDelay() {
+	s.turnAdvanceDelay--
+	if s.turnAdvanceDelay > 0 {
+		return
+	}
+	s.turnAdvanceDelay = 0
+	s.advanceActivePlayer()
 }
 
 func (s *GameScene) updateBattleCamera() {
@@ -554,13 +639,37 @@ func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
 
 	weapons := gameWeapons()
 	c := weapons[s.projectile.weaponIndex].color
-	for i, point := range s.projectile.trail {
-		projected := point.Project(camera)
-		alpha := uint8(70 + minInt(185, i*4))
-		drawFilledRect(screen, image.Rect(int(projected.X)-2, int(projected.Y)-2, int(projected.X)+2, int(projected.Y)+2), color.RGBA{R: c.R, G: c.G, B: c.B, A: alpha})
+	if weapons[s.projectile.weaponIndex].showTrail {
+		for i, point := range s.projectile.trail {
+			if i%2 != 0 {
+				continue
+			}
+			projected := point.Project(camera)
+			alpha := uint8(70 + minInt(185, i*4))
+			drawFilledRect(screen, image.Rect(int(projected.X)-2, int(projected.Y)-2, int(projected.X)+2, int(projected.Y)+2), color.RGBA{R: c.R, G: c.G, B: c.B, A: alpha})
+		}
 	}
 	projected := s.projectile.pos.Project(camera)
-	drawFilledRect(screen, image.Rect(int(projected.X)-4, int(projected.Y)-4, int(projected.X)+4, int(projected.Y)+4), c)
+	if weapons[s.projectile.weaponIndex].roundProjectile {
+		vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), projectileRadius, c, true)
+		return
+	}
+	drawFilledRect(screen, image.Rect(int(projected.X)-projectileRadius, int(projected.Y)-projectileRadius, int(projected.X)+projectileRadius, int(projected.Y)+projectileRadius), c)
+}
+
+func (s *GameScene) drawImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, impact := range s.impacts {
+		projected := impact.pos.Project(camera)
+		progress := float64(impact.age) / math.Max(1, float64(impact.duration))
+		cycleProgress := math.Mod(progress*2, 1)
+		steps := 8
+		for i := steps; i >= 1; i-- {
+			t := float64(i) / float64(steps)
+			radius := float32(impact.radius * t)
+			red := uint8(255 * math.Pow(t, 0.7) * cycleProgress)
+			vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), radius, color.RGBA{R: red, G: 0, B: 0, A: 220}, true)
+		}
+	}
 }
 
 func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
@@ -674,26 +783,18 @@ func drawLockedWeaponIcon(screen *ebiten.Image, r image.Rectangle, index int) {
 
 func (s *GameScene) cannonAngleDegrees() float64 {
 	tank := s.activeTank()
-	if tank == nil || tank.cannon == nil {
+	if tank == nil || tank.cannon == nil || tank.body == nil {
 		return 0
 	}
-	angle := -engine.RadToDeg(tank.cannon.Rot)
-	for angle < 0 {
-		angle += 360
-	}
-	for angle >= 360 {
-		angle -= 360
-	}
-	if angle > 180 {
-		angle = 360 - angle
-	}
-	return angle
+	leftLimit := tank.body.Rot - math.Pi
+	displayAngle := engine.RadToDeg(tank.cannon.Rot - leftLimit)
+	return math.Max(0, math.Min(180, displayAngle))
 }
 
 func gameWeapons() []weapon {
 	return []weapon{
-		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 0, unlocked: true},
-		{name: "Blaster", color: color.RGBA{R: 235, G: 49, B: 55, A: 255}, damage: 20, unlocked: true},
+		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 0, unlocked: true, showTrail: true},
+		{name: "Blaster", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 20, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
 	}
 }
 
@@ -773,9 +874,26 @@ func (s *GameScene) behaviorFallOntoGround(ground models.Ground, tank *battleTan
 		ground.AlignSpriteToSurface(source)
 		if tank != nil {
 			tank.landed = true
+			s.spawnPauseFrames = s.spawnLandingPauseFrames()
 		}
 		source.Steps = nil
 	}
+}
+
+func (s *GameScene) spawnLandingPauseFrames() int {
+	return secondsToFrames(core.Config().Gameplay.SpawnLandingPauseSeconds)
+}
+
+func (s *GameScene) impactAnimationFrames() int {
+	return secondsToFrames(core.Config().Gameplay.ImpactAnimationSeconds)
+}
+
+func (s *GameScene) impactPauseFrames() int {
+	return secondsToFrames(core.Config().Gameplay.ImpactPauseSeconds)
+}
+
+func secondsToFrames(seconds float64) int {
+	return maxInt(0, int(math.Round(seconds*60)))
 }
 
 func (s *GameScene) chooseStartingPlayerAfterLanding() {

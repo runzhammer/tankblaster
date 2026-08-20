@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/runzhammer/gamedemo/pkg/core"
@@ -419,11 +420,10 @@ func drawFrame(screen *ebiten.Image, r image.Rectangle, fill, border color.Color
 }
 
 func drawFilledRect(screen *ebiten.Image, r image.Rectangle, c color.Color) {
-	img := ebiten.NewImage(r.Dx(), r.Dy())
-	img.Fill(c)
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(float64(r.Min.X), float64(r.Min.Y))
-	screen.DrawImage(img, op)
+	if r.Empty() {
+		return
+	}
+	ebitenutil.DrawRect(screen, float64(r.Min.X), float64(r.Min.Y), float64(r.Dx()), float64(r.Dy()), c)
 }
 
 func drawText(screen *ebiten.Image, value string, x, y int, c color.Color) {

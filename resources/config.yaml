@@ -3,3 +3,27 @@ window:
   height: 768
 tanks:
   count: 2
+gameplay:
+  spawn_landing_pause_seconds: 1
+  impact_animation_seconds: 0.6
+  impact_pause_seconds: 1
+debug:
+  enabled: true
+  start_scene: game
+  game:
+    rounds: 10
+    players:
+      - kind: human
+        name: Spieler 1
+        color:
+          r: 11
+          g: 31
+          b: 255
+          a: 255
+      - kind: human
+        name: Spieler 2
+        color:
+          r: 230
+          g: 34
+          b: 45
+          a: 255

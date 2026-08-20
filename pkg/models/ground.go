@@ -16,6 +16,9 @@ type Ground struct {
 	Sprites  *engine.Sprites
 	Position *engine.Vec
 	Size     *engine.Vec
+	Image    *ebiten.Image
+	pixels   *image.RGBA
+	surface  []float64
 }
 
 func NewGround() Ground {
@@ -32,12 +35,16 @@ func NewGroundWithSize(width, height float64) Ground {
 	m.Sprites = engine.NewSprites()
 	m.Position = &engine.Vec{X: 0, Y: 0}
 	m.Size = &engine.Vec{X: width, Y: height}
+	m.pixels = generateGroundImage(m.Size.X, m.Size.Y)
+	m.surface = make([]float64, m.pixels.Bounds().Dx())
+	m.refreshSurfaceRange(0, len(m.surface)-1)
+	m.Image = ebiten.NewImageFromImage(m.pixels)
 
 	groundSprite := &engine.Sprite{}
 	groundSprite.Tag = m.Name
 	groundSprite.Pos = m.Position
 	groundSprite.Size = m.Size
-	groundSprite.Drawable = engine.NewImageDrawable(generateGroundImage(m.Size.X, m.Size.Y))
+	groundSprite.Drawable = engine.NewImageDrawable(m.Image)
 
 	m.Sprites.Add(groundSprite)
 
@@ -56,6 +63,16 @@ func (g Ground) SurfaceY(x float64) float64 {
 	if x > width {
 		x = width
 	}
+	if len(g.surface) > 0 {
+		column := int(math.Round(x))
+		if column < 0 {
+			column = 0
+		}
+		if column >= len(g.surface) {
+			column = len(g.surface) - 1
+		}
+		return g.surface[column]
+	}
 
 	t := x / width
 	base := g.Size.Y - 118
@@ -73,6 +90,55 @@ func (g Ground) SurfaceY(x float64) float64 {
 	minY := g.Size.Y - 245
 	maxY := g.Size.Y - 34
 	return math.Max(minY, math.Min(maxY, y))
+}
+
+func (g Ground) ApplyCrater(cx, cy, radius float64) {
+	if g.pixels == nil || g.Image == nil || radius <= 0 {
+		return
+	}
+
+	bounds := g.pixels.Bounds()
+	minX := maxInt(0, int(math.Floor(cx-radius)))
+	maxX := minInt(bounds.Dx()-1, int(math.Ceil(cx+radius)))
+	minY := maxInt(0, int(math.Floor(cy-radius)))
+	maxY := minInt(bounds.Dy()-1, int(math.Ceil(cy+radius)))
+	r2 := radius * radius
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			dx := float64(x) - cx
+			dy := float64(y) - cy
+			if dx*dx+dy*dy <= r2 {
+				g.pixels.SetRGBA(x, y, color.RGBA{})
+			}
+		}
+	}
+
+	g.refreshSurfaceRange(minX, maxX)
+	g.Image.WritePixels(g.pixels.Pix)
+}
+
+func (g Ground) refreshSurfaceRange(minX, maxX int) {
+	if g.pixels == nil || len(g.surface) == 0 {
+		return
+	}
+	if minX < 0 {
+		minX = 0
+	}
+	if maxX >= len(g.surface) {
+		maxX = len(g.surface) - 1
+	}
+
+	bounds := g.pixels.Bounds()
+	for x := minX; x <= maxX; x++ {
+		g.surface[x] = float64(bounds.Dy())
+		for y := 0; y < bounds.Dy(); y++ {
+			if g.pixels.RGBAAt(x, y).A > 0 {
+				g.surface[x] = float64(y)
+				break
+			}
+		}
+	}
 }
 
 func cartoonHill(t, center, width, height float64) float64 {
@@ -101,7 +167,7 @@ func (g Ground) AlignSpriteToSurface(source *engine.Sprite) {
 	}
 }
 
-func generateGroundImage(width, height float64) *ebiten.Image {
+func generateGroundImage(width, height float64) *image.RGBA {
 	w := int(math.Ceil(width))
 	h := int(math.Ceil(height))
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -120,7 +186,7 @@ func generateGroundImage(width, height float64) *ebiten.Image {
 		}
 	}
 
-	return ebiten.NewImageFromImage(img)
+	return img
 }
 
 func desertSandColor(depth float64) color.RGBA {
@@ -134,6 +200,20 @@ func desertSandColor(depth float64) color.RGBA {
 		return blendRGBA(top, mid, depth/0.42)
 	}
 	return blendRGBA(mid, bottom, (depth-0.42)/0.58)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func blendRGBA(a, b color.RGBA, t float64) color.RGBA {
