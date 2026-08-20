@@ -1,6 +1,6 @@
 package resources
 
-import _ "embed"
+import "embed"
 
 //go:embed config.yaml
 var GameConfig []byte
@@ -40,3 +40,21 @@ var PlayerComputer []byte
 
 //go:embed zero_power_smoke.gif
 var ZeroPowerSmokeGIF []byte
+
+//go:embed shop_entry.png
+var ShopEntry []byte
+
+//go:embed shop_class_a.png
+var ShopClassA []byte
+
+//go:embed shop_class_b.png
+var ShopClassB []byte
+
+//go:embed taining-ammo.png
+var TrainingAmmoSelected []byte
+
+//go:embed taining-ammo-deslected.png
+var TrainingAmmoDeselected []byte
+
+//go:embed class-a-*.png class-b.png
+var ShopListScreens embed.FS

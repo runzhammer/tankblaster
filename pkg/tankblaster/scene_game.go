@@ -30,6 +30,7 @@ type Phase uint8
 
 const (
 	phaseBattle Phase = iota
+	phaseShop
 	phaseBlueVictory
 	phaseRedVictory
 )
@@ -53,9 +54,19 @@ const (
 	fallDamageStepPixels   = 20
 	fallDamagePerStep      = 10
 	zeroPowerFrames        = 216
+	creditsPerScorePoint   = 500
+	roundTransitionSeconds = 5
+)
+
+type damageCause uint8
+
+const (
+	damageCauseDirect damageCause = iota
+	damageCauseFall
 )
 
 type battleTank struct {
+	playerIndex    int
 	player         PlayerConfig
 	body           *engine.Sprite
 	cannon         *engine.Sprite
@@ -65,6 +76,7 @@ type battleTank struct {
 	fallTargetY    float64
 	fallDamage     bool
 	power          int
+	score          int
 	tint           color.RGBA
 	zeroPowerShown bool
 	selectedWeapon int
@@ -131,18 +143,37 @@ type GameScene struct {
 	cameraGoal float64
 	rng        *rand.Rand
 
-	tanks             []*battleTank
-	spawnIndex        int
-	spawnPauseFrames  int
-	activePlayerIndex int
-	wind              int
-	windDirection     int
-	projectile        *projectile
-	impacts           []impactAnimation
-	sandFalls         []sandFallAnimation
-	zeroPowerEffects  []zeroPowerAnimation
-	zeroPowerSmoke    gifAnimation
-	turnAdvanceDelay  int
+	tanks                []*battleTank
+	players              []PlayerConfig
+	scores               []int
+	roundScores          []int
+	credits              []int
+	inventories          []shopInventory
+	roundNumber          int
+	spawnIndex           int
+	spawnPauseFrames     int
+	activePlayerIndex    int
+	wind                 int
+	windDirection        int
+	projectile           *projectile
+	impacts              []impactAnimation
+	sandFalls            []sandFallAnimation
+	zeroPowerEffects     []zeroPowerAnimation
+	zeroPowerSmoke       gifAnimation
+	shop                 shopAssets
+	turnAdvanceDelay     int
+	roundTransitionDelay int
+	roundSeriesComplete  bool
+	showScoreTable       bool
+	lastDamageSource     *battleTank
+	shopPlayerOrder      []int
+	shopPlayerCursor     int
+	shopHoverClass       int
+	shopMode             shopMode
+	shopSelectedIndex    int
+	shopClassAStock      []int
+	shopClassBStock      []int
+	shopClassBItems      []int
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -152,18 +183,55 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		g:                 game,
 		phase:             phaseBattle,
 		rng:               rand.New(rand.NewSource(time.Now().UnixNano())),
-		spawnIndex:        0,
 		activePlayerIndex: -1,
-		// cannonSFX:   cannonSFX,
-		// messageFace: messageFace,
-		// shot:        shotDrawable,
-		layers: engine.NewLayers(numLayers),
+		roundNumber:       1,
 	}
 	smoke, err := loadGIFAnimation(r.ZeroPowerSmokeGIF)
 	if err != nil {
 		return nil, err
 	}
 	s.zeroPowerSmoke = smoke
+	s.shop = shopAssets{
+		entry:         mustImageFromPNG(r.ShopEntry),
+		classA:        mustImageFromPNG(r.ShopClassA),
+		classB:        mustImageFromPNG(r.ShopClassB),
+		human:         mustImageFromPNG(r.PlayerHuman),
+		computer:      mustImageFromPNG(r.PlayerComputer),
+		trainingOn:    mustImageFromPNG(r.TrainingAmmoSelected),
+		trainingOff:   mustImageFromPNG(r.TrainingAmmoDeselected),
+		classAScreens: loadShopClassAScreens(),
+		classBScreen:  mustImageFromPNG(mustReadShopScreen("class-b.png")),
+	}
+	s.players = s.playersForRound()
+	s.scores = make([]int, len(s.players))
+	s.roundScores = make([]int, len(s.players))
+	s.credits = make([]int, len(s.players))
+	s.inventories = makeShopInventories(len(s.players))
+	s.startRound()
+
+	return s, nil
+}
+
+func (s *GameScene) startRound() {
+	s.phase = phaseBattle
+	s.layers = engine.NewLayers(numLayers)
+	s.spawnIndex = 0
+	s.spawnPauseFrames = 0
+	s.activePlayerIndex = -1
+	s.projectile = nil
+	s.impacts = nil
+	s.sandFalls = nil
+	s.zeroPowerEffects = nil
+	s.turnAdvanceDelay = 0
+	s.roundTransitionDelay = 0
+	s.roundSeriesComplete = false
+	s.lastDamageSource = nil
+	s.shopPlayerOrder = nil
+	s.shopPlayerCursor = 0
+	s.shopHoverClass = 0
+	s.shopMode = shopModeEntry
+	s.shopSelectedIndex = 0
+	s.roundScores = make([]int, len(s.players))
 	s.wind = s.rng.Intn(101)
 	if s.rng.Intn(2) == 0 {
 		s.windDirection = -1
@@ -171,26 +239,28 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		s.windDirection = 1
 	}
 
-	players := s.playersForRound()
-	s.worldWidth = worldWidthForPlayers(len(players))
+	s.worldWidth = worldWidthForPlayers(len(s.players))
 
 	battlefieldHeight := s.battlefieldHeight()
 	b := models.NewBackgroundWithSize(s.worldWidth, battlefieldHeight)
 	gr := models.NewGroundWithSize(s.worldWidth, battlefieldHeight)
 	s.ground = gr
+	s.tanks = nil
 
-	for tankIndex, player := range players {
+	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
 		battleTank := &battleTank{
+			playerIndex:    tankIndex,
 			player:         player,
 			power:          100,
+			score:          s.scoreForPlayer(tankIndex),
 			tint:           player.Color,
 			selectedWeapon: 1,
 			shotStrength:   20,
 		}
 		tankBody := tank.Body()
 		if tankBody != nil {
-			tankBody.Pos = randomTankDropPosition(s.rng, tankIndex, len(players), tankBody.Size, s.worldWidth, battlefieldHeight)
+			tankBody.Pos = randomTankDropPosition(s.rng, tankIndex, len(s.players), tankBody.Size, s.worldWidth, battlefieldHeight)
 			tankBody.Velocity = engine.Vec{Y: 2 + s.rng.Float64()*4}
 			battleTank.body = tankBody
 		}
@@ -212,28 +282,6 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	s.cameraGoal = s.cameraTargetForTank(0)
 	s.layers[layerGround] = engine.AddSprites(s.layers[layerGround], gr.Sprites)
 	s.layers[layerBackground] = engine.AddSprites(s.layers[layerBackground], b.Sprites)
-
-	// iter = t1.Sprites.All().Iterator()
-	// for obj, ok := iter(); ok; obj, ok = iter() {
-	// 	s.layers[layerTanks].Add(obj)
-	// }
-
-	// iter = gr.Sprites.All().Iterator()
-	// for obj, ok := iter(); ok; obj, ok = iter() {
-	// 	s.layers[layerGround].Add(obj)
-	// }
-
-	// iter = b.Sprites.All().Iterator()
-	// for obj, ok := iter(); ok; obj, ok = iter() {
-	// 	s.layers[layerBackground].Add(obj)
-	// }
-
-	// log.Printf("t1.Sprite: %v", t1.Sprite)
-	// log.Printf("t2.Sprite: %v", t2.Sprite)
-	// log.Printf("gr.Sprite: %v", gr.Sprite)
-	// log.Printf("b.Sprite: %v", b.Sprite)
-
-	return s, nil
 }
 
 func (s *GameScene) playersForRound() []PlayerConfig {
@@ -301,6 +349,9 @@ func (g *GameScene) Movement(source *engine.Sprite) {
 
 func (s *GameScene) Update() error {
 	s.time += 1
+	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		s.showScoreTable = !s.showScoreTable
+	}
 	if s.allTanksLanded() {
 		s.handleDebugScroll()
 	}
@@ -324,6 +375,10 @@ func (s *GameScene) Update() error {
 		s.updateImpacts()
 		s.updateSandFalls()
 		s.updateZeroPowerEffects()
+		if s.roundTransitionDelay > 0 || s.roundSeriesComplete {
+			s.updateRoundTransition()
+			return nil
+		}
 		if s.allTanksLanded() {
 			if s.turnAdvanceDelay > 0 {
 				s.updateTurnAdvanceDelay()
@@ -339,6 +394,8 @@ func (s *GameScene) Update() error {
 		s.layers.Update()
 		s.advanceSpawnSequence()
 		s.chooseStartingPlayerAfterLanding()
+	case phaseShop:
+		s.handleShopInput()
 	case phaseBlueVictory:
 		fallthrough
 	case phaseRedVictory:
@@ -459,6 +516,11 @@ func (a gifAnimation) frameAt(tick int) *ebiten.Image {
 }
 
 func (s *GameScene) Draw(screen *ebiten.Image) {
+	if s.phase == phaseShop {
+		s.drawShop(screen)
+		return
+	}
+
 	camera := ebiten.GeoM{}
 	camera.Translate(-s.cameraX, 0)
 
@@ -469,6 +531,8 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawProjectile(screen, &camera)
 	s.drawGameHUD(screen)
 	s.drawDebugScrollBar(screen)
+	s.drawScoreTable(screen)
+	s.drawRoundTransitionBanner(screen)
 
 	switch s.phase {
 	case phaseBattle:
@@ -540,8 +604,8 @@ func (s *GameScene) handleBattleInput() {
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		x, y := ebiten.CursorPosition()
-		for i := 0; i < 2; i++ {
-			if image.Pt(x, y).In(s.weaponSlotRect(i)) {
+		for i := 0; i < s.weaponSlotCount(); i++ {
+			if image.Pt(x, y).In(s.weaponSlotRect(i)) && s.canSelectWeaponSlot(tank, i) {
 				tank.selectedWeapon = i
 				break
 			}
@@ -561,9 +625,67 @@ func shouldAdjustStrength(key ebiten.Key) bool {
 	return held > 18 && held%4 == 0
 }
 
+func (s *GameScene) canSelectWeaponSlot(tank *battleTank, slot int) bool {
+	if tank == nil || slot < 0 {
+		return false
+	}
+	if slot == 0 {
+		return true
+	}
+	return s.ammoForWeaponSlot(tank.playerIndex, slot) > 0
+}
+
+func (s *GameScene) consumeSelectedWeaponAmmo(tank *battleTank) bool {
+	if tank == nil {
+		return false
+	}
+	slot := tank.selectedWeapon
+	if slot == 0 {
+		return true
+	}
+	itemIndex := s.itemIndexForWeaponSlot(slot)
+	if itemIndex < 0 || s.shopItemCountForPlayer(tank.playerIndex, itemIndex) <= 0 {
+		return false
+	}
+	s.ensureInventory(tank.playerIndex)
+	if itemIndex < len(s.inventories[tank.playerIndex].classA) && s.inventories[tank.playerIndex].classA[itemIndex] > 0 {
+		s.inventories[tank.playerIndex].classA[itemIndex]--
+		return true
+	}
+	if itemIndex < len(s.inventories[tank.playerIndex].classB) && s.inventories[tank.playerIndex].classB[itemIndex] > 0 {
+		s.inventories[tank.playerIndex].classB[itemIndex]--
+		return true
+	}
+	return false
+}
+
+func (s *GameScene) ammoForWeaponSlot(playerIndex, slot int) int {
+	if slot == 0 {
+		return 1
+	}
+	return s.shopItemCountForPlayer(playerIndex, s.itemIndexForWeaponSlot(slot))
+}
+
+func (s *GameScene) itemIndexForWeaponSlot(slot int) int {
+	if slot <= 0 {
+		return -1
+	}
+	return slot - 1
+}
+
+func (s *GameScene) weaponForProjectile(p *projectile) weapon {
+	if p != nil && p.weaponIndex == 0 {
+		return gameWeapons()[0]
+	}
+	return gameWeapons()[1]
+}
+
 func (s *GameScene) fireActiveWeapon() {
 	tank := s.activeTank()
 	if tank == nil || tank.cannon == nil {
+		return
+	}
+	if !s.consumeSelectedWeaponAmmo(tank) {
 		return
 	}
 
@@ -577,6 +699,7 @@ func (s *GameScene) fireActiveWeapon() {
 		weaponIndex: tank.selectedWeapon,
 		trail:       []engine.Vec{*muzzle},
 	}
+	s.lastDamageSource = tank
 }
 
 func (s *GameScene) updateProjectile() {
@@ -623,8 +746,8 @@ func (s *GameScene) updateProjectile() {
 			continue
 		}
 		if engine.Collision(hitBounds, tank.body.Bounds().ScaledAtCenter(0.78)) {
-			if damage := gameWeapons()[p.weaponIndex].damage; damage > 0 {
-				s.damageTank(tank, damage)
+			if damage := s.weaponForProjectile(p).damage; damage > 0 {
+				s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
 				s.darkenTank(tank, 0.10)
 			}
 			s.projectile = nil
@@ -646,9 +769,31 @@ func (s *GameScene) advanceActivePlayer() {
 	if len(s.tanks) == 0 {
 		return
 	}
-	s.activePlayerIndex = (s.activePlayerIndex + 1) % len(s.tanks)
+	if s.endRoundIfOnlyOneTankRemains() {
+		return
+	}
+	s.lastDamageSource = nil
+	next := s.nextActivePlayerIndex()
+	if next < 0 {
+		return
+	}
+	s.activePlayerIndex = next
 	s.clampActiveShotStrength()
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+}
+
+func (s *GameScene) nextActivePlayerIndex() int {
+	if len(s.tanks) == 0 {
+		return -1
+	}
+	start := s.activePlayerIndex
+	for offset := 1; offset <= len(s.tanks); offset++ {
+		index := (start + offset) % len(s.tanks)
+		if s.tankCanAct(s.tanks[index]) {
+			return index
+		}
+	}
+	return -1
 }
 
 func (s *GameScene) delayTurnAdvance(frames int) {
@@ -663,8 +808,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	if p == nil {
 		return false
 	}
-	weapons := gameWeapons()
-	if p.weaponIndex < 0 || p.weaponIndex >= len(weapons) || !weapons[p.weaponIndex].damagesTerrain {
+	if !s.weaponForProjectile(p).damagesTerrain {
 		return false
 	}
 
@@ -735,6 +879,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 		return
 	}
 	s.turnAdvanceDelay = 0
+	if s.endRoundIfOnlyOneTankRemains() {
+		return
+	}
 	s.advanceActivePlayer()
 }
 
@@ -793,9 +940,12 @@ func (s *GameScene) clampActiveShotStrength() {
 	}
 	tank.shotStrength = minInt(tank.shotStrength, s.maxShotStrength())
 	tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength)
+	if !s.canSelectWeaponSlot(tank, tank.selectedWeapon) {
+		tank.selectedWeapon = 0
+	}
 }
 
-func (s *GameScene) damageTank(tank *battleTank, damage int) {
+func (s *GameScene) damageTank(tank *battleTank, damage int, attacker *battleTank, cause damageCause) {
 	if tank == nil || damage <= 0 {
 		return
 	}
@@ -803,8 +953,58 @@ func (s *GameScene) damageTank(tank *battleTank, damage int) {
 	tank.power = maxInt(0, tank.power-damage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
+		s.awardZeroPowerScore(tank, attacker, cause)
 		s.startZeroPowerAnimation(tank)
 	}
+}
+
+func (s *GameScene) awardZeroPowerScore(defeated, attacker *battleTank, cause damageCause) {
+	if defeated == nil || attacker == nil {
+		return
+	}
+	if defeated == attacker {
+		s.addScore(defeated.playerIndex, -3)
+		for _, tank := range s.tanks {
+			if tank != nil && tank != defeated {
+				s.addScore(tank.playerIndex, 1)
+			}
+		}
+		return
+	}
+	switch cause {
+	case damageCauseFall:
+		s.addScore(attacker.playerIndex, 1)
+	default:
+		s.addScore(attacker.playerIndex, 3)
+	}
+}
+
+func (s *GameScene) addScore(playerIndex, points int) {
+	if playerIndex < 0 {
+		return
+	}
+	if len(s.scores) <= playerIndex {
+		next := make([]int, playerIndex+1)
+		copy(next, s.scores)
+		s.scores = next
+	}
+	if len(s.roundScores) <= playerIndex {
+		next := make([]int, playerIndex+1)
+		copy(next, s.roundScores)
+		s.roundScores = next
+	}
+	s.scores[playerIndex] += points
+	s.roundScores[playerIndex] += points
+	if playerIndex < len(s.tanks) && s.tanks[playerIndex] != nil {
+		s.tanks[playerIndex].score = s.scores[playerIndex]
+	}
+}
+
+func (s *GameScene) scoreForPlayer(playerIndex int) int {
+	if playerIndex < 0 || playerIndex >= len(s.scores) {
+		return 0
+	}
+	return s.scores[playerIndex]
 }
 
 func (s *GameScene) startZeroPowerAnimation(tank *battleTank) {
@@ -921,9 +1121,9 @@ func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
 		return
 	}
 
-	weapons := gameWeapons()
-	c := weapons[s.projectile.weaponIndex].color
-	if weapons[s.projectile.weaponIndex].showTrail {
+	weapon := s.weaponForProjectile(s.projectile)
+	c := weapon.color
+	if weapon.showTrail {
 		for i, point := range s.projectile.trail {
 			if i%2 != 0 {
 				continue
@@ -934,7 +1134,7 @@ func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
 		}
 	}
 	projected := s.projectile.pos.Project(camera)
-	if weapons[s.projectile.weaponIndex].roundProjectile {
+	if weapon.roundProjectile {
 		vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), projectileRadius, c, true)
 		return
 	}
@@ -1024,9 +1224,138 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 	drawText(screen, "Wind: "+strconv.Itoa(s.wind)+" ("+windArrow+")", rightX, hud.Min.Y+30, colornames.White)
 	drawText(screen, "Power: "+strconv.Itoa(power), rightX, hud.Min.Y+55, colornames.White)
 
-	for i := 0; i < 12; i++ {
+	for i := 0; i < s.weaponSlotCount(); i++ {
 		s.drawWeaponSlot(screen, i)
 	}
+}
+
+func (s *GameScene) drawScoreTable(screen *ebiten.Image) {
+	if !s.showScoreTable {
+		return
+	}
+
+	screenCfg := core.Config().Screen
+	tableW := int(math.Min(620, screenCfg.Width-80))
+	if tableW < 360 {
+		tableW = int(screenCfg.Width) - 32
+	}
+	rowH := 30
+	tableH := 112 + rowH*len(s.tanks)
+	left := int(screenCfg.Width)/2 - tableW/2
+	top := int(s.battlefieldHeight())/2 - tableH/2
+	if top < 42 {
+		top = 42
+	}
+	right := left + tableW
+	bottom := top + tableH
+
+	drawFilledRect(screen, image.Rect(left-14, top-16, right+14, bottom+12), color.RGBA{R: 22, G: 10, B: 38, A: 118})
+
+	title := "Runde " + strconv.Itoa(maxInt(1, s.roundNumber)) + " von " + strconv.Itoa(maxInt(1, s.g.rounds))
+	drawCenteredText(screen, title, image.Rect(left, top, right, top+24), colornames.Yellow)
+
+	headerY := top + 60
+	nameX := left + 80
+	scoreX := left + tableW/2 + 60
+	statusX := right - 110
+	lineColor := color.RGBA{R: 250, G: 246, B: 230, A: 230}
+	textColor := color.RGBA{R: 250, G: 246, B: 255, A: 255}
+
+	drawText(screen, "Spieler", nameX, headerY, textColor)
+	drawText(screen, "Erfolg", scoreX, headerY, textColor)
+	drawText(screen, "Status", statusX, headerY, textColor)
+
+	separatorY := headerY + 24
+	drawFilledRect(screen, image.Rect(left+18, separatorY, right-18, separatorY+2), lineColor)
+	drawFilledRect(screen, image.Rect(left+tableW/2-8, headerY-22, left+tableW/2-6, bottom-18), lineColor)
+	drawFilledRect(screen, image.Rect(right-170, headerY-22, right-168, bottom-18), lineColor)
+
+	rows := s.scoreTableTanks()
+	for i, tank := range rows {
+		if tank == nil {
+			continue
+		}
+		y := separatorY + 32 + i*rowH
+		status := "aktiv"
+		if tank.power <= 0 {
+			status = "aus"
+		}
+		drawText(screen, tank.player.Name, nameX, y, textColor)
+		drawText(screen, strconv.Itoa(s.scoreForPlayer(tank.playerIndex)), scoreX+28, y, textColor)
+		drawText(screen, status, statusX+18, y, textColor)
+	}
+}
+
+func (s *GameScene) scoreTableTanks() []*battleTank {
+	if len(s.tanks) == 0 {
+		return nil
+	}
+	rows := make([]*battleTank, 0, len(s.tanks))
+	if s.activePlayerIndex >= 0 && s.activePlayerIndex < len(s.tanks) {
+		rows = append(rows, s.tanks[s.activePlayerIndex])
+	}
+	for index, tank := range s.tanks {
+		if index == s.activePlayerIndex {
+			continue
+		}
+		rows = append(rows, tank)
+	}
+	return rows
+}
+
+func (s *GameScene) drawRoundTransitionBanner(screen *ebiten.Image) {
+	if s.roundTransitionDelay <= 0 && !s.roundSeriesComplete {
+		return
+	}
+
+	screenCfg := core.Config().Screen
+	bannerW := int(math.Min(760, screenCfg.Width-140))
+	if bannerW < 320 {
+		bannerW = int(screenCfg.Width) - 32
+	}
+	bannerH := 56
+	left := int(screenCfg.Width)/2 - bannerW/2
+	top := int(s.battlefieldHeight()*0.53) - bannerH/2
+	r := image.Rect(left, top, left+bannerW, top+bannerH)
+
+	drawFrame(screen, r, color.RGBA{R: 4, G: 4, B: 4, A: 232}, colornames.Yellow)
+
+	played := maxInt(0, minInt(s.roundNumber, maxInt(1, s.g.rounds)))
+	remaining := maxInt(0, maxInt(1, s.g.rounds)-played)
+	textValue := strconv.Itoa(played) + " gespielt, noch " + strconv.Itoa(remaining) + " Runden."
+	drawCenteredText(screen, textValue, r, colornames.White)
+}
+
+func (s *GameScene) updateRoundTransition() {
+	if s.roundSeriesComplete {
+		return
+	}
+	s.roundTransitionDelay--
+	if s.roundTransitionDelay > 0 {
+		return
+	}
+	s.roundTransitionDelay = 0
+	if s.roundNumber >= maxInt(1, s.g.rounds) {
+		s.roundSeriesComplete = true
+		return
+	}
+	s.roundNumber++
+	s.beginShop()
+}
+
+func drawScaledImage(screen, img *ebiten.Image, r image.Rectangle) {
+	if img == nil || r.Empty() {
+		return
+	}
+	bounds := img.Bounds()
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(float64(r.Dx())/float64(bounds.Dx()), float64(r.Dy())/float64(bounds.Dy()))
+	op.GeoM.Translate(float64(r.Min.X), float64(r.Min.Y))
+	screen.DrawImage(img, op)
+}
+
+func insetRect(r image.Rectangle, inset int) image.Rectangle {
+	return image.Rect(r.Min.X+inset, r.Min.Y+inset, r.Max.X-inset, r.Max.Y-inset)
 }
 
 func (s *GameScene) drawHUDStepper(screen *ebiten.Image, r image.Rectangle, label string, value int) {
@@ -1039,20 +1368,36 @@ func (s *GameScene) drawHUDStepper(screen *ebiten.Image, r image.Rectangle, labe
 func (s *GameScene) drawWeaponSlot(screen *ebiten.Image, index int) {
 	r := s.weaponSlotRect(index)
 	weapons := gameWeapons()
+	shopItemIndex := s.itemIndexForWeaponSlot(index)
 	unlocked := index < len(weapons) && weapons[index].unlocked
+	active := s.activeTank()
+	if index > 0 {
+		unlocked = active != nil && s.shopItemCountForPlayer(active.playerIndex, shopItemIndex) > 0
+	}
 	fill := color.RGBA{R: 28, G: 32, B: 37, A: 255}
 	border := color.RGBA{R: 94, G: 101, B: 110, A: 255}
 	if !unlocked {
 		fill = color.RGBA{R: 34, G: 35, B: 37, A: 255}
 		border = color.RGBA{R: 52, G: 55, B: 60, A: 255}
 	}
-	active := s.activeTank()
 	if unlocked && active != nil && index == active.selectedWeapon {
 		border = color.RGBA{R: 236, G: 58, B: 63, A: 255}
 	}
 
 	drawFrame(screen, r, fill, border)
 	inner := image.Rect(r.Min.X+7, r.Min.Y+7, r.Max.X-7, r.Max.Y-7)
+	if index == 0 {
+		if active != nil && active.selectedWeapon == 0 {
+			drawScaledImage(screen, s.shop.trainingOn, r)
+		} else {
+			drawScaledImage(screen, s.shop.trainingOff, r)
+		}
+		return
+	}
+	if shopItemIndex >= 0 {
+		s.drawShopItemIcon(screen, shopItemIndex, inner, !unlocked)
+		return
+	}
 	if unlocked {
 		drawWeaponIcon(screen, inner, weapons[index])
 		return
@@ -1062,19 +1407,47 @@ func (s *GameScene) drawWeaponSlot(screen *ebiten.Image, index int) {
 
 func (s *GameScene) weaponSlotRect(index int) image.Rectangle {
 	screenCfg := core.Config().Screen
-	slot := 42
-	gap := 9
-	total := 12*slot + 11*gap
+	slot := 32
+	gap := 5
+	count := s.weaponSlotCount()
+	total := count*slot + (count-1)*gap
 	x := int(screenCfg.Width)/2 - total/2 + index*(slot+gap)
-	y := int(screenCfg.Height) - 52
+	y := int(screenCfg.Height) - 44
 	return image.Rect(x, y, x+slot, y+slot)
+}
+
+func (s *GameScene) weaponSlotCount() int {
+	return 1 + len(shopItems())
+}
+
+func (s *GameScene) shopItemCountForActivePlayer(itemIndex int) int {
+	tank := s.activeTank()
+	if tank == nil {
+		return 0
+	}
+	return s.shopItemCountForPlayer(tank.playerIndex, itemIndex)
+}
+
+func (s *GameScene) shopItemCountForPlayer(playerIndex, itemIndex int) int {
+	if playerIndex < 0 || playerIndex >= len(s.inventories) || itemIndex < 0 {
+		return 0
+	}
+	inventory := s.inventories[playerIndex]
+	count := 0
+	if itemIndex < len(inventory.classA) {
+		count += inventory.classA[itemIndex]
+	}
+	if itemIndex < len(inventory.classB) {
+		count += inventory.classB[itemIndex]
+	}
+	return count
 }
 
 func drawWeaponIcon(screen *ebiten.Image, r image.Rectangle, weapon weapon) {
 	switch weapon.name {
 	case "Training":
 		drawFilledRect(screen, image.Rect(r.Min.X+11, r.Min.Y+11, r.Max.X-11, r.Max.Y-11), weapon.color)
-	case "Blaster":
+	case "Granate":
 		drawFilledRect(screen, image.Rect(r.Min.X+4, r.Min.Y+18, r.Max.X-4, r.Min.Y+23), weapon.color)
 		drawFilledRect(screen, image.Rect(r.Max.X-12, r.Min.Y+13, r.Max.X-5, r.Min.Y+28), color.RGBA{R: 255, G: 222, B: 76, A: 255})
 	default:
@@ -1113,7 +1486,7 @@ func (s *GameScene) cannonAngleDegrees() float64 {
 func gameWeapons() []weapon {
 	return []weapon{
 		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 0, unlocked: true, showTrail: true},
-		{name: "Blaster", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 30, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
+		{name: "Granate", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 30, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
 	}
 }
 
@@ -1140,30 +1513,6 @@ func debugScrollBarRect() image.Rectangle {
 func (s *GameScene) battlefieldHeight() float64 {
 	return math.Max(120, core.Config().Screen.Height-gameHUDHeight)
 }
-
-// func (s *GameScene) reflectInBounds(source *engine.Sprite, dt float64) {
-// 	objBounds := source.Bounds()
-// 	switch {
-// 	case objBounds.Min.X <= 0:
-// 		source.Velocity = engine.V(-source.Velocity.X, source.Velocity.Y)
-// 		source.Rot = source.Velocity.Angle()
-// 		source.Pos = &engine.V(0, source.Pos.Y)
-// 	case objBounds.Max.X >= core.Config().Screen.Width:
-// 		source.Velocity = engine.V(-source.Velocity.X, source.Velocity.Y)
-// 		source.Rot = source.Velocity.Angle()
-// 		source.Pos = &engine.V(core.Config().Screen.Width-source.Size.X, source.Pos.Y)
-// 	}
-// 	switch {
-// 	case objBounds.Min.Y <= 0:
-// 		source.Velocity = engine.V(source.Velocity.X, -source.Velocity.Y)
-// 		source.Rot = source.Velocity.Angle()
-// 		source.Pos = &engine.V(source.Pos.X, 0)
-// 	case objBounds.Max.Y >= core.Config().Screen.Height:
-// 		source.Velocity = engine.V(source.Velocity.X, -source.Velocity.Y)
-// 		source.Rot = source.Velocity.Angle()
-// 		source.Pos = &engine.V(source.Pos.X, core.Config().Screen.Height-source.Size.Y)
-// 	}
-// }
 
 func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {
 	if MoveLeft() {
@@ -1224,7 +1573,7 @@ func (s *GameScene) applyFallDamage(tank *battleTank, fallDistance float64) {
 	}
 	damage := int(fallDistance * float64(fallDamagePerStep) / float64(fallDamageStepPixels))
 	damage = maxInt(1, damage)
-	s.damageTank(tank, damage)
+	s.damageTank(tank, damage, s.lastDamageSource, damageCauseFall)
 }
 
 func (s *GameScene) spawnLandingPauseFrames() int {
@@ -1251,7 +1600,11 @@ func (s *GameScene) chooseStartingPlayerAfterLanding() {
 	if s.activePlayerIndex >= 0 || !s.allTanksLanded() {
 		return
 	}
-	s.activePlayerIndex = s.rng.Intn(len(s.tanks))
+	living := s.livingTankIndexes()
+	if len(living) == 0 {
+		return
+	}
+	s.activePlayerIndex = living[s.rng.Intn(len(living))]
 }
 
 func (s *GameScene) allTanksLanded() bool {
@@ -1264,6 +1617,56 @@ func (s *GameScene) allTanksLanded() bool {
 		}
 	}
 	return true
+}
+
+func (s *GameScene) tankCanAct(tank *battleTank) bool {
+	return tank != nil && tank.power > 0 && tank.landed && !tank.falling
+}
+
+func (s *GameScene) livingTankIndexes() []int {
+	indexes := make([]int, 0, len(s.tanks))
+	for index, tank := range s.tanks {
+		if s.tankCanAct(tank) {
+			indexes = append(indexes, index)
+		}
+	}
+	return indexes
+}
+
+func (s *GameScene) livingTankCount() int {
+	count := 0
+	for _, tank := range s.tanks {
+		if tank != nil && tank.power > 0 {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *GameScene) endRoundIfOnlyOneTankRemains() bool {
+	if s.roundTransitionDelay > 0 || s.roundSeriesComplete {
+		return true
+	}
+	if len(s.tanks) <= 1 || s.livingTankCount() > 1 {
+		return false
+	}
+	s.creditRoundScores()
+	s.roundTransitionDelay = secondsToFrames(roundTransitionSeconds)
+	return true
+}
+
+func (s *GameScene) creditRoundScores() {
+	if len(s.credits) < len(s.roundScores) {
+		next := make([]int, len(s.roundScores))
+		copy(next, s.credits)
+		s.credits = next
+	}
+	for index, score := range s.roundScores {
+		if score <= 0 {
+			continue
+		}
+		s.credits[index] += score * creditsPerScorePoint
+	}
 }
 
 func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behavior {
@@ -1294,7 +1697,7 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 	if tank == nil || tank.cannon != source {
 		return
 	}
-	if s.projectile != nil {
+	if s.projectile != nil || s.roundTransitionDelay > 0 || s.roundSeriesComplete {
 		return
 	}
 	s.behaviorRotateOnButton(source)
@@ -1309,132 +1712,3 @@ func (s *GameScene) clampCannonRotationToTank(cannon, tank *engine.Sprite) {
 	maxRot := tank.Rot
 	cannon.Rot = math.Max(minRot, math.Min(maxRot, cannon.Rot))
 }
-
-func (s *GameScene) behaviorRedRotateOnButton(source *engine.Sprite, dt float64) {
-	// if RedRotate() {
-	// 	// rotate
-	// 	source.Rot += engine.DegToRad(-tankRotatesPerSecond*360) * dt
-	// 	s.redShotDelay = 0
-	// } else {
-	// 	source.Velocity = engine.V(tankSpeed, 0).Rotated(source.Rot)
-	// 	engine.Movement(source, dt)
-	// 	if s.redShotDelay > 1.0/autoShotPerSecond {
-	// 		s.spawnRedShots()
-	// 		s.redShotDelay = 0
-	// 	}
-	// }
-}
-
-func (s *GameScene) spawnBlueShots() {
-
-	// bounds := s.bluePlayer.Bounds()
-	// pos1 := bounds.Center().Add(engine.V(bounds.W()/2, 2).Rotated(s.bluePlayer.Rot))
-	// pos2 := bounds.Center().Add(engine.V(bounds.W()/2, -8).Rotated(s.bluePlayer.Rot))
-
-	// blueBullet1 := &engine.Sprite{
-	// 	Tag:      tagBlueBullet,
-	// 	Pos:      pos1,
-	// 	Size:     engine.V(8, 8),
-	// 	Drawable: s.shot,
-	// 	Velocity: engine.V(bulletSpeed, 0).Rotated(s.bluePlayer.Rot),
-	// 	Steps: engine.MakeBehaviors(
-	// 		engine.Movement,
-	// 	),
-	// 	PostSteps: engine.MakeBehaviors(
-	// 		s.behaviorRemoveOutOfBounds,
-	// 	),
-	// }
-	// blueBullet2 := &engine.Sprite{
-	// 	Tag:      tagBlueBullet,
-	// 	Pos:      pos2,
-	// 	Size:     engine.V(8, 8),
-	// 	Drawable: s.shot,
-	// 	Velocity: engine.V(bulletSpeed, 0).Rotated(s.bluePlayer.Rot),
-	// 	Steps: engine.MakeBehaviors(
-	// 		engine.Movement,
-	// 	),
-	// 	PostSteps: engine.MakeBehaviors(
-	// 		s.behaviorRemoveOutOfBounds,
-	// 	),
-	// }
-	// s.layers[layerBullets].Add(blueBullet1)
-	// s.layers[layerBullets].Add(blueBullet2)
-
-	// if !s.g.context.Muted() {
-	// 	s.cannonSFX.Play()
-	// }
-}
-
-func (s *GameScene) spawnRedShots() {
-
-	// bounds := s.redPlayer.Bounds()
-	// offset := engine.V(bounds.H()/2, -8).Rotated(s.redPlayer.Rot)
-	// pos := bounds.Center().Add(offset)
-
-	// redBullet := &engine.Sprite{
-	// 	Tag:      tagRedBullet,
-	// 	Pos:      pos,
-	// 	Size:     engine.V(14, 14),
-	// 	Drawable: s.shot,
-	// 	Velocity: engine.V(bulletSpeed, 0).Rotated(s.redPlayer.Rot),
-	// 	Steps: engine.MakeBehaviors(
-	// 		engine.Movement,
-	// 	),
-	// 	PostSteps: engine.MakeBehaviors(
-	// 		s.behaviorRemoveOutOfBounds,
-	// 	),
-	// }
-	// s.layers[layerBullets].Add(redBullet)
-
-	// if !s.g.context.Muted() {
-	// 	s.cannonSFX.Play()
-	// }
-}
-
-// func (s *GameScene) behaviorRemoveOutOfBounds(source *engine.Sprite, dt float64) {
-// 	if !engine.Collision(source.Bounds(), core.Config().Screen.Bounds) {
-// 		s.layers[layerBullets].Remove(source)
-// 	}
-// }
-
-// func (s *gameScene) behaviorRedHitsBlueBullet(source *engine.Sprite, dt float64) {
-// 	if s.phase != phaseBattle {
-// 		return
-// 	}
-// 	sourceBounds := source.Bounds().ScaledAtCenter(tankCollisionScale)
-// 	iter := s.layers.TagIterator(tagBlueBullet)
-// 	for bullet, ok := iter(); ok; bullet, ok = iter() {
-// 		if engine.Collision(sourceBounds, bullet.Bounds()) {
-// 			s.g.blueScore++
-// 			s.phase = phaseBlueVictory
-// 			s.onVictory("Blue", colornames.Cadetblue)
-// 			break
-// 		}
-// 	}
-// }
-
-// func (s *gameScene) behaviorBlueHitsRedBullet(source *engine.Sprite, dt float64) {
-// 	if s.phase != phaseBattle {
-// 		return
-// 	}
-// 	sourceBounds := source.Bounds().ScaledAtCenter(tankCollisionScale)
-// 	iter := s.layers.TagIterator(tagRedBullet)
-// 	for bullet, ok := iter(); ok; bullet, ok = iter() {
-// 		if engine.Collision(sourceBounds, bullet.Bounds()) {
-// 			s.g.redScore++
-// 			s.phase = phaseRedVictory
-// 			s.onVictory("Red", colornames.Indianred)
-// 			break
-// 		}
-// 	}
-// }
-
-// func (s *gameScene) onVictory(winner string, textColor color.Color) {
-// 	s.victoryTime = victoryMessageDuration
-
-// 	saying := winningMessages[rand.Intn(len(winningMessages))]
-// 	victoryMessage := fmt.Sprintf(saying, winner)
-
-// 	text := engine.NewText(s.messageFace, textColor, victoryMessage)
-// 	s.message = &text
-// }

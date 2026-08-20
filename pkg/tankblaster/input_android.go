@@ -1,28 +1,35 @@
 package tankblaster
 
 import (
-	"github.com/hajimehoshi/ebiten"
-	"github.com/runzhammer/gamedemo/pkg/core"
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 func Begin() bool {
-	return len(ebiten.Touches()) > 0
+	return len(ebiten.AppendTouchIDs(nil)) > 0
 }
 
-func BlueRotate() bool {
-	for _, touch := range ebiten.Touches() {
-		x, _ := touch.Position()
-		if x < core.ScreenWidth/2 {
+func MoveLeft() bool {
+	return false
+}
+
+func MoveRight() bool {
+	return false
+}
+
+func RotateLeft() bool {
+	for _, id := range ebiten.AppendTouchIDs(nil) {
+		x, _ := ebiten.TouchPosition(id)
+		if x < ScreenWidth/2 {
 			return true
 		}
 	}
 	return false
 }
 
-func RedRotate() bool {
-	for _, touch := range ebiten.Touches() {
-		x, _ := touch.Position()
-		if x > core.ScreenWidth/2 {
+func RotateRight() bool {
+	for _, id := range ebiten.AppendTouchIDs(nil) {
+		x, _ := ebiten.TouchPosition(id)
+		if x > ScreenWidth/2 {
 			return true
 		}
 	}
