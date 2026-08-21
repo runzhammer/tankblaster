@@ -48,14 +48,19 @@ const debugScrollMode = true
 const gameHUDHeight = 132
 
 const (
-	projectileRadius       = 4
-	impactRadiusMultiplier = 4
-	sandFallFrames         = 12
-	fallDamageStepPixels   = 20
-	fallDamagePerStep      = 10
-	zeroPowerFrames        = 216
-	creditsPerScorePoint   = 500
-	roundTransitionSeconds = 5
+	projectileRadius        = 4
+	impactRadiusMultiplier  = 4
+	directHitDamage         = 50
+	impactSplashMinDamage   = 10
+	impactSplashMaxDamage   = 40
+	largeGrenadeScale       = 1.8
+	largeGrenadeImpactScale = 3.0
+	sandFallFrames          = 12
+	fallDamageStepPixels    = 20
+	fallDamagePerStep       = 10
+	zeroPowerFrames         = 216
+	creditsPerScorePoint    = 500
+	roundTransitionSeconds  = 5
 )
 
 type damageCause uint8
@@ -91,6 +96,8 @@ type weapon struct {
 	showTrail       bool
 	roundProjectile bool
 	damagesTerrain  bool
+	projectileScale float64
+	impactScale     float64
 }
 
 type projectile struct {
@@ -243,7 +250,7 @@ func (s *GameScene) startRound() {
 
 	battlefieldHeight := s.battlefieldHeight()
 	b := models.NewBackgroundWithSize(s.worldWidth, battlefieldHeight)
-	gr := models.NewGroundWithSize(s.worldWidth, battlefieldHeight)
+	gr := models.NewRandomGroundWithSize(s.worldWidth, battlefieldHeight, s.rng.Int63())
 	s.ground = gr
 	s.tanks = nil
 
@@ -674,10 +681,14 @@ func (s *GameScene) itemIndexForWeaponSlot(slot int) int {
 }
 
 func (s *GameScene) weaponForProjectile(p *projectile) weapon {
+	weapons := gameWeapons()
 	if p != nil && p.weaponIndex == 0 {
-		return gameWeapons()[0]
+		return weapons[0]
 	}
-	return gameWeapons()[1]
+	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 1 {
+		return weapons[2]
+	}
+	return weapons[1]
 }
 
 func (s *GameScene) fireActiveWeapon() {
@@ -740,7 +751,8 @@ func (s *GameScene) updateProjectile() {
 		return
 	}
 
-	hitBounds := engine.R(p.pos.X-3, p.pos.Y-3, p.pos.X+3, p.pos.Y+3)
+	hitRadius := projectileRadiusForWeapon(s.weaponForProjectile(p))
+	hitBounds := engine.R(p.pos.X-hitRadius, p.pos.Y-hitRadius, p.pos.X+hitRadius, p.pos.Y+hitRadius)
 	for _, tank := range s.tanks {
 		if tank == nil || tank.body == nil {
 			continue
@@ -812,7 +824,8 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 
-	radius := float64(projectileRadius * impactRadiusMultiplier)
+	radius := impactRadiusForWeapon(s.weaponForProjectile(p))
+	s.damageTanksInImpactRadius(p.pos, radius)
 	falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
 	if len(falls) > 0 {
 		s.sandFalls = append(s.sandFalls, sandFallAnimation{
@@ -828,6 +841,30 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	})
 	s.turnAdvanceDelay = s.impactAnimationFrames() + s.impactPauseFrames()
 	return true
+}
+
+func (s *GameScene) damageTanksInImpactRadius(center engine.Vec, radius float64) {
+	if radius <= 0 {
+		return
+	}
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 {
+			continue
+		}
+		distance := distancePointToRect(center, tank.body.Bounds().ScaledAtCenter(0.78))
+		if distance > radius {
+			continue
+		}
+		damage := impactSplashMinDamage + int(math.Round(float64(impactSplashMaxDamage-impactSplashMinDamage)*(1-distance/radius)))
+		damage = maxInt(impactSplashMinDamage, minInt(impactSplashMaxDamage, damage))
+		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
+	}
+}
+
+func distancePointToRect(point engine.Vec, rect engine.Rect) float64 {
+	closestX := math.Max(rect.Min.X, math.Min(point.X, rect.Max.X))
+	closestY := math.Max(rect.Min.Y, math.Min(point.Y, rect.Max.Y))
+	return math.Hypot(point.X-closestX, point.Y-closestY)
 }
 
 func (s *GameScene) updateImpacts() {
@@ -1134,11 +1171,12 @@ func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
 		}
 	}
 	projected := s.projectile.pos.Project(camera)
+	radius := projectileRadiusForWeapon(weapon)
 	if weapon.roundProjectile {
-		vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), projectileRadius, c, true)
+		vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), float32(radius), c, true)
 		return
 	}
-	drawFilledRect(screen, image.Rect(int(projected.X)-projectileRadius, int(projected.Y)-projectileRadius, int(projected.X)+projectileRadius, int(projected.Y)+projectileRadius), c)
+	drawFilledRect(screen, image.Rect(int(projected.X-radius), int(projected.Y-radius), int(projected.X+radius), int(projected.Y+radius)), c)
 }
 
 func (s *GameScene) drawImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
@@ -1209,7 +1247,7 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 		shotStrength = active.shotStrength
 	}
 
-	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+14, 112, hud.Min.Y+44), "Staerke", shotStrength)
+	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+14, 112, hud.Min.Y+44), "Stärke", shotStrength)
 	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+50, 122, hud.Min.Y+80), "Winkel", int(math.Round(s.cannonAngleDegrees())))
 
 	centerX := int(screenCfg.Width) / 2
@@ -1485,9 +1523,26 @@ func (s *GameScene) cannonAngleDegrees() float64 {
 
 func gameWeapons() []weapon {
 	return []weapon{
-		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 0, unlocked: true, showTrail: true},
-		{name: "Granate", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: 30, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
+		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: true},
+		{name: "Granate", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
+		{name: "Große Granate", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true, projectileScale: largeGrenadeScale, impactScale: largeGrenadeImpactScale},
 	}
+}
+
+func projectileRadiusForWeapon(weapon weapon) float64 {
+	scale := weapon.projectileScale
+	if scale <= 0 {
+		scale = 1
+	}
+	return float64(projectileRadius) * scale
+}
+
+func impactRadiusForWeapon(weapon weapon) float64 {
+	scale := weapon.impactScale
+	if scale <= 0 {
+		scale = 1
+	}
+	return float64(projectileRadius*impactRadiusMultiplier) * scale
 }
 
 func minInt(a, b int) int {

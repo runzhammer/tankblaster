@@ -105,6 +105,9 @@ func makeShopInventories(playerCount int) []shopInventory {
 		if len(inventories[i].classA) > 0 {
 			inventories[i].classA[0] = items[0].stock
 		}
+		if core.Config().Debug.Enabled && len(inventories[i].classA) > 1 {
+			inventories[i].classA[1] = 50
+		}
 	}
 	return inventories
 }

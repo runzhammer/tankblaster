@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/runzhammer/gamedemo/pkg/core"
@@ -19,6 +20,7 @@ type Ground struct {
 	Image    *ebiten.Image
 	pixels   *image.RGBA
 	surface  []float64
+	terrain  terrainProfile
 }
 
 type SandFallPixel struct {
@@ -26,6 +28,24 @@ type SandFallPixel struct {
 	FromY int
 	ToY   int
 	Color color.RGBA
+}
+
+type terrainProfile struct {
+	baseFromBottom float64
+	waves          []terrainWave
+	hills          []terrainHill
+}
+
+type terrainWave struct {
+	frequency float64
+	phase     float64
+	amplitude float64
+}
+
+type terrainHill struct {
+	center float64
+	width  float64
+	height float64
 }
 
 func NewGround() Ground {
@@ -37,12 +57,20 @@ func NewGroundWithWidth(width float64) Ground {
 }
 
 func NewGroundWithSize(width, height float64) Ground {
+	return newGroundWithProfile(width, height, defaultTerrainProfile())
+}
 
+func NewRandomGroundWithSize(width, height float64, seed int64) Ground {
+	return newGroundWithProfile(width, height, randomTerrainProfile(seed))
+}
+
+func newGroundWithProfile(width, height float64, terrain terrainProfile) Ground {
 	m := Ground{Name: "ground"}
 	m.Sprites = engine.NewSprites()
 	m.Position = &engine.Vec{X: 0, Y: 0}
 	m.Size = &engine.Vec{X: width, Y: height}
-	m.pixels = generateGroundImage(m.Size.X, m.Size.Y)
+	m.terrain = terrain
+	m.pixels = generateGroundImage(m.Size.X, m.Size.Y, terrain)
 	m.surface = make([]float64, m.pixels.Bounds().Dx())
 	m.refreshSurfaceRange(0, len(m.surface)-1)
 	m.Image = ebiten.NewImageFromImage(m.pixels)
@@ -82,20 +110,20 @@ func (g Ground) SurfaceY(x float64) float64 {
 	}
 
 	t := x / width
-	base := g.Size.Y - 118
-	y := base +
-		math.Sin(t*math.Pi*2.4+0.25)*46 +
-		math.Sin(t*math.Pi*5.7+1.1)*30 +
-		math.Sin(t*math.Pi*11.0+2.6)*12
+	profile := g.terrain
+	if len(profile.waves) == 0 && len(profile.hills) == 0 {
+		profile = defaultTerrainProfile()
+	}
+	y := g.Size.Y - profile.baseFromBottom
+	for _, wave := range profile.waves {
+		y += math.Sin(t*math.Pi*wave.frequency+wave.phase) * wave.amplitude
+	}
+	for _, hill := range profile.hills {
+		y += cartoonHill(t, hill.center, hill.width, hill.height)
+	}
 
-	y += cartoonHill(t, 0.18, 0.11, -68)
-	y += cartoonHill(t, 0.36, 0.09, 58)
-	y += cartoonHill(t, 0.54, 0.12, -54)
-	y += cartoonHill(t, 0.76, 0.10, 64)
-	y += cartoonHill(t, 0.91, 0.08, -42)
-
-	minY := g.Size.Y - 245
-	maxY := g.Size.Y - 34
+	minY := g.Size.Y - 330
+	maxY := g.Size.Y - 56
 	return math.Max(minY, math.Min(maxY, y))
 }
 
@@ -204,12 +232,63 @@ func (g Ground) AlignSpriteToSurface(source *engine.Sprite) {
 	}
 }
 
-func generateGroundImage(width, height float64) *image.RGBA {
+func defaultTerrainProfile() terrainProfile {
+	return terrainProfile{
+		baseFromBottom: 118,
+		waves: []terrainWave{
+			{frequency: 2.4, phase: 0.25, amplitude: 46},
+			{frequency: 5.7, phase: 1.1, amplitude: 30},
+			{frequency: 11.0, phase: 2.6, amplitude: 12},
+		},
+		hills: []terrainHill{
+			{center: 0.18, width: 0.11, height: -68},
+			{center: 0.36, width: 0.09, height: 58},
+			{center: 0.54, width: 0.12, height: -54},
+			{center: 0.76, width: 0.10, height: 64},
+			{center: 0.91, width: 0.08, height: -42},
+		},
+	}
+}
+
+func randomTerrainProfile(seed int64) terrainProfile {
+	rng := rand.New(rand.NewSource(seed))
+	profile := terrainProfile{
+		baseFromBottom: 105 + rng.Float64()*58,
+		waves: []terrainWave{
+			{frequency: 1.5 + rng.Float64()*2.2, phase: rng.Float64() * math.Pi * 2, amplitude: 50 + rng.Float64()*58},
+			{frequency: 4.0 + rng.Float64()*4.6, phase: rng.Float64() * math.Pi * 2, amplitude: 24 + rng.Float64()*42},
+			{frequency: 8.5 + rng.Float64()*8.5, phase: rng.Float64() * math.Pi * 2, amplitude: 8 + rng.Float64()*26},
+		},
+	}
+	if rng.Intn(2) == 0 {
+		profile.waves = append(profile.waves, terrainWave{
+			frequency: 2.5 + rng.Float64()*5.5,
+			phase:     rng.Float64() * math.Pi * 2,
+			amplitude: 18 + rng.Float64()*38,
+		})
+	}
+
+	hillCount := 5 + rng.Intn(5)
+	for i := 0; i < hillCount; i++ {
+		height := 45 + rng.Float64()*95
+		if rng.Intn(2) == 0 {
+			height = -height
+		}
+		profile.hills = append(profile.hills, terrainHill{
+			center: 0.04 + rng.Float64()*0.92,
+			width:  0.045 + rng.Float64()*0.12,
+			height: height,
+		})
+	}
+	return profile
+}
+
+func generateGroundImage(width, height float64, terrain terrainProfile) *image.RGBA {
 	w := int(math.Ceil(width))
 	h := int(math.Ceil(height))
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 
-	ground := Ground{Size: &engine.Vec{X: width, Y: height}}
+	ground := Ground{Size: &engine.Vec{X: width, Y: height}, terrain: terrain}
 	for x := 0; x < w; x++ {
 		surface := int(math.Round(ground.SurfaceY(float64(x))))
 		for y := surface; y < h; y++ {
