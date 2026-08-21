@@ -22,6 +22,7 @@ func (Doedel) Decide(state State, rng *rand.Rand) Decision {
 	strength := doedelStrength(state, target, minStrength, maxStrength, rng)
 
 	return Decision{
+		TargetIndex:  target.Index,
 		WeaponSlot:   doedelWeaponSlot(state.AvailableWeaponSlots, rng),
 		Strength:     strength,
 		AngleDegrees: angle,
@@ -67,7 +68,7 @@ func doedelAngle(state State, target TankState, rng *rand.Rand) float64 {
 	if distance > 450 {
 		base += math.Copysign(12, dx)
 	}
-	angle := base + rng.NormFloat64()*24 + float64(state.WindDirection*state.Wind)*0.035
+	angle := base + state.Memory.AngleBias + rng.NormFloat64()*24 + float64(state.WindDirection*state.Wind)*0.035
 
 	switch roll := rng.Float64(); {
 	case roll < 0.10:
@@ -92,6 +93,7 @@ func doedelStrength(state State, target TankState, minStrength, maxStrength int,
 	active := activeTank(state)
 	distance := math.Abs(target.X - active.X)
 	guess := int(math.Round(distance/9.5)) + rng.Intn(31) - 15
+	guess += int(math.Round(state.Memory.StrengthBias))
 	guess += int(math.Round(float64(state.Wind*state.WindDirection) / 18))
 
 	switch roll := rng.Float64(); {
@@ -137,4 +139,16 @@ func maxIntForDoedel(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func learnDoedel(memory *Memory, lesson Lesson) {
+	if lesson.Hit {
+		memory.StrengthBias *= 0.96
+		memory.AngleBias *= 0.96
+		return
+	}
+
+	errorX := lesson.TargetX - lesson.ImpactX
+	memory.StrengthBias = clampFloat(memory.StrengthBias+errorX*0.006, -14, 14)
+	memory.AngleBias = clampFloat(memory.AngleBias+errorX*0.0018, -10, 10)
 }

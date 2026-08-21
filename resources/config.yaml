@@ -11,7 +11,7 @@ gameplay:
 debug:
   enabled: true
   start_scene: game
-  start_shop: false
+  start_shop: true
   game:
     rounds: 10
     players:
@@ -23,7 +23,7 @@ debug:
       #     b: 255
       #     a: 255
       - kind: computer
-        name: "A. Adel"
+        name: "F. Merz"
         id: 0
         color:
           r: 230
@@ -31,7 +31,7 @@ debug:
           b: 70
           a: 255
       - kind: computer
-        name: "B. Blödel"
+        name: "B. Bartislartfast"
         id: 0
         color:
           r: 200
@@ -39,7 +39,7 @@ debug:
           b: 45
           a: 255
       - kind: computer
-        name: "C. Cödel"
+        name: "C. Koch"
         id: 0
         color:
           r: 230

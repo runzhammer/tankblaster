@@ -27,13 +27,26 @@ type State struct {
 	MaxStrength          int
 	Wind                 int
 	WindDirection        int
+	Memory               Memory
 }
 
 type Decision struct {
+	TargetIndex  int
 	WeaponSlot   int
 	Strength     int
 	AngleDegrees float64
 	DelayFrames  int
+}
+
+type Memory struct {
+	StrengthBias float64
+	AngleBias    float64
+}
+
+type Lesson struct {
+	TargetX float64
+	ImpactX float64
+	Hit     bool
 }
 
 type Player interface {
@@ -69,6 +82,18 @@ func IDForName(name string) ID {
 
 func Decide(id ID, state State, rng *rand.Rand) Decision {
 	return ForID(id).Decide(state, rng)
+}
+
+func Learn(id ID, memory *Memory, lesson Lesson) {
+	if memory == nil {
+		return
+	}
+	switch id {
+	case DoedelID:
+		learnDoedel(memory, lesson)
+	default:
+		learnDoedel(memory, lesson)
+	}
 }
 
 func clampInt(value, min, max int) int {

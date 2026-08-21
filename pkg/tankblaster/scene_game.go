@@ -92,7 +92,29 @@ type battleTank struct {
 }
 
 type computerTurnPlan struct {
-	delay int
+	phase          computerTurnPhase
+	delay          int
+	decision       computerplayers.Decision
+	targetStrength int
+	targetAngle    float64
+}
+
+type computerTurnPhase uint8
+
+const (
+	computerTurnWaitCamera computerTurnPhase = iota
+	computerTurnAdjustStrength
+	computerTurnAdjustAngle
+	computerTurnSelectWeapon
+	computerTurnFireDelay
+)
+
+type computerShotRecord struct {
+	active      bool
+	playerIndex int
+	computerID  computerplayers.ID
+	targetIndex int
+	targetX     float64
 }
 
 type projectile struct {
@@ -165,6 +187,7 @@ type GameScene struct {
 	roundScores          []int
 	credits              []int
 	inventories          []shopInventory
+	computerMemories     []computerplayers.Memory
 	roundNumber          int
 	spawnIndex           int
 	spawnPauseFrames     int
@@ -190,8 +213,10 @@ type GameScene struct {
 	shopClassAStock      []int
 	shopClassBStock      []int
 	shopClassBItems      []int
+	shopComputerPlan     *shopComputerPlan
 	scrollBarDragging    bool
 	zeroPowerStartDelay  int
+	lastComputerShot     computerShotRecord
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -226,6 +251,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	s.roundScores = make([]int, len(s.players))
 	s.credits = make([]int, len(s.players))
 	s.inventories = makeShopInventories(len(s.players))
+	s.computerMemories = make([]computerplayers.Memory, len(s.players))
 	s.startRound()
 
 	return s, nil
@@ -263,6 +289,7 @@ func (s *GameScene) startRound() {
 	s.roundTransitionDelay = 0
 	s.roundSeriesComplete = false
 	s.lastDamageSource = nil
+	s.lastComputerShot = computerShotRecord{}
 	s.shopPlayerOrder = nil
 	s.shopPlayerCursor = 0
 	s.shopHoverClass = 0
@@ -750,14 +777,65 @@ func (s *GameScene) handleComputerTurn() {
 	}
 	if tank.computerPlan == nil {
 		decision := computerplayers.Decide(tank.player.ComputerID, s.computerPlayerState(tank), s.rng)
-		s.applyComputerDecision(tank, decision)
-		tank.computerPlan = &computerTurnPlan{delay: maxInt(1, decision.DelayFrames)}
+		tank.computerPlan = &computerTurnPlan{
+			phase:          computerTurnWaitCamera,
+			decision:       decision,
+			targetStrength: s.clampedComputerStrength(decision.Strength),
+			targetAngle:    math.Max(0, math.Min(180, decision.AngleDegrees)),
+		}
 	}
-	if tank.computerPlan.delay > 0 {
-		tank.computerPlan.delay--
+	s.updateComputerTurnPlan(tank)
+}
+
+func (s *GameScene) updateComputerTurnPlan(tank *battleTank) {
+	plan := tank.computerPlan
+	if plan == nil {
 		return
 	}
-	s.fireActiveWeapon()
+
+	switch plan.phase {
+	case computerTurnWaitCamera:
+		s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+		if math.Abs(s.cameraX-s.cameraGoal) > 2 {
+			return
+		}
+		plan.phase = computerTurnAdjustStrength
+	case computerTurnAdjustStrength:
+		if plan.delay > 0 {
+			plan.delay--
+			return
+		}
+		if tank.shotStrength < plan.targetStrength {
+			tank.shotStrength++
+			plan.delay = 3
+			return
+		}
+		if tank.shotStrength > plan.targetStrength {
+			tank.shotStrength--
+			plan.delay = 3
+			return
+		}
+		plan.phase = computerTurnAdjustAngle
+	case computerTurnAdjustAngle:
+		if s.adjustComputerCannonAngle(tank, plan.targetAngle) {
+			return
+		}
+		plan.phase = computerTurnSelectWeapon
+	case computerTurnSelectWeapon:
+		if s.canSelectWeaponSlot(tank, plan.decision.WeaponSlot) {
+			tank.selectedWeapon = plan.decision.WeaponSlot
+		} else {
+			tank.selectedWeapon = 0
+		}
+		plan.delay = maxInt(1, plan.decision.DelayFrames/4)
+		plan.phase = computerTurnFireDelay
+	case computerTurnFireDelay:
+		plan.delay--
+		if plan.delay > 0 {
+			return
+		}
+		s.fireActiveWeapon()
+	}
 }
 
 func (s *GameScene) computerPlayerState(active *battleTank) computerplayers.State {
@@ -767,6 +845,7 @@ func (s *GameScene) computerPlayerState(active *battleTank) computerplayers.Stat
 		Wind:                 s.wind,
 		WindDirection:        s.windDirection,
 		AvailableWeaponSlots: s.availableComputerWeaponSlots(active),
+		Memory:               s.computerMemory(active.playerIndex),
 		Tanks:                make([]computerplayers.TankState, 0, len(s.tanks)),
 	}
 	for _, tank := range s.tanks {
@@ -799,21 +878,88 @@ func (s *GameScene) availableComputerWeaponSlots(tank *battleTank) []int {
 	return slots
 }
 
-func (s *GameScene) applyComputerDecision(tank *battleTank, decision computerplayers.Decision) {
-	if tank == nil {
+func (s *GameScene) adjustComputerCannonAngle(tank *battleTank, targetAngle float64) bool {
+	if tank.cannon != nil && tank.body != nil {
+		current := s.cannonAngleDegreesForTank(tank)
+		delta := targetAngle - current
+		step := math.Max(1, float64(tank.cannon.RotationSpeed))
+		if math.Abs(delta) <= step {
+			leftLimit := tank.body.Rot - math.Pi
+			tank.cannon.Rot = leftLimit + engine.DegToRad(targetAngle)
+			s.clampCannonRotationToTank(tank.cannon, tank.body)
+			return false
+		}
+		if delta < 0 {
+			step = -step
+		}
+		tank.cannon.Rot += engine.DegToRad(step)
+		s.clampCannonRotationToTank(tank.cannon, tank.body)
+		return true
+	}
+	return false
+}
+
+func (s *GameScene) clampedComputerStrength(strength int) int {
+	strength = minInt(strength, s.maxShotStrength())
+	strength = maxInt(s.minShotStrength(), strength)
+	return strength
+}
+
+func (s *GameScene) cannonAngleDegreesForTank(tank *battleTank) float64 {
+	if tank == nil || tank.cannon == nil || tank.body == nil {
+		return 0
+	}
+	leftLimit := tank.body.Rot - math.Pi
+	displayAngle := engine.RadToDeg(tank.cannon.Rot - leftLimit)
+	return math.Max(0, math.Min(180, displayAngle))
+}
+
+func (s *GameScene) computerMemory(playerIndex int) computerplayers.Memory {
+	if playerIndex < 0 || playerIndex >= len(s.computerMemories) {
+		return computerplayers.Memory{}
+	}
+	return s.computerMemories[playerIndex]
+}
+
+func (s *GameScene) computerShotRecordFor(tank *battleTank) computerShotRecord {
+	if tank == nil || tank.computerPlan == nil {
+		return computerShotRecord{}
+	}
+	record := computerShotRecord{
+		active:      true,
+		playerIndex: tank.playerIndex,
+		computerID:  tank.player.ComputerID,
+		targetIndex: tank.computerPlan.decision.TargetIndex,
+	}
+	if target := s.tankByPlayerIndex(record.targetIndex); target != nil && target.body != nil {
+		record.targetX = target.body.Bounds().Center().X
+	} else if tank.body != nil {
+		record.targetX = tank.body.Bounds().Center().X
+	}
+	return record
+}
+
+func (s *GameScene) reportComputerShot(impact engine.Vec, hitPlayerIndex int, directHit bool) {
+	record := s.lastComputerShot
+	if !record.active || record.playerIndex < 0 || record.playerIndex >= len(s.computerMemories) {
+		s.lastComputerShot = computerShotRecord{}
 		return
 	}
-	if s.canSelectWeaponSlot(tank, decision.WeaponSlot) {
-		tank.selectedWeapon = decision.WeaponSlot
-	} else {
-		tank.selectedWeapon = 0
+	computerplayers.Learn(record.computerID, &s.computerMemories[record.playerIndex], computerplayers.Lesson{
+		TargetX: record.targetX,
+		ImpactX: impact.X,
+		Hit:     directHit && hitPlayerIndex == record.targetIndex,
+	})
+	s.lastComputerShot = computerShotRecord{}
+}
+
+func (s *GameScene) tankByPlayerIndex(playerIndex int) *battleTank {
+	for _, tank := range s.tanks {
+		if tank != nil && tank.playerIndex == playerIndex {
+			return tank
+		}
 	}
-	tank.shotStrength = maxInt(s.minShotStrength(), minInt(s.maxShotStrength(), decision.Strength))
-	if tank.cannon != nil && tank.body != nil {
-		leftLimit := tank.body.Rot - math.Pi
-		tank.cannon.Rot = leftLimit + engine.DegToRad(math.Max(0, math.Min(180, decision.AngleDegrees)))
-		s.clampCannonRotationToTank(tank.cannon, tank.body)
-	}
+	return nil
 }
 
 func shouldAdjustStrength(key ebiten.Key) bool {
@@ -898,6 +1044,9 @@ func (s *GameScene) fireActiveWeapon() {
 		trail:       []engine.Vec{*muzzle},
 	}
 	s.lastDamageSource = tank
+	if tank.player.Kind == PlayerComputer {
+		s.lastComputerShot = s.computerShotRecordFor(tank)
+	}
 	tank.computerPlan = nil
 }
 
@@ -926,6 +1075,7 @@ func (s *GameScene) updateProjectile() {
 
 	battlefieldHeight := s.battlefieldHeight()
 	if p.pos.X < -80 || p.pos.X > s.worldWidth+80 || p.pos.Y > battlefieldHeight+80 || p.pos.Y < -battlefieldHeight {
+		s.reportComputerShot(p.pos, -1, false)
 		s.finishProjectile()
 		return
 	}
@@ -951,6 +1101,7 @@ func (s *GameScene) updateProjectile() {
 				s.awardDirectHitCredits(tank, s.lastDamageSource)
 				s.darkenTank(tank, 0.10)
 			}
+			s.reportComputerShot(p.pos, tank.playerIndex, true)
 			s.projectile = nil
 			s.delayTurnAdvance(s.tankHitPauseFrames())
 			return
@@ -1016,6 +1167,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	}
 	weapon := s.weaponForProjectile(p)
 	if !weapon.DamagesTerrain {
+		s.reportComputerShot(p.pos, -1, false)
 		return false
 	}
 
@@ -1026,6 +1178,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		s.zeroPowerStartDelay = 0
 	}()
 	s.damageTanksInImpactRadius(p.pos, radius)
+	s.reportComputerShot(p.pos, -1, false)
 	falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
 	if len(falls) > 0 {
 		s.sandFalls = append(s.sandFalls, sandFallAnimation{
@@ -1755,13 +1908,7 @@ func (s *GameScene) shopItemCountForPlayer(playerIndex, itemIndex int) int {
 }
 
 func (s *GameScene) cannonAngleDegrees() float64 {
-	tank := s.activeTank()
-	if tank == nil || tank.cannon == nil || tank.body == nil {
-		return 0
-	}
-	leftLimit := tank.body.Rot - math.Pi
-	displayAngle := engine.RadToDeg(tank.cannon.Rot - leftLimit)
-	return math.Max(0, math.Min(180, displayAngle))
+	return s.cannonAngleDegreesForTank(s.activeTank())
 }
 
 func minInt(a, b int) int {

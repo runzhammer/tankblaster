@@ -26,6 +26,33 @@ const classBDiscountMultiplier = 2105.0 / 3175.0
 
 const shopListKeyRepeatFrames = 9
 
+const (
+	shopComputerEntryDelay    = 35
+	shopComputerNavigateDelay = 6
+	shopComputerBuyDelay      = 28
+	shopComputerBackDelay     = 24
+	shopComputerContinueDelay = 35
+)
+
+type shopComputerPhase uint8
+
+const (
+	shopComputerEnterList shopComputerPhase = iota
+	shopComputerNavigate
+	shopComputerBuy
+	shopComputerBack
+	shopComputerContinue
+)
+
+type shopComputerPlan struct {
+	playerIndex int
+	phase       shopComputerPhase
+	delay       int
+	mode        shopMode
+	targetIndex int
+	purchases   int
+}
+
 var (
 	shopMainLeftOverlayRect  = image.Rect(130, 110, 400, 240)
 	shopMainRightOverlayRect = image.Rect(270, 100, 499, 240)
@@ -84,6 +111,7 @@ func (s *GameScene) beginShop() {
 	s.shopHoverClass = 0
 	s.shopMode = shopModeEntry
 	s.shopSelectedIndex = 0
+	s.shopComputerPlan = nil
 	s.shopPlayerOrder = make([]int, len(s.players))
 	for i := range s.shopPlayerOrder {
 		s.shopPlayerOrder[i] = i
@@ -98,6 +126,11 @@ func (s *GameScene) beginShop() {
 }
 
 func (s *GameScene) handleShopInput() {
+	if s.currentShopPlayerIsComputer() {
+		s.handleComputerShopInput()
+		return
+	}
+
 	x, y := ebiten.CursorPosition()
 	cursor := image.Pt(x, y)
 	if s.shopMode != shopModeEntry {
@@ -131,11 +164,186 @@ func (s *GameScene) handleShopInput() {
 		return
 	}
 	if s.shopPlayerCursor < len(s.shopPlayerOrder)-1 {
-		s.shopPlayerCursor++
-		s.shopHoverClass = 0
+		s.advanceShopPlayer()
 		return
 	}
 	s.startRound()
+}
+
+func (s *GameScene) handleComputerShopInput() {
+	playerIndex := s.currentShopPlayerIndex()
+	if playerIndex < 0 {
+		return
+	}
+	if s.shopComputerPlan == nil || s.shopComputerPlan.playerIndex != playerIndex {
+		s.shopComputerPlan = s.newComputerShopPlan(playerIndex)
+	}
+	plan := s.shopComputerPlan
+	if plan == nil {
+		return
+	}
+	if plan.delay > 0 {
+		plan.delay--
+		return
+	}
+
+	switch plan.phase {
+	case shopComputerEnterList:
+		s.shopMode = plan.mode
+		s.shopSelectedIndex = 0
+		s.shopHoverClass = 0
+		plan.phase = shopComputerNavigate
+		plan.delay = shopComputerNavigateDelay
+	case shopComputerNavigate:
+		items := s.visibleShopItemIndexes()
+		if len(items) == 0 {
+			plan.phase = shopComputerBack
+			plan.delay = shopComputerBackDelay
+			return
+		}
+		plan.targetIndex = maxInt(0, minInt(plan.targetIndex, len(items)-1))
+		if s.shopSelectedIndex < plan.targetIndex {
+			s.shopSelectedIndex++
+			plan.delay = shopComputerNavigateDelay
+			return
+		}
+		if s.shopSelectedIndex > plan.targetIndex {
+			s.shopSelectedIndex--
+			plan.delay = shopComputerNavigateDelay
+			return
+		}
+		plan.phase = shopComputerBuy
+		plan.delay = shopComputerBuyDelay
+	case shopComputerBuy:
+		before := s.credits[playerIndex]
+		s.buySelectedShopItem()
+		if s.credits[playerIndex] < before {
+			plan.purchases++
+		}
+		next, ok := s.nextComputerShopChoiceInMode(playerIndex, plan.mode, plan.purchases)
+		if !ok {
+			plan.phase = shopComputerBack
+			plan.delay = shopComputerBackDelay
+			return
+		}
+		plan.targetIndex = next.targetIndex
+		plan.phase = shopComputerNavigate
+		plan.delay = shopComputerNavigateDelay
+	case shopComputerBack:
+		s.shopMode = shopModeEntry
+		s.shopHoverClass = 0
+		plan.phase = shopComputerContinue
+		plan.delay = shopComputerContinueDelay
+	case shopComputerContinue:
+		s.shopComputerPlan = nil
+		if s.shopPlayerCursor < len(s.shopPlayerOrder)-1 {
+			s.advanceShopPlayer()
+			return
+		}
+		s.startRound()
+	}
+}
+
+type computerShopChoice struct {
+	mode        shopMode
+	targetIndex int
+}
+
+func (s *GameScene) newComputerShopPlan(playerIndex int) *shopComputerPlan {
+	choice, ok := s.nextComputerShopChoice(playerIndex, 0)
+	if !ok {
+		return &shopComputerPlan{
+			playerIndex: playerIndex,
+			phase:       shopComputerContinue,
+			delay:       shopComputerContinueDelay,
+		}
+	}
+	if choice.mode == shopModeClassB {
+		s.shopHoverClass = 2
+	} else {
+		s.shopHoverClass = 1
+	}
+	return &shopComputerPlan{
+		playerIndex: playerIndex,
+		phase:       shopComputerEnterList,
+		delay:       shopComputerEntryDelay,
+		mode:        choice.mode,
+		targetIndex: choice.targetIndex,
+	}
+}
+
+func (s *GameScene) nextComputerShopChoice(playerIndex, purchases int) (computerShopChoice, bool) {
+	if playerIndex < 0 || playerIndex >= len(s.credits) || s.credits[playerIndex] <= 0 {
+		return computerShopChoice{}, false
+	}
+	if purchases > 0 && s.rng.Float64() < 0.35+float64(purchases)*0.12 {
+		return computerShopChoice{}, false
+	}
+	choices := s.affordableComputerShopChoices(playerIndex, shopModeClassB)
+	if len(choices) > 0 && s.rng.Float64() < 0.68 {
+		return choices[s.rng.Intn(len(choices))], true
+	}
+	choices = s.affordableComputerShopChoices(playerIndex, shopModeClassA)
+	if len(choices) > 0 {
+		return choices[s.rng.Intn(len(choices))], true
+	}
+	choices = s.affordableComputerShopChoices(playerIndex, shopModeClassB)
+	if len(choices) > 0 {
+		return choices[s.rng.Intn(len(choices))], true
+	}
+	return computerShopChoice{}, false
+}
+
+func (s *GameScene) nextComputerShopChoiceInMode(playerIndex int, mode shopMode, purchases int) (computerShopChoice, bool) {
+	if playerIndex < 0 || playerIndex >= len(s.credits) || s.credits[playerIndex] <= 0 {
+		return computerShopChoice{}, false
+	}
+	if s.rng.Float64() < 0.35+float64(purchases)*0.12 {
+		return computerShopChoice{}, false
+	}
+	choices := s.affordableComputerShopChoices(playerIndex, mode)
+	if len(choices) == 0 {
+		return computerShopChoice{}, false
+	}
+	return choices[s.rng.Intn(len(choices))], true
+}
+
+func (s *GameScene) affordableComputerShopChoices(playerIndex int, mode shopMode) []computerShopChoice {
+	previousMode := s.shopMode
+	previousSelection := s.shopSelectedIndex
+	s.shopMode = mode
+	defer func() {
+		s.shopMode = previousMode
+		s.shopSelectedIndex = previousSelection
+	}()
+
+	items := s.visibleShopItemIndexes()
+	choices := make([]computerShopChoice, 0, len(items))
+	for listIndex, itemIndex := range items {
+		s.shopSelectedIndex = listIndex
+		price := s.shopPriceForItem(itemIndex)
+		if price <= 0 || s.credits[playerIndex] < price || s.shopStockForSelected(itemIndex) <= 0 {
+			continue
+		}
+		if s.isScrollOMatItem(itemIndex) && s.shopItemCountForPlayer(playerIndex, itemIndex) > 0 {
+			continue
+		}
+		choices = append(choices, computerShopChoice{mode: mode, targetIndex: listIndex})
+	}
+	return choices
+}
+
+func (s *GameScene) advanceShopPlayer() {
+	s.shopPlayerCursor++
+	s.shopHoverClass = 0
+	s.shopMode = shopModeEntry
+	s.shopSelectedIndex = 0
+	s.shopComputerPlan = nil
+}
+
+func (s *GameScene) currentShopPlayerIsComputer() bool {
+	playerIndex := s.currentShopPlayerIndex()
+	return playerIndex >= 0 && playerIndex < len(s.players) && s.players[playerIndex].Kind == PlayerComputer
 }
 
 func (s *GameScene) drawShop(screen *ebiten.Image) {
