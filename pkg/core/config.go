@@ -36,9 +36,10 @@ type FileSettings struct {
 }
 
 type DebugPlayerSettings struct {
-	Kind  string        `yaml:"kind"`
-	Name  string        `yaml:"name"`
-	Color ColorSettings `yaml:"color"`
+	Kind       string        `yaml:"kind"`
+	ComputerID int           `yaml:"computer_id"`
+	Name       string        `yaml:"name"`
+	Color      ColorSettings `yaml:"color"`
 }
 
 type ColorSettings struct {

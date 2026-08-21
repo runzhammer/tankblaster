@@ -8,6 +8,7 @@ import (
 
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
+	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
 )
 
 var _ core.Game = (*GameLoop)(nil)
@@ -38,9 +39,10 @@ const (
 )
 
 type PlayerConfig struct {
-	Kind  PlayerKind
-	Name  string
-	Color color.RGBA
+	Kind       PlayerKind
+	ComputerID computerplayers.ID
+	Name       string
+	Color      color.RGBA
 }
 
 type GameLoop struct {
@@ -108,11 +110,15 @@ func debugPlayers(configured []core.DebugPlayerSettings) []PlayerConfig {
 		name := player.Name
 		if name == "" {
 			name = "Spieler " + strconv.Itoa(len(players)+1)
+			if kind == PlayerComputer {
+				name = computerplayers.Name(computerplayers.ID(player.ComputerID))
+			}
 		}
 		players = append(players, PlayerConfig{
-			Kind:  kind,
-			Name:  name,
-			Color: player.Color.RGBA(defaultTankColor(i)),
+			Kind:       kind,
+			ComputerID: computerplayers.ID(player.ComputerID),
+			Name:       name,
+			Color:      player.Color.RGBA(defaultTankColor(i)),
 		})
 	}
 	if len(players) >= 2 {

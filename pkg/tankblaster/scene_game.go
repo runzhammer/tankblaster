@@ -19,6 +19,7 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
 	"github.com/runzhammer/gamedemo/pkg/models"
+	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
 	weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
 	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/colornames"
@@ -87,6 +88,11 @@ type battleTank struct {
 	zeroPowerGone  bool
 	selectedWeapon int
 	shotStrength   int
+	computerPlan   *computerTurnPlan
+}
+
+type computerTurnPlan struct {
+	delay int
 }
 
 type projectile struct {
@@ -416,6 +422,7 @@ func (s *GameScene) Update() error {
 			} else {
 				s.clampActiveShotStrength()
 				s.handleBattleInput()
+				s.handleComputerTurn()
 				s.updateProjectile()
 				if s.turnAdvanceDelay == 0 {
 					s.updateBattleCamera()
@@ -707,6 +714,9 @@ func (s *GameScene) handleBattleInput() {
 	if tank == nil {
 		return
 	}
+	if tank.player.Kind == PlayerComputer {
+		return
+	}
 
 	if shouldAdjustStrength(ebiten.KeyArrowUp) {
 		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+1)
@@ -727,6 +737,82 @@ func (s *GameScene) handleBattleInput() {
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
 		s.fireActiveWeapon()
+	}
+}
+
+func (s *GameScene) handleComputerTurn() {
+	if s.projectile != nil || s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
+		return
+	}
+	tank := s.activeTank()
+	if tank == nil || tank.player.Kind != PlayerComputer || !s.tankCanAct(tank) {
+		return
+	}
+	if tank.computerPlan == nil {
+		decision := computerplayers.Decide(tank.player.ComputerID, s.computerPlayerState(tank), s.rng)
+		s.applyComputerDecision(tank, decision)
+		tank.computerPlan = &computerTurnPlan{delay: maxInt(1, decision.DelayFrames)}
+	}
+	if tank.computerPlan.delay > 0 {
+		tank.computerPlan.delay--
+		return
+	}
+	s.fireActiveWeapon()
+}
+
+func (s *GameScene) computerPlayerState(active *battleTank) computerplayers.State {
+	state := computerplayers.State{
+		ActiveIndex:          active.playerIndex,
+		MaxStrength:          s.maxShotStrength(),
+		Wind:                 s.wind,
+		WindDirection:        s.windDirection,
+		AvailableWeaponSlots: s.availableComputerWeaponSlots(active),
+		Tanks:                make([]computerplayers.TankState, 0, len(s.tanks)),
+	}
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil {
+			continue
+		}
+		center := tank.body.Bounds().Center()
+		state.Tanks = append(state.Tanks, computerplayers.TankState{
+			Index: tank.playerIndex,
+			X:     center.X,
+			Y:     center.Y,
+			Power: tank.power,
+			Alive: tank.power > 0 && tank.landed && !tank.falling,
+		})
+	}
+	return state
+}
+
+func (s *GameScene) availableComputerWeaponSlots(tank *battleTank) []int {
+	const maxComputerProjectileSlot = 3
+	slots := make([]int, 0, maxComputerProjectileSlot+1)
+	for slot := 0; slot <= maxComputerProjectileSlot && slot < s.weaponSlotCount(); slot++ {
+		if s.canSelectWeaponSlot(tank, slot) {
+			slots = append(slots, slot)
+		}
+	}
+	if len(slots) == 0 {
+		return []int{0}
+	}
+	return slots
+}
+
+func (s *GameScene) applyComputerDecision(tank *battleTank, decision computerplayers.Decision) {
+	if tank == nil {
+		return
+	}
+	if s.canSelectWeaponSlot(tank, decision.WeaponSlot) {
+		tank.selectedWeapon = decision.WeaponSlot
+	} else {
+		tank.selectedWeapon = 0
+	}
+	tank.shotStrength = maxInt(s.minShotStrength(), minInt(s.maxShotStrength(), decision.Strength))
+	if tank.cannon != nil && tank.body != nil {
+		leftLimit := tank.body.Rot - math.Pi
+		tank.cannon.Rot = leftLimit + engine.DegToRad(math.Max(0, math.Min(180, decision.AngleDegrees)))
+		s.clampCannonRotationToTank(tank.cannon, tank.body)
 	}
 }
 
@@ -812,6 +898,7 @@ func (s *GameScene) fireActiveWeapon() {
 		trail:       []engine.Vec{*muzzle},
 	}
 	s.lastDamageSource = tank
+	tank.computerPlan = nil
 }
 
 func (s *GameScene) updateProjectile() {
@@ -892,6 +979,7 @@ func (s *GameScene) advanceActivePlayer() {
 		return
 	}
 	s.activePlayerIndex = next
+	s.resetComputerTurnPlans()
 	s.clampActiveShotStrength()
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
 }
@@ -1795,6 +1883,7 @@ func (s *GameScene) chooseStartingPlayerAfterLanding() {
 		return
 	}
 	s.activePlayerIndex = living[s.rng.Intn(len(living))]
+	s.resetComputerTurnPlans()
 }
 
 func (s *GameScene) allTanksLanded() bool {
@@ -1887,6 +1976,10 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 	if tank == nil || tank.cannon != source {
 		return
 	}
+	if tank.player.Kind == PlayerComputer {
+		s.clampCannonRotationToTank(source, tank.body)
+		return
+	}
 	if s.projectile != nil || s.roundTransitionDelay > 0 || s.roundSeriesComplete {
 		return
 	}
@@ -1895,6 +1988,14 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 	}
 	s.behaviorRotateOnButton(source)
 	s.clampCannonRotationToTank(source, tank.body)
+}
+
+func (s *GameScene) resetComputerTurnPlans() {
+	for _, tank := range s.tanks {
+		if tank != nil {
+			tank.computerPlan = nil
+		}
+	}
 }
 
 func (s *GameScene) clampCannonRotationToTank(cannon, tank *engine.Sprite) {

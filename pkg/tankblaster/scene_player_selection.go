@@ -15,6 +15,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine/tinge"
+	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
 	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/colornames"
 	"golang.org/x/image/font"
@@ -66,9 +67,10 @@ var paletteColors = []color.RGBA{
 }
 
 type playerSelectionSlot struct {
-	Kind  PlayerKind
-	Name  string
-	Color color.RGBA
+	Kind       PlayerKind
+	ComputerID computerplayers.ID
+	Name       string
+	Color      color.RGBA
 }
 
 type playerSelectionScene struct {
@@ -251,9 +253,11 @@ func (s *playerSelectionScene) cycleSlotKind(index int) {
 		slot.Name = "Spieler " + strconv.Itoa(s.nextHumanNumber())
 	case PlayerHuman:
 		slot.Kind = PlayerComputer
-		slot.Name = "D. Dödel"
+		slot.ComputerID = computerplayers.DoedelID
+		slot.Name = computerplayers.Name(slot.ComputerID)
 	case PlayerComputer:
 		slot.Kind = PlayerNone
+		slot.ComputerID = computerplayers.DoedelID
 		slot.Name = ""
 	}
 }
@@ -278,13 +282,14 @@ func (s *playerSelectionScene) startGame() error {
 		if name == "" {
 			name = "Spieler " + strconv.Itoa(len(players)+1)
 			if slot.Kind == PlayerComputer {
-				name = "D. Dödel"
+				name = computerplayers.Name(slot.ComputerID)
 			}
 		}
 		players = append(players, PlayerConfig{
-			Kind:  slot.Kind,
-			Name:  name,
-			Color: slot.Color,
+			Kind:       slot.Kind,
+			ComputerID: slot.ComputerID,
+			Name:       name,
+			Color:      slot.Color,
 		})
 	}
 	if len(players) < 2 {
