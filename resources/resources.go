@@ -68,8 +68,11 @@ var StoreRoll []byte
 //go:embed store_icons.png
 var StoreIcons []byte
 
-//go:embed taining-ammo.png
-var TrainingAmmoSelected []byte
+//go:embed weaponbar_active.png
+var WeaponbarActive []byte
 
-//go:embed taining-ammo-deslected.png
-var TrainingAmmoDeselected []byte
+//go:embed weaponbar_onstock.png
+var WeaponbarOnStock []byte
+
+//go:embed weaponbar_outofstock.png
+var WeaponbarOutOfStock []byte

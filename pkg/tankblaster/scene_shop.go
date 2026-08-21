@@ -37,15 +37,16 @@ type shopInventory struct {
 }
 
 type shopAssets struct {
-	human          *ebiten.Image
-	computer       *ebiten.Image
-	trainingOn     *ebiten.Image
-	trainingOff    *ebiten.Image
-	storeBg        *ebiten.Image
-	storeMainLeft  *ebiten.Image
-	storeMainRight *ebiten.Image
-	storeRoll      *ebiten.Image
-	storeIcons     *ebiten.Image
+	human               *ebiten.Image
+	computer            *ebiten.Image
+	storeBg             *ebiten.Image
+	storeMainLeft       *ebiten.Image
+	storeMainRight      *ebiten.Image
+	storeRoll           *ebiten.Image
+	storeIcons          *ebiten.Image
+	weaponbarActive     *ebiten.Image
+	weaponbarOnStock    *ebiten.Image
+	weaponbarOutOfStock *ebiten.Image
 }
 
 func makeShopInventories(playerCount int) []shopInventory {

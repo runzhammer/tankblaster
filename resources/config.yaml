@@ -9,7 +9,7 @@ gameplay:
   impact_pause_seconds: 1
   tank_hit_pause_seconds: 0.6
 debug:
-  enabled: true
+  enabled: false
   start_scene: game
   start_shop: true
   game:

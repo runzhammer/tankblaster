@@ -45,6 +45,8 @@ const (
 
 const gameHUDHeight = 132
 
+const weaponbarSlotCount = 20
+
 const (
 	projectileRadius         = 4
 	impactRadiusMultiplier   = 4
@@ -124,6 +126,8 @@ type spriteAnimation struct {
 	totalTicks int
 	width      int
 	height     int
+	scaleX     float64
+	scaleY     float64
 	anchor     zeroPowerAnimationAnchor
 }
 
@@ -200,15 +204,16 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 	s.zeroPowerAnimations = zeroPowerAnimations
 	s.shop = shopAssets{
-		human:          mustImageFromPNG(r.PlayerHuman),
-		computer:       mustImageFromPNG(r.PlayerComputer),
-		trainingOn:     mustImageFromPNG(r.TrainingAmmoSelected),
-		trainingOff:    mustImageFromPNG(r.TrainingAmmoDeselected),
-		storeBg:        mustImageFromPNG(r.StoreBackground),
-		storeMainLeft:  mustImageFromPNG(r.StoreMainLeft),
-		storeMainRight: mustImageFromPNG(r.StoreMainRight),
-		storeRoll:      mustImageFromPNG(r.StoreRoll),
-		storeIcons:     mustImageFromPNG(r.StoreIcons),
+		human:               mustImageFromPNG(r.PlayerHuman),
+		computer:            mustImageFromPNG(r.PlayerComputer),
+		storeBg:             mustImageFromPNG(r.StoreBackground),
+		storeMainLeft:       mustImageFromPNG(r.StoreMainLeft),
+		storeMainRight:      mustImageFromPNG(r.StoreMainRight),
+		storeRoll:           mustImageFromPNG(r.StoreRoll),
+		storeIcons:          mustImageFromPNG(r.StoreIcons),
+		weaponbarActive:     mustImageFromPNG(r.WeaponbarActive),
+		weaponbarOnStock:    mustImageFromPNG(r.WeaponbarOnStock),
+		weaponbarOutOfStock: mustImageFromPNG(r.WeaponbarOutOfStock),
 	}
 	s.players = s.playersForRound()
 	s.scores = make([]int, len(s.players))
@@ -500,6 +505,8 @@ type zeroPowerAnimationSheet struct {
 	frameHeight int
 	delay       int
 	anchor      zeroPowerAnimationAnchor
+	scaleX      float64
+	scaleY      float64
 }
 
 func loadSpriteAnimation(spec zeroPowerAnimationSheet) (spriteAnimation, error) {
@@ -515,11 +522,21 @@ func loadSpriteAnimation(spec zeroPowerAnimationSheet) (spriteAnimation, error) 
 	}
 	cols := bounds.Dx() / spec.frameWidth
 	rows := bounds.Dy() / frameHeight
+	scaleX := spec.scaleX
+	if scaleX <= 0 {
+		scaleX = 1
+	}
+	scaleY := spec.scaleY
+	if scaleY <= 0 {
+		scaleY = 1
+	}
 	animation := spriteAnimation{
 		frames: make([]*ebiten.Image, 0, cols*rows),
 		delays: make([]int, 0, cols*rows),
 		width:  spec.frameWidth,
 		height: frameHeight,
+		scaleX: scaleX,
+		scaleY: scaleY,
 		anchor: spec.anchor,
 	}
 	ticks := maxInt(1, int(math.Round(float64(spec.delay)*60/100)))
@@ -550,10 +567,10 @@ func loadSpriteAnimation(spec zeroPowerAnimationSheet) (spriteAnimation, error) 
 
 func loadZeroPowerAnimations() ([]spriteAnimation, error) {
 	sources := []zeroPowerAnimationSheet{
-		{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6},
+		{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 0.5, scaleY: 0.5},
 		{data: r.ZeroPowerExplosionPNG, frameWidth: 67, frameHeight: 64, delay: 6},
 		{data: r.ZeroPowerMushroomExplosionPNG, frameWidth: 51, frameHeight: 57, delay: 6, anchor: zeroPowerAnchorTankBottom},
-		{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 21, delay: 6},
+		{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 21, delay: 6, scaleX: 1.0, scaleY: 1.3},
 	}
 	animations := make([]spriteAnimation, 0, len(sources))
 	for _, source := range sources {
@@ -1382,12 +1399,15 @@ func (s *GameScene) drawZeroPowerEffects(screen *ebiten.Image, camera *ebiten.Ge
 		}
 		anchor := engine.V(center.X, center.Y).Project(camera)
 		op := &ebiten.DrawImageOptions{}
-		x := anchor.X - float64(effect.animation.width)/2
-		y := anchor.Y - float64(effect.animation.height)/2
+		width := float64(effect.animation.width) * effect.animation.scaleX
+		height := float64(effect.animation.height) * effect.animation.scaleY
+		x := anchor.X - width/2
+		y := anchor.Y - height/2
 		if effect.animation.anchor == zeroPowerAnchorTankBottom {
 			tankBottom := engine.V(center.X, body.Max.Y).Project(camera)
-			y = tankBottom.Y - float64(effect.animation.height)
+			y = tankBottom.Y - height
 		}
+		op.GeoM.Scale(effect.animation.scaleX, effect.animation.scaleY)
 		op.GeoM.Translate(x, y)
 		screen.DrawImage(frame, op)
 	}
@@ -1569,57 +1589,58 @@ func (s *GameScene) drawHUDStepper(screen *ebiten.Image, r image.Rectangle, labe
 
 func (s *GameScene) drawWeaponSlot(screen *ebiten.Image, index int) {
 	r := s.weaponSlotRect(index)
-	weapons := gameWeapons()
 	shopItemIndex := s.itemIndexForWeaponSlot(index)
-	unlocked := index < len(weapons) && weapons[index].Unlocked
 	active := s.activeTank()
-	if index > 0 {
-		unlocked = active != nil && s.shopItemCountForPlayer(active.playerIndex, shopItemIndex) > 0
-	}
-	fill := color.RGBA{R: 28, G: 32, B: 37, A: 255}
-	border := color.RGBA{R: 94, G: 101, B: 110, A: 255}
-	if !unlocked {
-		fill = color.RGBA{R: 34, G: 35, B: 37, A: 255}
-		border = color.RGBA{R: 52, G: 55, B: 60, A: 255}
-	}
-	if unlocked && active != nil && index == active.selectedWeapon {
-		border = color.RGBA{R: 236, G: 58, B: 63, A: 255}
-	}
-
-	drawFrame(screen, r, fill, border)
-	inner := image.Rect(r.Min.X+7, r.Min.Y+7, r.Max.X-7, r.Max.Y-7)
+	inStock := false
 	if index == 0 {
-		if active != nil && active.selectedWeapon == 0 {
-			drawScaledImage(screen, s.shop.trainingOn, r)
-		} else {
-			drawScaledImage(screen, s.shop.trainingOff, r)
-		}
+		inStock = true
+	} else if active != nil && shopItemIndex >= 0 {
+		inStock = s.shopItemCountForPlayer(active.playerIndex, shopItemIndex) > 0
+	}
+	img := s.shop.weaponbarOutOfStock
+	if inStock {
+		img = s.shop.weaponbarOnStock
+	}
+	if active != nil && index == active.selectedWeapon {
+		img = s.shop.weaponbarActive
+	}
+	if img == nil {
 		return
 	}
-	if shopItemIndex >= 0 {
-		s.drawShopItemIcon(screen, shopItemIndex, inner, !unlocked)
+	src := weaponbarSlotSourceRect(img, index)
+	slot, ok := img.SubImage(src).(*ebiten.Image)
+	if !ok {
 		return
 	}
-	if unlocked {
-		drawWeaponIcon(screen, inner, weapons[index])
-		return
-	}
-	drawLockedWeaponIcon(screen, inner, index)
+	drawScaledImage(screen, slot, r)
 }
 
 func (s *GameScene) weaponSlotRect(index int) image.Rectangle {
 	screenCfg := core.Config().Screen
-	slot := 32
-	gap := 5
-	count := s.weaponSlotCount()
-	total := count*slot + (count-1)*gap
-	x := int(screenCfg.Width)/2 - total/2 + index*(slot+gap)
-	y := int(screenCfg.Height) - 44
-	return image.Rect(x, y, x+slot, y+slot)
+	screenW := int(screenCfg.Width)
+	sourceW := 640
+	sourceH := 34
+	if s.shop.weaponbarOnStock != nil {
+		bounds := s.shop.weaponbarOnStock.Bounds()
+		sourceW = bounds.Dx()
+		sourceH = bounds.Dy()
+	}
+	x1 := index * screenW / weaponbarSlotCount
+	x2 := (index + 1) * screenW / weaponbarSlotCount
+	height := int(math.Round(float64(sourceH) * float64(screenW) / float64(sourceW)))
+	y := int(screenCfg.Height) - height
+	return image.Rect(x1, y, x2, y+height)
 }
 
 func (s *GameScene) weaponSlotCount() int {
-	return 1 + len(shopItems())
+	return weaponbarSlotCount
+}
+
+func weaponbarSlotSourceRect(img *ebiten.Image, index int) image.Rectangle {
+	bounds := img.Bounds()
+	x1 := bounds.Min.X + index*bounds.Dx()/weaponbarSlotCount
+	x2 := bounds.Min.X + (index+1)*bounds.Dx()/weaponbarSlotCount
+	return image.Rect(x1, bounds.Min.Y, x2, bounds.Max.Y)
 }
 
 func (s *GameScene) shopItemCountForActivePlayer(itemIndex int) int {
