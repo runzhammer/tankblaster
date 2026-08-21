@@ -27,6 +27,7 @@ type FileSettings struct {
 	Debug struct {
 		Enabled    bool   `yaml:"enabled"`
 		StartScene string `yaml:"start_scene"`
+		StartShop  bool   `yaml:"start_shop"`
 		Game       struct {
 			Rounds  int                   `yaml:"rounds"`
 			Players []DebugPlayerSettings `yaml:"players"`
@@ -65,6 +66,7 @@ type Settings struct {
 	Debug struct {
 		Enabled    bool
 		StartScene string
+		StartShop  bool
 		Game       struct {
 			Rounds  int
 			Players []DebugPlayerSettings
@@ -112,6 +114,7 @@ func init() {
 	}
 	s.Debug.Enabled = fs.Debug.Enabled
 	s.Debug.StartScene = fs.Debug.StartScene
+	s.Debug.StartShop = fs.Debug.StartShop
 	if s.Debug.StartScene == "" {
 		s.Debug.StartScene = "game"
 	}

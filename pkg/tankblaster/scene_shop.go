@@ -11,7 +11,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"github.com/runzhammer/gamedemo/pkg/core"
-	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/colornames"
 )
 
@@ -24,6 +23,13 @@ const (
 )
 
 const classBDiscountMultiplier = 2105.0 / 3175.0
+
+const shopListKeyRepeatFrames = 9
+
+var (
+	shopMainLeftOverlayRect  = image.Rect(130, 110, 400, 240)
+	shopMainRightOverlayRect = image.Rect(270, 100, 499, 240)
+)
 
 type shopItem struct {
 	name        string
@@ -38,15 +44,15 @@ type shopInventory struct {
 }
 
 type shopAssets struct {
-	entry         *ebiten.Image
-	classA        *ebiten.Image
-	classB        *ebiten.Image
-	human         *ebiten.Image
-	computer      *ebiten.Image
-	trainingOn    *ebiten.Image
-	trainingOff   *ebiten.Image
-	classAScreens []*ebiten.Image
-	classBScreen  *ebiten.Image
+	human          *ebiten.Image
+	computer       *ebiten.Image
+	trainingOn     *ebiten.Image
+	trainingOff    *ebiten.Image
+	storeBg        *ebiten.Image
+	storeMainLeft  *ebiten.Image
+	storeMainRight *ebiten.Image
+	storeRoll      *ebiten.Image
+	storeIcons     *ebiten.Image
 }
 
 func shopItems() []shopItem {
@@ -75,23 +81,6 @@ func shopItems() []shopItem {
 		{name: "XM-V12 Panzer", price: 9890, stock: 1, screenIndex: 22},
 		{name: "Diesel (F54)", price: 400, stock: 100, screenIndex: 23},
 	}
-}
-
-func loadShopClassAScreens() []*ebiten.Image {
-	items := shopItems()
-	screens := make([]*ebiten.Image, len(items))
-	for index, item := range items {
-		screens[index] = mustImageFromPNG(mustReadShopScreen("class-a-" + strconv.Itoa(item.screenIndex) + ".png"))
-	}
-	return screens
-}
-
-func mustReadShopScreen(name string) []byte {
-	data, err := r.ShopListScreens.ReadFile(name)
-	if err != nil {
-		panic(err)
-	}
-	return data
 }
 
 func makeShopInventories(playerCount int) []shopInventory {
@@ -181,15 +170,13 @@ func (s *GameScene) drawShop(screen *ebiten.Image) {
 		return
 	}
 
-	bg := s.shop.entry
+	s.drawStoreImage(screen, s.shop.storeBg)
 	switch s.shopHoverClass {
 	case 1:
-		bg = s.shop.classA
+		s.drawStoreOverlay(screen, s.shop.storeMainLeft, shopMainLeftOverlayRect)
 	case 2:
-		bg = s.shop.classB
+		s.drawStoreOverlay(screen, s.shop.storeMainRight, shopMainRightOverlayRect)
 	}
-	drawScaledImage(screen, bg, image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height)))
-	s.coverShopRoundLabel(screen)
 
 	playerIndex := s.currentShopPlayerIndex()
 	player := PlayerConfig{Name: "Spieler"}
@@ -206,11 +193,18 @@ func (s *GameScene) handleShopListInput(cursor image.Point) {
 	if len(items) == 0 {
 		return
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) {
+	if shouldNavigateShopList(ebiten.KeyArrowUp) {
 		s.shopSelectedIndex = maxInt(0, s.shopSelectedIndex-1)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowDown) {
+	if shouldNavigateShopList(ebiten.KeyArrowDown) {
 		s.shopSelectedIndex = minInt(len(items)-1, s.shopSelectedIndex+1)
+	}
+	_, wheelY := ebiten.Wheel()
+	if wheelY > 0 {
+		s.shopSelectedIndex = maxInt(0, s.shopSelectedIndex-int(math.Ceil(wheelY)))
+	}
+	if wheelY < 0 {
+		s.shopSelectedIndex = minInt(len(items)-1, s.shopSelectedIndex+int(math.Ceil(-wheelY)))
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
 		s.buySelectedShopItem()
@@ -232,13 +226,16 @@ func (s *GameScene) handleShopListInput(cursor image.Point) {
 	}
 }
 
-func (s *GameScene) drawShopList(screen *ebiten.Image) {
-	bg := s.shop.classBScreen
-	if s.shopMode == shopModeClassA && s.shopSelectedIndex >= 0 && s.shopSelectedIndex < len(s.shop.classAScreens) {
-		bg = s.shop.classAScreens[s.shopSelectedIndex]
+func shouldNavigateShopList(key ebiten.Key) bool {
+	if inpututil.IsKeyJustPressed(key) {
+		return true
 	}
-	drawScaledImage(screen, bg, image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height)))
-	s.coverShopRoundLabel(screen)
+	held := inpututil.KeyPressDuration(key)
+	return held >= shopListKeyRepeatFrames && held%shopListKeyRepeatFrames == 0
+}
+
+func (s *GameScene) drawShopList(screen *ebiten.Image) {
+	s.drawStoreImage(screen, s.shop.storeRoll)
 
 	items := s.visibleShopItemIndexes()
 	if len(items) == 0 {
@@ -260,12 +257,12 @@ func (s *GameScene) drawShopList(screen *ebiten.Image) {
 }
 
 func (s *GameScene) drawDynamicShopList(screen *ebiten.Image, indexes []int) {
-	if s.shopMode == shopModeClassA {
-		return
+	titleRect := s.shopStoreScaledRect(image.Rect(210, 36, 430, 66))
+	title := "- Klasse A -"
+	if s.shopMode == shopModeClassB {
+		title = "- Schnäppchen -"
 	}
-
-	titleRect := s.shopScaledRect(image.Rect(490, 84, 970, 136))
-	drawCenteredText(screen, "- Schnäppchen -", titleRect, colornames.Black)
+	drawCenteredText(screen, title, titleRect, colornames.Black)
 
 	listRect := s.shopListRect()
 	rowH := s.shopListRowHeight()
@@ -282,7 +279,7 @@ func (s *GameScene) drawDynamicShopList(screen *ebiten.Image, indexes []int) {
 		}
 		r := image.Rect(listRect.Min.X, listRect.Min.Y+row*rowH, listRect.Max.X, listRect.Min.Y+(row+1)*rowH)
 		if listIndex == s.shopSelectedIndex {
-			drawFilledRect(screen, r, color.RGBA{R: 0, G: 0, B: 55, A: 255})
+			drawFilledRect(screen, insetRect(r, maxInt(4, r.Dx()/40)), color.RGBA{R: 0, G: 0, B: 55, A: 255})
 			drawCenteredText(screen, shopItems()[itemIndex].name, r, colornames.White)
 			continue
 		}
@@ -426,14 +423,13 @@ func (s *GameScene) shopListIndexAt(cursor image.Point, count int) (int, bool) {
 
 func (s *GameScene) shopListRect() image.Rectangle {
 	if s.shopMode == shopModeClassB {
-		return s.shopScaledRect(image.Rect(490, 164, 970, 326))
+		return s.shopStoreScaledRect(image.Rect(220, 70, 386, 128))
 	}
-	return s.shopScaledRect(image.Rect(490, 150, 1055, 936))
+	return s.shopStoreScaledRect(image.Rect(218, 68, 388, 350))
 }
 
 func (s *GameScene) shopListRowHeight() int {
-	screenCfg := core.Config().Screen
-	return maxInt(22, int(math.Round(48*screenCfg.Height/1209)))
+	return maxInt(22, int(math.Round(19*float64(s.shopStoreRect().Dy())/400)))
 }
 
 func (s *GameScene) shopVisibleRows(count int) int {
@@ -514,15 +510,36 @@ func (s *GameScene) roundScoreForPlayer(playerIndex int) int {
 }
 
 func (s *GameScene) shopClassARect() image.Rectangle {
-	return s.shopScaledRect(image.Rect(340, 285, 520, 485))
+	return s.shopStoreScaledRect(image.Rect(146, 86, 210, 184))
 }
 
 func (s *GameScene) shopClassBRect() image.Rectangle {
-	return s.shopScaledRect(image.Rect(1085, 260, 1245, 460))
+	return s.shopStoreScaledRect(image.Rect(432, 78, 496, 180))
 }
 
 func (s *GameScene) shopContinueRect() image.Rectangle {
 	return s.shopScaledRect(image.Rect(1304, 932, 1580, 987))
+}
+
+func (s *GameScene) shopStoreRect() image.Rectangle {
+	screenCfg := core.Config().Screen
+	panelTop := s.shopScaledRect(image.Rect(0, 1032, 1, 1032)).Min.Y
+	if panelTop <= 0 || panelTop > int(screenCfg.Height) {
+		panelTop = int(screenCfg.Height * 0.84)
+	}
+	return image.Rect(0, 0, int(screenCfg.Width), panelTop)
+}
+
+func (s *GameScene) shopStoreScaledRect(r image.Rectangle) image.Rectangle {
+	store := s.shopStoreRect()
+	scaleX := float64(store.Dx()) / 640
+	scaleY := float64(store.Dy()) / 400
+	return image.Rect(
+		store.Min.X+int(math.Round(float64(r.Min.X)*scaleX)),
+		store.Min.Y+int(math.Round(float64(r.Min.Y)*scaleY)),
+		store.Min.X+int(math.Round(float64(r.Max.X)*scaleX)),
+		store.Min.Y+int(math.Round(float64(r.Max.Y)*scaleY)),
+	)
 }
 
 func (s *GameScene) shopScaledRect(r image.Rectangle) image.Rectangle {
@@ -537,15 +554,46 @@ func (s *GameScene) shopScaledRect(r image.Rectangle) image.Rectangle {
 	)
 }
 
-func (s *GameScene) drawShopItemIcon(screen *ebiten.Image, itemIndex int, r image.Rectangle, disabled bool) {
-	if itemIndex < 0 || itemIndex >= len(s.shop.classAScreens) {
+func (s *GameScene) drawStoreImage(screen, img *ebiten.Image) {
+	if img == nil {
 		return
 	}
-	src := s.shop.classAScreens[itemIndex]
+	drawScaledImage(screen, img, s.shopStoreRect())
+}
+
+func (s *GameScene) drawStoreOverlay(screen, img *ebiten.Image, r image.Rectangle) {
+	if img == nil {
+		return
+	}
+	srcRect := img.Bounds()
+	if srcRect.Dx() > 1 {
+		srcRect.Max.X--
+	}
+	if trimmed, ok := img.SubImage(srcRect).(*ebiten.Image); ok {
+		img = trimmed
+	}
+	drawScaledImage(screen, img, s.shopStoreScaledRect(r))
+}
+
+func (s *GameScene) drawShopItemIcon(screen *ebiten.Image, itemIndex int, r image.Rectangle, disabled bool) {
+	if itemIndex < 0 {
+		return
+	}
+	src := s.shop.storeIcons
 	if src == nil {
 		return
 	}
-	icon, ok := src.SubImage(image.Rect(1124, 324, 1204, 404)).(*ebiten.Image)
+	iconRect := image.Rect(1124, 324, 1204, 404)
+	if src == s.shop.storeIcons {
+		cell := 32
+		col := itemIndex % 16
+		row := itemIndex / 16
+		iconRect = image.Rect(col*cell, row*cell, col*cell+cell, row*cell+cell)
+		if iconRect.Max.Y > src.Bounds().Dy() {
+			return
+		}
+	}
+	icon, ok := src.SubImage(iconRect).(*ebiten.Image)
 	if !ok {
 		return
 	}

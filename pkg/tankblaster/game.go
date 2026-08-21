@@ -72,7 +72,11 @@ func NewGame() (core.Game, error) {
 
 	if core.Config().Debug.Enabled {
 		game.applyDebugConfig()
-		if err := game.SetNewScene(debugStartSceneFactory(core.Config().Debug.StartScene)); err != nil {
+		factory := debugStartSceneFactory(core.Config().Debug.StartScene)
+		if core.Config().Debug.StartShop {
+			factory = NewDebugShopScene
+		}
+		if err := game.SetNewScene(factory); err != nil {
 			return nil, err
 		}
 		return game, nil
@@ -139,6 +143,8 @@ func debugStartSceneFactory(scene string) func(*GameLoop) (core.Scene, error) {
 		return NewPlayerSelectionScene
 	case "game", "battle", "spielmodus", "":
 		return NewGameScene
+	case "shop", "store", "laden":
+		return NewDebugShopScene
 	default:
 		return NewGameScene
 	}

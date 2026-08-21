@@ -63,6 +63,7 @@ const (
 	fallDamagePerStep          = 10
 	zeroPowerFrames            = 216
 	creditsPerScorePoint       = 500
+	debugShopStartingCredits   = 20000
 	roundTransitionSeconds     = 5
 )
 
@@ -207,15 +208,15 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 	s.zeroPowerSmoke = smoke
 	s.shop = shopAssets{
-		entry:         mustImageFromPNG(r.ShopEntry),
-		classA:        mustImageFromPNG(r.ShopClassA),
-		classB:        mustImageFromPNG(r.ShopClassB),
-		human:         mustImageFromPNG(r.PlayerHuman),
-		computer:      mustImageFromPNG(r.PlayerComputer),
-		trainingOn:    mustImageFromPNG(r.TrainingAmmoSelected),
-		trainingOff:   mustImageFromPNG(r.TrainingAmmoDeselected),
-		classAScreens: loadShopClassAScreens(),
-		classBScreen:  mustImageFromPNG(mustReadShopScreen("class-b.png")),
+		human:          mustImageFromPNG(r.PlayerHuman),
+		computer:       mustImageFromPNG(r.PlayerComputer),
+		trainingOn:     mustImageFromPNG(r.TrainingAmmoSelected),
+		trainingOff:    mustImageFromPNG(r.TrainingAmmoDeselected),
+		storeBg:        mustImageFromPNG(r.StoreBackground),
+		storeMainLeft:  mustImageFromPNG(r.StoreMainLeft),
+		storeMainRight: mustImageFromPNG(r.StoreMainRight),
+		storeRoll:      mustImageFromPNG(r.StoreRoll),
+		storeIcons:     mustImageFromPNG(r.StoreIcons),
 	}
 	s.players = s.playersForRound()
 	s.scores = make([]int, len(s.players))
@@ -224,6 +225,24 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	s.inventories = makeShopInventories(len(s.players))
 	s.startRound()
 
+	return s, nil
+}
+
+func NewDebugShopScene(game *GameLoop) (core.Scene, error) {
+	scene, err := NewGameScene(game)
+	if err != nil {
+		return nil, err
+	}
+	s, ok := scene.(*GameScene)
+	if !ok {
+		return scene, nil
+	}
+	for i := range s.credits {
+		if s.credits[i] < debugShopStartingCredits {
+			s.credits[i] = debugShopStartingCredits
+		}
+	}
+	s.beginShop()
 	return s, nil
 }
 

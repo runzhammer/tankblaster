@@ -11,6 +11,7 @@ gameplay:
 debug:
   enabled: true
   start_scene: game
+  start_shop: true
   game:
     rounds: 10
     players:
