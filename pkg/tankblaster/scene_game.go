@@ -48,19 +48,22 @@ const debugScrollMode = true
 const gameHUDHeight = 132
 
 const (
-	projectileRadius        = 4
-	impactRadiusMultiplier  = 4
-	directHitDamage         = 50
-	impactSplashMinDamage   = 10
-	impactSplashMaxDamage   = 40
-	largeGrenadeScale       = 1.8
-	largeGrenadeImpactScale = 3.0
-	sandFallFrames          = 12
-	fallDamageStepPixels    = 20
-	fallDamagePerStep       = 10
-	zeroPowerFrames         = 216
-	creditsPerScorePoint    = 500
-	roundTransitionSeconds  = 5
+	projectileRadius           = 4
+	impactRadiusMultiplier     = 4
+	directHitDamage            = 100
+	directHitCreditBonus       = 4000
+	impactSplashMinDamage      = 10
+	impactSplashMaxDamage      = 40
+	largeGrenadeScale          = 1.8
+	largeGrenadeImpactScale    = 3.0
+	atomBombImpactScale        = 4.0
+	atomBombImpactExtraSeconds = 0.5
+	sandFallFrames             = 12
+	fallDamageStepPixels       = 20
+	fallDamagePerStep          = 10
+	zeroPowerFrames            = 216
+	creditsPerScorePoint       = 500
+	roundTransitionSeconds     = 5
 )
 
 type damageCause uint8
@@ -89,15 +92,18 @@ type battleTank struct {
 }
 
 type weapon struct {
-	name            string
-	color           color.RGBA
-	damage          int
-	unlocked        bool
-	showTrail       bool
-	roundProjectile bool
-	damagesTerrain  bool
-	projectileScale float64
-	impactScale     float64
+	name                        string
+	color                       color.RGBA
+	damage                      int
+	unlocked                    bool
+	showTrail                   bool
+	roundProjectile             bool
+	damagesTerrain              bool
+	projectileScale             float64
+	impactScale                 float64
+	impactAnimationExtraSeconds float64
+	impactCycles                int
+	impactGradientOutward       bool
 }
 
 type projectile struct {
@@ -113,6 +119,8 @@ type impactAnimation struct {
 	radius   float64
 	age      int
 	duration int
+	cycles   int
+	outward  bool
 }
 
 type sandFallAnimation struct {
@@ -688,6 +696,9 @@ func (s *GameScene) weaponForProjectile(p *projectile) weapon {
 	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 1 {
 		return weapons[2]
 	}
+	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 2 {
+		return weapons[3]
+	}
 	return weapons[1]
 }
 
@@ -760,6 +771,7 @@ func (s *GameScene) updateProjectile() {
 		if engine.Collision(hitBounds, tank.body.Bounds().ScaledAtCenter(0.78)) {
 			if damage := s.weaponForProjectile(p).damage; damage > 0 {
 				s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
+				s.awardDirectHitCredits(tank, s.lastDamageSource)
 				s.darkenTank(tank, 0.10)
 			}
 			s.projectile = nil
@@ -820,11 +832,13 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	if p == nil {
 		return false
 	}
-	if !s.weaponForProjectile(p).damagesTerrain {
+	weapon := s.weaponForProjectile(p)
+	if !weapon.damagesTerrain {
 		return false
 	}
 
-	radius := impactRadiusForWeapon(s.weaponForProjectile(p))
+	radius := impactRadiusForWeapon(weapon)
+	duration := s.impactAnimationFramesForWeapon(weapon)
 	s.damageTanksInImpactRadius(p.pos, radius)
 	falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
 	if len(falls) > 0 {
@@ -837,9 +851,11 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	s.impacts = append(s.impacts, impactAnimation{
 		pos:      p.pos,
 		radius:   radius,
-		duration: s.impactAnimationFrames(),
+		duration: duration,
+		cycles:   impactCyclesForWeapon(weapon),
+		outward:  weapon.impactGradientOutward,
 	})
-	s.turnAdvanceDelay = s.impactAnimationFrames() + s.impactPauseFrames()
+	s.turnAdvanceDelay = duration + s.impactPauseFrames()
 	return true
 }
 
@@ -993,6 +1009,16 @@ func (s *GameScene) damageTank(tank *battleTank, damage int, attacker *battleTan
 		s.awardZeroPowerScore(tank, attacker, cause)
 		s.startZeroPowerAnimation(tank)
 	}
+}
+
+func (s *GameScene) awardDirectHitCredits(target, attacker *battleTank) {
+	if target == nil || attacker == nil || target == attacker {
+		return
+	}
+	if attacker.playerIndex < 0 || attacker.playerIndex >= len(s.credits) {
+		return
+	}
+	s.credits[attacker.playerIndex] += directHitCreditBonus
 }
 
 func (s *GameScene) awardZeroPowerScore(defeated, attacker *battleTank, cause damageCause) {
@@ -1183,7 +1209,23 @@ func (s *GameScene) drawImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
 	for _, impact := range s.impacts {
 		projected := impact.pos.Project(camera)
 		progress := float64(impact.age) / math.Max(1, float64(impact.duration))
-		cycleProgress := math.Mod(progress*2, 1)
+		cycles := impact.cycles
+		if cycles <= 0 {
+			cycles = 2
+		}
+		if impact.outward {
+			fillProgress := math.Max(0, math.Min(1, progress))
+			vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), float32(impact.radius), color.RGBA{R: 255, G: 0, B: 0, A: 220}, true)
+			steps := 8
+			for i := steps; i >= 1; i-- {
+				t := float64(i) / float64(steps)
+				radius := float32(impact.radius * fillProgress * t)
+				alpha := uint8(255 * math.Pow(t, 0.7))
+				vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), radius, color.RGBA{R: 0, G: 0, B: 0, A: alpha}, true)
+			}
+			continue
+		}
+		cycleProgress := math.Mod(progress*float64(cycles), 1)
 		steps := 8
 		for i := steps; i >= 1; i-- {
 			t := float64(i) / float64(steps)
@@ -1526,6 +1568,7 @@ func gameWeapons() []weapon {
 		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: true},
 		{name: "Granate", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
 		{name: "Große Granate", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true, projectileScale: largeGrenadeScale, impactScale: largeGrenadeImpactScale},
+		{name: "Atombombe", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true, impactScale: atomBombImpactScale, impactAnimationExtraSeconds: atomBombImpactExtraSeconds, impactCycles: 1, impactGradientOutward: true},
 	}
 }
 
@@ -1543,6 +1586,13 @@ func impactRadiusForWeapon(weapon weapon) float64 {
 		scale = 1
 	}
 	return float64(projectileRadius*impactRadiusMultiplier) * scale
+}
+
+func impactCyclesForWeapon(weapon weapon) int {
+	if weapon.impactCycles <= 0 {
+		return 2
+	}
+	return weapon.impactCycles
 }
 
 func minInt(a, b int) int {
@@ -1637,6 +1687,10 @@ func (s *GameScene) spawnLandingPauseFrames() int {
 
 func (s *GameScene) impactAnimationFrames() int {
 	return secondsToFrames(core.Config().Gameplay.ImpactAnimationSeconds)
+}
+
+func (s *GameScene) impactAnimationFramesForWeapon(weapon weapon) int {
+	return secondsToFrames(core.Config().Gameplay.ImpactAnimationSeconds + weapon.impactAnimationExtraSeconds)
 }
 
 func (s *GameScene) impactPauseFrames() int {
