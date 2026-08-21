@@ -38,8 +38,17 @@ var PlayerHuman []byte
 //go:embed player_computer.png
 var PlayerComputer []byte
 
-//go:embed zero_power_smoke.gif
-var ZeroPowerSmokeGIF []byte
+//go:embed zero_power_dust_explosion.png
+var ZeroPowerDustExplosionPNG []byte
+
+//go:embed zero_power_explosion.png
+var ZeroPowerExplosionPNG []byte
+
+//go:embed zero_power_mushroom_explosion.png
+var ZeroPowerMushroomExplosionPNG []byte
+
+//go:embed zero_power_player_smoke.png
+var ZeroPowerPlayerSmokePNG []byte
 
 //go:embed fonts/DejaVuSansMono.ttf
 var DejaVuSansMono []byte

@@ -109,22 +109,11 @@ func (g Ground) SurfaceY(x float64) float64 {
 		return g.surface[column]
 	}
 
-	t := x / width
 	profile := g.terrain
 	if len(profile.waves) == 0 && len(profile.hills) == 0 {
 		profile = defaultTerrainProfile()
 	}
-	y := g.Size.Y - profile.baseFromBottom
-	for _, wave := range profile.waves {
-		y += math.Sin(t*math.Pi*wave.frequency+wave.phase) * wave.amplitude
-	}
-	for _, hill := range profile.hills {
-		y += cartoonHill(t, hill.center, hill.width, hill.height)
-	}
-
-	minY := g.Size.Y - 330
-	maxY := g.Size.Y - 56
-	return math.Max(minY, math.Min(maxY, y))
+	return normalizedTerrainSurfaceY(width, g.Size.Y, profile, x)
 }
 
 func (g Ground) ApplyCrater(cx, cy, radius float64) []SandFallPixel {
@@ -287,10 +276,10 @@ func generateGroundImage(width, height float64, terrain terrainProfile) *image.R
 	w := int(math.Ceil(width))
 	h := int(math.Ceil(height))
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	surfaces := generateTerrainSurfaces(width, height, terrain)
 
-	ground := Ground{Size: &engine.Vec{X: width, Y: height}, terrain: terrain}
 	for x := 0; x < w; x++ {
-		surface := int(math.Round(ground.SurfaceY(float64(x))))
+		surface := int(math.Round(surfaces[x]))
 		for y := surface; y < h; y++ {
 			depth := float64(y-surface) / math.Max(1, float64(h-surface))
 			img.SetRGBA(x, y, desertSandColor(depth))
@@ -303,6 +292,82 @@ func generateGroundImage(width, height float64, terrain terrainProfile) *image.R
 	}
 
 	return img
+}
+
+func normalizedTerrainSurfaceY(width, height float64, terrain terrainProfile, x float64) float64 {
+	if width <= 0 {
+		return height
+	}
+	surfaces := generateTerrainSurfaces(width, height, terrain)
+	if len(surfaces) == 0 {
+		return height
+	}
+	column := int(math.Round(x))
+	if column < 0 {
+		column = 0
+	}
+	if column >= len(surfaces) {
+		column = len(surfaces) - 1
+	}
+	return surfaces[column]
+}
+
+func generateTerrainSurfaces(width, height float64, terrain terrainProfile) []float64 {
+	w := int(math.Ceil(width))
+	if w <= 0 {
+		return nil
+	}
+
+	raw := make([]float64, w)
+	minRaw := math.Inf(1)
+	maxRaw := math.Inf(-1)
+	for x := 0; x < w; x++ {
+		y := rawTerrainSurfaceY(width, height, terrain, float64(x))
+		raw[x] = y
+		minRaw = math.Min(minRaw, y)
+		maxRaw = math.Max(maxRaw, y)
+	}
+
+	minY := height - 330
+	maxY := height - 56
+	allowedRange := maxY - minY
+	rawRange := maxRaw - minRaw
+
+	surfaces := make([]float64, w)
+	switch {
+	case rawRange > allowedRange && rawRange > 0:
+		scale := allowedRange / rawRange
+		for x, y := range raw {
+			surfaces[x] = minY + (y-minRaw)*scale
+		}
+	default:
+		offset := 0.0
+		if minRaw < minY {
+			offset = minY - minRaw
+		}
+		if maxRaw+offset > maxY {
+			offset = maxY - maxRaw
+		}
+		for x, y := range raw {
+			surfaces[x] = y + offset
+		}
+	}
+	return surfaces
+}
+
+func rawTerrainSurfaceY(width, height float64, terrain terrainProfile, x float64) float64 {
+	t := 0.0
+	if width > 0 {
+		t = x / width
+	}
+	y := height - terrain.baseFromBottom
+	for _, wave := range terrain.waves {
+		y += math.Sin(t*math.Pi*wave.frequency+wave.phase) * wave.amplitude
+	}
+	for _, hill := range terrain.hills {
+		y += cartoonHill(t, hill.center, hill.width, hill.height)
+	}
+	return y
 }
 
 func desertSandColor(depth float64) color.RGBA {

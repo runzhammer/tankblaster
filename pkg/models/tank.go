@@ -81,7 +81,8 @@ func colorizedSpriteImage(sprite []byte, tint color.RGBA) *ebiten.Image {
 			if alpha == 0 {
 				continue
 			}
-			img.SetRGBA(x, y, color.RGBA{R: tint.R, G: tint.G, B: tint.B, A: uint8(alpha / 257)})
+			tintedAlpha := (alpha / 257) * uint32(tint.A) / 255
+			img.SetRGBA(x, y, color.RGBA{R: tint.R, G: tint.G, B: tint.B, A: uint8(tintedAlpha)})
 		}
 	}
 

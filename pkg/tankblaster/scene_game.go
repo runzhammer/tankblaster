@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"image"
 	"image/color"
-	"image/gif"
 	"math"
 	"math/rand"
 	"strconv"
@@ -20,6 +19,7 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
 	"github.com/runzhammer/gamedemo/pkg/models"
+	weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
 	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/colornames"
 )
@@ -43,28 +43,22 @@ const (
 	numLayers
 )
 
-const debugScrollMode = true
-
 const gameHUDHeight = 132
 
 const (
-	projectileRadius           = 4
-	impactRadiusMultiplier     = 4
-	directHitDamage            = 100
-	directHitCreditBonus       = 4000
-	impactSplashMinDamage      = 10
-	impactSplashMaxDamage      = 40
-	largeGrenadeScale          = 1.8
-	largeGrenadeImpactScale    = 3.0
-	atomBombImpactScale        = 4.0
-	atomBombImpactExtraSeconds = 0.5
-	sandFallFrames             = 12
-	fallDamageStepPixels       = 20
-	fallDamagePerStep          = 10
-	zeroPowerFrames            = 216
-	creditsPerScorePoint       = 500
-	debugShopStartingCredits   = 20000
-	roundTransitionSeconds     = 5
+	projectileRadius         = 4
+	impactRadiusMultiplier   = 4
+	directHitCreditBonus     = 4000
+	impactSplashMinDamage    = 10
+	impactSplashMaxDamage    = 40
+	sandFallFrames           = 12
+	fallDamageStepPixels     = 20
+	fallDamagePerStep        = 10
+	zeroPowerFrames          = 216
+	zeroPowerDissolveFrames  = 12
+	creditsPerScorePoint     = 500
+	debugShopStartingCredits = 20000
+	roundTransitionSeconds   = 5
 )
 
 type damageCause uint8
@@ -88,23 +82,9 @@ type battleTank struct {
 	score          int
 	tint           color.RGBA
 	zeroPowerShown bool
+	zeroPowerGone  bool
 	selectedWeapon int
 	shotStrength   int
-}
-
-type weapon struct {
-	name                        string
-	color                       color.RGBA
-	damage                      int
-	unlocked                    bool
-	showTrail                   bool
-	roundProjectile             bool
-	damagesTerrain              bool
-	projectileScale             float64
-	impactScale                 float64
-	impactAnimationExtraSeconds float64
-	impactCycles                int
-	impactGradientOutward       bool
 }
 
 type projectile struct {
@@ -131,18 +111,28 @@ type sandFallAnimation struct {
 }
 
 type zeroPowerAnimation struct {
-	tank     *battleTank
-	age      int
-	duration int
+	tank      *battleTank
+	animation spriteAnimation
+	delay     int
+	age       int
+	duration  int
 }
 
-type gifAnimation struct {
+type spriteAnimation struct {
 	frames     []*ebiten.Image
 	delays     []int
 	totalTicks int
 	width      int
 	height     int
+	anchor     zeroPowerAnimationAnchor
 }
+
+type zeroPowerAnimationAnchor uint8
+
+const (
+	zeroPowerAnchorTankCenter zeroPowerAnimationAnchor = iota
+	zeroPowerAnchorTankBottom
+)
 
 type GameScene struct {
 	g    *GameLoop
@@ -175,7 +165,7 @@ type GameScene struct {
 	impacts              []impactAnimation
 	sandFalls            []sandFallAnimation
 	zeroPowerEffects     []zeroPowerAnimation
-	zeroPowerSmoke       gifAnimation
+	zeroPowerAnimations  []spriteAnimation
 	shop                 shopAssets
 	turnAdvanceDelay     int
 	roundTransitionDelay int
@@ -190,6 +180,8 @@ type GameScene struct {
 	shopClassAStock      []int
 	shopClassBStock      []int
 	shopClassBItems      []int
+	scrollBarDragging    bool
+	zeroPowerStartDelay  int
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -202,11 +194,11 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		activePlayerIndex: -1,
 		roundNumber:       1,
 	}
-	smoke, err := loadGIFAnimation(r.ZeroPowerSmokeGIF)
+	zeroPowerAnimations, err := loadZeroPowerAnimations()
 	if err != nil {
 		return nil, err
 	}
-	s.zeroPowerSmoke = smoke
+	s.zeroPowerAnimations = zeroPowerAnimations
 	s.shop = shopAssets{
 		human:          mustImageFromPNG(r.PlayerHuman),
 		computer:       mustImageFromPNG(r.PlayerComputer),
@@ -387,7 +379,7 @@ func (s *GameScene) Update() error {
 		s.showScoreTable = !s.showScoreTable
 	}
 	if s.allTanksLanded() {
-		s.handleDebugScroll()
+		s.handleCameraScrollControls()
 	}
 
 	switch s.phase {
@@ -502,29 +494,52 @@ func approach(current, target, smoothing, minStep float64) float64 {
 	return current + delta*smoothing
 }
 
-func loadGIFAnimation(data []byte) (gifAnimation, error) {
-	decoded, err := gif.DecodeAll(bytes.NewReader(data))
+type zeroPowerAnimationSheet struct {
+	data        []byte
+	frameWidth  int
+	frameHeight int
+	delay       int
+	anchor      zeroPowerAnimationAnchor
+}
+
+func loadSpriteAnimation(spec zeroPowerAnimationSheet) (spriteAnimation, error) {
+	decoded, _, err := image.Decode(bytes.NewReader(spec.data))
 	if err != nil {
-		return gifAnimation{}, err
+		return spriteAnimation{}, err
 	}
 
-	animation := gifAnimation{
-		frames: make([]*ebiten.Image, 0, len(decoded.Image)),
-		delays: make([]int, 0, len(decoded.Image)),
+	bounds := decoded.Bounds()
+	frameHeight := spec.frameHeight
+	if frameHeight <= 0 {
+		frameHeight = bounds.Dy()
 	}
-	for i, frame := range decoded.Image {
-		ticks := 4
-		if i < len(decoded.Delay) && decoded.Delay[i] > 0 {
-			ticks = maxInt(1, int(math.Round(float64(decoded.Delay[i])*60/100)))
-		}
-		animation.frames = append(animation.frames, ebiten.NewImageFromImage(frame))
-		animation.delays = append(animation.delays, ticks)
-		animation.totalTicks += ticks
-		if frame.Bounds().Dx() > animation.width {
-			animation.width = frame.Bounds().Dx()
-		}
-		if frame.Bounds().Dy() > animation.height {
-			animation.height = frame.Bounds().Dy()
+	cols := bounds.Dx() / spec.frameWidth
+	rows := bounds.Dy() / frameHeight
+	animation := spriteAnimation{
+		frames: make([]*ebiten.Image, 0, cols*rows),
+		delays: make([]int, 0, cols*rows),
+		width:  spec.frameWidth,
+		height: frameHeight,
+		anchor: spec.anchor,
+	}
+	ticks := maxInt(1, int(math.Round(float64(spec.delay)*60/100)))
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			src := image.Rect(
+				bounds.Min.X+col*spec.frameWidth,
+				bounds.Min.Y+row*frameHeight,
+				bounds.Min.X+(col+1)*spec.frameWidth,
+				bounds.Min.Y+(row+1)*frameHeight,
+			)
+			frame := image.NewRGBA(image.Rect(0, 0, spec.frameWidth, frameHeight))
+			for y := 0; y < frameHeight; y++ {
+				for x := 0; x < spec.frameWidth; x++ {
+					frame.Set(x, y, decoded.At(src.Min.X+x, src.Min.Y+y))
+				}
+			}
+			animation.frames = append(animation.frames, ebiten.NewImageFromImage(frame))
+			animation.delays = append(animation.delays, ticks)
+			animation.totalTicks += ticks
 		}
 	}
 	if animation.totalTicks <= 0 {
@@ -533,7 +548,27 @@ func loadGIFAnimation(data []byte) (gifAnimation, error) {
 	return animation, nil
 }
 
-func (a gifAnimation) frameAt(tick int) *ebiten.Image {
+func loadZeroPowerAnimations() ([]spriteAnimation, error) {
+	sources := []zeroPowerAnimationSheet{
+		{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6},
+		{data: r.ZeroPowerExplosionPNG, frameWidth: 67, frameHeight: 64, delay: 6},
+		{data: r.ZeroPowerMushroomExplosionPNG, frameWidth: 51, frameHeight: 57, delay: 6, anchor: zeroPowerAnchorTankBottom},
+		{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 21, delay: 6},
+	}
+	animations := make([]spriteAnimation, 0, len(sources))
+	for _, source := range sources {
+		animation, err := loadSpriteAnimation(source)
+		if err != nil {
+			return nil, err
+		}
+		if len(animation.frames) > 0 {
+			animations = append(animations, animation)
+		}
+	}
+	return animations, nil
+}
+
+func (a spriteAnimation) frameAt(tick int) *ebiten.Image {
 	if len(a.frames) == 0 {
 		return nil
 	}
@@ -582,26 +617,46 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	}
 }
 
-func (s *GameScene) handleDebugScroll() {
-	if !debugScrollMode || s.worldWidth <= core.Config().Screen.Width {
+func (s *GameScene) handleCameraScrollControls() {
+	if !s.scrollBarAvailable() {
 		return
+	}
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		x, y := ebiten.CursorPosition()
+		s.scrollBarDragging = image.Pt(x, y).In(debugScrollBarRect())
 	}
 	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		return
+		s.scrollBarDragging = false
+	}
+	if s.scrollBarDragging {
+		x, _ := ebiten.CursorPosition()
+		s.setCameraFromScrollBarX(x)
 	}
 
-	x, y := ebiten.CursorPosition()
+	if !s.scrollOMatActive() {
+		return
+	}
+	if ebiten.IsKeyPressed(ebiten.KeyArrowLeft) {
+		s.cameraX = math.Max(0, s.cameraX-scrollOMatKeyboardStep)
+	}
+	if ebiten.IsKeyPressed(ebiten.KeyArrowRight) {
+		maxCameraX := math.Max(0, s.worldWidth-core.Config().Screen.Width)
+		s.cameraX = math.Min(maxCameraX, s.cameraX+scrollOMatKeyboardStep)
+	}
+}
+
+func (s *GameScene) setCameraFromScrollBarX(x int) {
 	bar := debugScrollBarRect()
-	if !image.Pt(x, y).In(bar) {
+	if bar.Dx() <= 0 {
 		return
 	}
-
 	t := float64(x-bar.Min.X) / float64(bar.Dx())
+	t = math.Max(0, math.Min(1, t))
 	s.cameraX = math.Max(0, math.Min(s.worldWidth-core.Config().Screen.Width, t*(s.worldWidth-core.Config().Screen.Width)))
 }
 
 func (s *GameScene) drawDebugScrollBar(screen *ebiten.Image) {
-	if !debugScrollMode || s.worldWidth <= core.Config().Screen.Width {
+	if !s.scrollBarAvailable() {
 		return
 	}
 
@@ -618,6 +673,13 @@ func (s *GameScene) drawDebugScrollBar(screen *ebiten.Image) {
 	handleX := float64(bar.Min.X) + (float64(bar.Dx())-handleW)*t
 	handle := image.Rect(int(handleX), bar.Min.Y+3, int(handleX+handleW), bar.Max.Y-3)
 	drawFrame(screen, handle, color.RGBA{R: 230, G: 230, B: 230, A: 240}, colornames.White)
+}
+
+func (s *GameScene) scrollBarAvailable() bool {
+	if s.worldWidth <= core.Config().Screen.Width {
+		return false
+	}
+	return s.scrollOMatActive() || s.scrollBarDragging
 }
 
 func (s *GameScene) handleBattleInput() {
@@ -681,6 +743,9 @@ func (s *GameScene) consumeSelectedWeaponAmmo(tank *battleTank) bool {
 	if itemIndex < 0 || s.shopItemCountForPlayer(tank.playerIndex, itemIndex) <= 0 {
 		return false
 	}
+	if s.isScrollOMatItem(itemIndex) {
+		return true
+	}
 	s.ensureInventory(tank.playerIndex)
 	if itemIndex < len(s.inventories[tank.playerIndex].classA) && s.inventories[tank.playerIndex].classA[itemIndex] > 0 {
 		s.inventories[tank.playerIndex].classA[itemIndex]--
@@ -707,23 +772,12 @@ func (s *GameScene) itemIndexForWeaponSlot(slot int) int {
 	return slot - 1
 }
 
-func (s *GameScene) weaponForProjectile(p *projectile) weapon {
-	weapons := gameWeapons()
-	if p != nil && p.weaponIndex == 0 {
-		return weapons[0]
-	}
-	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 1 {
-		return weapons[2]
-	}
-	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 2 {
-		return weapons[3]
-	}
-	return weapons[1]
-}
-
 func (s *GameScene) fireActiveWeapon() {
 	tank := s.activeTank()
 	if tank == nil || tank.cannon == nil {
+		return
+	}
+	if s.scrollOMatActive() {
 		return
 	}
 	if !s.consumeSelectedWeaponAmmo(tank) {
@@ -788,7 +842,7 @@ func (s *GameScene) updateProjectile() {
 			continue
 		}
 		if engine.Collision(hitBounds, tank.body.Bounds().ScaledAtCenter(0.78)) {
-			if damage := s.weaponForProjectile(p).damage; damage > 0 {
+			if damage := s.weaponForProjectile(p).Damage; damage > 0 {
 				s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
 				s.awardDirectHitCredits(tank, s.lastDamageSource)
 				s.darkenTank(tank, 0.10)
@@ -841,10 +895,14 @@ func (s *GameScene) nextActivePlayerIndex() int {
 
 func (s *GameScene) delayTurnAdvance(frames int) {
 	if frames <= 0 {
-		s.advanceActivePlayer()
+		if s.turnAdvanceDelay <= 0 {
+			s.advanceActivePlayer()
+		}
 		return
 	}
-	s.turnAdvanceDelay = frames
+	if s.turnAdvanceDelay < frames {
+		s.turnAdvanceDelay = frames
+	}
 }
 
 func (s *GameScene) onGroundImpact(p *projectile) bool {
@@ -852,12 +910,16 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
-	if !weapon.damagesTerrain {
+	if !weapon.DamagesTerrain {
 		return false
 	}
 
 	radius := impactRadiusForWeapon(weapon)
 	duration := s.impactAnimationFramesForWeapon(weapon)
+	s.zeroPowerStartDelay = (duration * 2) / 3
+	defer func() {
+		s.zeroPowerStartDelay = 0
+	}()
 	s.damageTanksInImpactRadius(p.pos, radius)
 	falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
 	if len(falls) > 0 {
@@ -872,9 +934,11 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		radius:   radius,
 		duration: duration,
 		cycles:   impactCyclesForWeapon(weapon),
-		outward:  weapon.impactGradientOutward,
+		outward:  weapon.ImpactGradientOutward,
 	})
-	s.turnAdvanceDelay = duration + s.impactPauseFrames()
+	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
+		s.turnAdvanceDelay = minimumDelay
+	}
 	return true
 }
 
@@ -936,6 +1000,12 @@ func (s *GameScene) updateZeroPowerEffects() {
 	}
 	active := s.zeroPowerEffects[:0]
 	for _, effect := range s.zeroPowerEffects {
+		if effect.delay > 0 {
+			effect.delay--
+			active = append(active, effect)
+			continue
+		}
+		s.updateZeroPowerTankDissolve(effect)
 		effect.age++
 		if effect.age < effect.duration {
 			active = append(active, effect)
@@ -959,6 +1029,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 
 func (s *GameScene) updateBattleCamera() {
 	if s.updateZeroPowerCamera() {
+		return
+	}
+	if s.scrollOMatActive() || s.scrollBarDragging {
 		return
 	}
 	if s.projectile != nil || s.activePlayerIndex < 0 {
@@ -1097,14 +1170,41 @@ func (s *GameScene) startZeroPowerAnimation(tank *battleTank) {
 	tank.tint = color.RGBA{A: 255}
 	models.RecolorTankBody(tank.body, tank.tint)
 	models.RecolorCannon(tank.cannon, tank.tint)
-	duration := maxInt(1, s.zeroPowerSmoke.totalTicks)
-	s.zeroPowerEffects = append(s.zeroPowerEffects, zeroPowerAnimation{
-		tank:     tank,
-		duration: duration,
-	})
-	if s.turnAdvanceDelay < duration {
-		s.turnAdvanceDelay = duration
+	if len(s.zeroPowerAnimations) == 0 {
+		return
 	}
+	animation := s.zeroPowerAnimations[s.rng.Intn(len(s.zeroPowerAnimations))]
+	duration := maxInt(1, animation.totalTicks)
+	delay := maxInt(0, s.zeroPowerStartDelay)
+	s.zeroPowerEffects = append(s.zeroPowerEffects, zeroPowerAnimation{
+		tank:      tank,
+		animation: animation,
+		delay:     delay,
+		duration:  duration,
+	})
+	if s.turnAdvanceDelay < duration+delay {
+		s.turnAdvanceDelay = duration + delay
+	}
+}
+
+func (s *GameScene) updateZeroPowerTankDissolve(effect zeroPowerAnimation) {
+	tank := effect.tank
+	if tank == nil || tank.zeroPowerGone {
+		return
+	}
+	dissolveStart := (effect.duration * 2) / 3
+	if effect.age < dissolveStart {
+		return
+	}
+	progress := float64(effect.age-dissolveStart+1) / float64(maxInt(1, zeroPowerDissolveFrames))
+	if progress >= 1 {
+		tank.zeroPowerGone = true
+		tank.tint.A = 0
+	} else {
+		tank.tint.A = uint8(math.Round(255 * (1 - progress)))
+	}
+	models.RecolorTankBody(tank.body, tank.tint)
+	models.RecolorCannon(tank.cannon, tank.tint)
 }
 
 func (s *GameScene) dropUnsupportedTanks() {
@@ -1204,8 +1304,8 @@ func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
 	}
 
 	weapon := s.weaponForProjectile(s.projectile)
-	c := weapon.color
-	if weapon.showTrail {
+	c := weapon.Color
+	if weapon.ShowTrail {
 		for i, point := range s.projectile.trail {
 			if i%2 != 0 {
 				continue
@@ -1217,7 +1317,7 @@ func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
 	}
 	projected := s.projectile.pos.Project(camera)
 	radius := projectileRadiusForWeapon(weapon)
-	if weapon.roundProjectile {
+	if weapon.RoundProjectile {
 		vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), float32(radius), c, true)
 		return
 	}
@@ -1267,25 +1367,28 @@ func (s *GameScene) drawSandFalls(screen *ebiten.Image, camera *ebiten.GeoM) {
 }
 
 func (s *GameScene) drawZeroPowerEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
-	if len(s.zeroPowerSmoke.frames) == 0 {
-		return
-	}
 	for _, effect := range s.zeroPowerEffects {
-		if effect.tank == nil || effect.tank.body == nil {
+		if effect.tank == nil || effect.tank.body == nil || len(effect.animation.frames) == 0 {
 			continue
 		}
 		body := effect.tank.body.Bounds()
 		center := body.Center()
-		frame := s.zeroPowerSmoke.frameAt(effect.age)
+		if effect.delay > 0 {
+			continue
+		}
+		frame := effect.animation.frameAt(effect.age)
 		if frame == nil {
 			continue
 		}
-		anchor := engine.V(center.X, body.Min.Y-26).Project(camera)
+		anchor := engine.V(center.X, center.Y).Project(camera)
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(
-			anchor.X-float64(s.zeroPowerSmoke.width)/2,
-			anchor.Y-float64(s.zeroPowerSmoke.height)/2,
-		)
+		x := anchor.X - float64(effect.animation.width)/2
+		y := anchor.Y - float64(effect.animation.height)/2
+		if effect.animation.anchor == zeroPowerAnchorTankBottom {
+			tankBottom := engine.V(center.X, body.Max.Y).Project(camera)
+			y = tankBottom.Y - float64(effect.animation.height)
+		}
+		op.GeoM.Translate(x, y)
 		screen.DrawImage(frame, op)
 	}
 }
@@ -1468,7 +1571,7 @@ func (s *GameScene) drawWeaponSlot(screen *ebiten.Image, index int) {
 	r := s.weaponSlotRect(index)
 	weapons := gameWeapons()
 	shopItemIndex := s.itemIndexForWeaponSlot(index)
-	unlocked := index < len(weapons) && weapons[index].unlocked
+	unlocked := index < len(weapons) && weapons[index].Unlocked
 	active := s.activeTank()
 	if index > 0 {
 		unlocked = active != nil && s.shopItemCountForPlayer(active.playerIndex, shopItemIndex) > 0
@@ -1542,36 +1645,6 @@ func (s *GameScene) shopItemCountForPlayer(playerIndex, itemIndex int) int {
 	return count
 }
 
-func drawWeaponIcon(screen *ebiten.Image, r image.Rectangle, weapon weapon) {
-	switch weapon.name {
-	case "Training":
-		drawFilledRect(screen, image.Rect(r.Min.X+11, r.Min.Y+11, r.Max.X-11, r.Max.Y-11), weapon.color)
-	case "Granate":
-		drawFilledRect(screen, image.Rect(r.Min.X+4, r.Min.Y+18, r.Max.X-4, r.Min.Y+23), weapon.color)
-		drawFilledRect(screen, image.Rect(r.Max.X-12, r.Min.Y+13, r.Max.X-5, r.Min.Y+28), color.RGBA{R: 255, G: 222, B: 76, A: 255})
-	default:
-		drawFilledRect(screen, r, weapon.color)
-	}
-}
-
-func drawLockedWeaponIcon(screen *ebiten.Image, r image.Rectangle, index int) {
-	c := color.RGBA{R: 77, G: 80, B: 84, A: 255}
-	switch index % 5 {
-	case 0:
-		drawFilledRect(screen, image.Rect(r.Min.X+5, r.Min.Y+16, r.Max.X-5, r.Min.Y+21), c)
-	case 1:
-		drawFilledRect(screen, image.Rect(r.Min.X+13, r.Min.Y+4, r.Min.X+19, r.Max.Y-4), c)
-		drawFilledRect(screen, image.Rect(r.Min.X+4, r.Min.Y+13, r.Max.X-4, r.Min.Y+19), c)
-	case 2:
-		drawFilledRect(screen, image.Rect(r.Min.X+7, r.Min.Y+7, r.Max.X-7, r.Max.Y-7), c)
-	case 3:
-		drawFilledRect(screen, image.Rect(r.Min.X+3, r.Min.Y+22, r.Max.X-3, r.Min.Y+27), c)
-		drawFilledRect(screen, image.Rect(r.Min.X+8, r.Min.Y+15, r.Max.X-8, r.Min.Y+20), c)
-	default:
-		drawFilledRect(screen, image.Rect(r.Min.X+15, r.Min.Y+3, r.Min.X+21, r.Max.Y-3), c)
-	}
-}
-
 func (s *GameScene) cannonAngleDegrees() float64 {
 	tank := s.activeTank()
 	if tank == nil || tank.cannon == nil || tank.body == nil {
@@ -1580,38 +1653,6 @@ func (s *GameScene) cannonAngleDegrees() float64 {
 	leftLimit := tank.body.Rot - math.Pi
 	displayAngle := engine.RadToDeg(tank.cannon.Rot - leftLimit)
 	return math.Max(0, math.Min(180, displayAngle))
-}
-
-func gameWeapons() []weapon {
-	return []weapon{
-		{name: "Training", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: true},
-		{name: "Granate", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true},
-		{name: "Große Granate", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true, projectileScale: largeGrenadeScale, impactScale: largeGrenadeImpactScale},
-		{name: "Atombombe", color: color.RGBA{R: 238, G: 238, B: 238, A: 255}, damage: directHitDamage, unlocked: true, showTrail: false, roundProjectile: true, damagesTerrain: true, impactScale: atomBombImpactScale, impactAnimationExtraSeconds: atomBombImpactExtraSeconds, impactCycles: 1, impactGradientOutward: true},
-	}
-}
-
-func projectileRadiusForWeapon(weapon weapon) float64 {
-	scale := weapon.projectileScale
-	if scale <= 0 {
-		scale = 1
-	}
-	return float64(projectileRadius) * scale
-}
-
-func impactRadiusForWeapon(weapon weapon) float64 {
-	scale := weapon.impactScale
-	if scale <= 0 {
-		scale = 1
-	}
-	return float64(projectileRadius*impactRadiusMultiplier) * scale
-}
-
-func impactCyclesForWeapon(weapon weapon) int {
-	if weapon.impactCycles <= 0 {
-		return 2
-	}
-	return weapon.impactCycles
 }
 
 func minInt(a, b int) int {
@@ -1708,8 +1749,8 @@ func (s *GameScene) impactAnimationFrames() int {
 	return secondsToFrames(core.Config().Gameplay.ImpactAnimationSeconds)
 }
 
-func (s *GameScene) impactAnimationFramesForWeapon(weapon weapon) int {
-	return secondsToFrames(core.Config().Gameplay.ImpactAnimationSeconds + weapon.impactAnimationExtraSeconds)
+func (s *GameScene) impactAnimationFramesForWeapon(weapon weaponspkg.Weapon) int {
+	return secondsToFrames(core.Config().Gameplay.ImpactAnimationSeconds + weapon.ImpactAnimationExtraSeconds)
 }
 
 func (s *GameScene) impactPauseFrames() int {
@@ -1826,6 +1867,9 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 		return
 	}
 	if s.projectile != nil || s.roundTransitionDelay > 0 || s.roundSeriesComplete {
+		return
+	}
+	if s.scrollOMatActive() {
 		return
 	}
 	s.behaviorRotateOnButton(source)
