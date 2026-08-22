@@ -107,16 +107,20 @@ func debugPlayers(configured []core.DebugPlayerSettings) []PlayerConfig {
 		if kind == PlayerNone {
 			continue
 		}
+		computerID := player.ComputerID
+		if computerID == 0 {
+			computerID = player.ID
+		}
 		name := player.Name
 		if name == "" {
 			name = "Spieler " + strconv.Itoa(len(players)+1)
 			if kind == PlayerComputer {
-				name = computerplayers.Name(computerplayers.ID(player.ComputerID))
+				name = computerplayers.Name(computerplayers.ID(computerID))
 			}
 		}
 		players = append(players, PlayerConfig{
 			Kind:       kind,
-			ComputerID: computerplayers.ID(player.ComputerID),
+			ComputerID: computerplayers.ID(computerID),
 			Name:       name,
 			Color:      player.Color.RGBA(defaultTankColor(i)),
 		})

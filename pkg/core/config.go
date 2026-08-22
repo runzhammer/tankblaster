@@ -23,6 +23,17 @@ type FileSettings struct {
 		ImpactAnimationSeconds   float64 `yaml:"impact_animation_seconds"`
 		ImpactPauseSeconds       float64 `yaml:"impact_pause_seconds"`
 		TankHitPauseSeconds      float64 `yaml:"tank_hit_pause_seconds"`
+		PalmHitPauseSeconds      float64 `yaml:"palm_hit_pause_seconds"`
+		Palms                    struct {
+			MinCount int `yaml:"min_count"`
+			MaxCount int `yaml:"max_count"`
+		} `yaml:"palms"`
+		Clouds struct {
+			MinCount int     `yaml:"min_count"`
+			MaxCount int     `yaml:"max_count"`
+			MinSpeed float64 `yaml:"min_speed"`
+			MaxSpeed float64 `yaml:"max_speed"`
+		} `yaml:"clouds"`
 	} `yaml:"gameplay"`
 	Debug struct {
 		Enabled    bool   `yaml:"enabled"`
@@ -37,6 +48,7 @@ type FileSettings struct {
 
 type DebugPlayerSettings struct {
 	Kind       string        `yaml:"kind"`
+	ID         int           `yaml:"id"`
 	ComputerID int           `yaml:"computer_id"`
 	Name       string        `yaml:"name"`
 	Color      ColorSettings `yaml:"color"`
@@ -63,6 +75,17 @@ type Settings struct {
 		ImpactAnimationSeconds   float64
 		ImpactPauseSeconds       float64
 		TankHitPauseSeconds      float64
+		PalmHitPauseSeconds      float64
+		Palms                    struct {
+			MinCount int
+			MaxCount int
+		}
+		Clouds struct {
+			MinCount int
+			MaxCount int
+			MinSpeed float64
+			MaxSpeed float64
+		}
 	}
 	Debug struct {
 		Enabled    bool
@@ -112,6 +135,34 @@ func init() {
 	s.Gameplay.TankHitPauseSeconds = fs.Gameplay.TankHitPauseSeconds
 	if s.Gameplay.TankHitPauseSeconds < 0 {
 		s.Gameplay.TankHitPauseSeconds = 0
+	}
+	s.Gameplay.PalmHitPauseSeconds = fs.Gameplay.PalmHitPauseSeconds
+	if s.Gameplay.PalmHitPauseSeconds <= 0 {
+		s.Gameplay.PalmHitPauseSeconds = 2
+	}
+	s.Gameplay.Palms.MinCount = fs.Gameplay.Palms.MinCount
+	s.Gameplay.Palms.MaxCount = fs.Gameplay.Palms.MaxCount
+	s.Gameplay.Clouds.MinCount = fs.Gameplay.Clouds.MinCount
+	if s.Gameplay.Clouds.MinCount <= 0 {
+		s.Gameplay.Clouds.MinCount = 3
+	}
+	s.Gameplay.Clouds.MaxCount = fs.Gameplay.Clouds.MaxCount
+	if s.Gameplay.Clouds.MaxCount <= 0 {
+		s.Gameplay.Clouds.MaxCount = 6
+	}
+	if s.Gameplay.Clouds.MaxCount < s.Gameplay.Clouds.MinCount {
+		s.Gameplay.Clouds.MaxCount = s.Gameplay.Clouds.MinCount
+	}
+	s.Gameplay.Clouds.MinSpeed = fs.Gameplay.Clouds.MinSpeed
+	if s.Gameplay.Clouds.MinSpeed <= 0 {
+		s.Gameplay.Clouds.MinSpeed = 0.035
+	}
+	s.Gameplay.Clouds.MaxSpeed = fs.Gameplay.Clouds.MaxSpeed
+	if s.Gameplay.Clouds.MaxSpeed <= 0 {
+		s.Gameplay.Clouds.MaxSpeed = 0.13
+	}
+	if s.Gameplay.Clouds.MaxSpeed < s.Gameplay.Clouds.MinSpeed {
+		s.Gameplay.Clouds.MaxSpeed = s.Gameplay.Clouds.MinSpeed
 	}
 	s.Debug.Enabled = fs.Debug.Enabled
 	s.Debug.StartScene = fs.Debug.StartScene

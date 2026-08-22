@@ -35,6 +35,7 @@ func main() {
 	frameWidth := flag.Int("frame-width", 0, "single frame width in pixels")
 	frameHeight := flag.Int("frame-height", 0, "single frame height in pixels; defaults to the full sheet height")
 	delay := flag.Int("delay", 6, "GIF frame delay in 1/100 seconds")
+	assetColors := flag.Bool("asset-colors", false, "read channels like the original game assets that are not normal BMP BGR")
 	flag.Parse()
 
 	specs := []sheetSpec{}
@@ -45,7 +46,11 @@ func main() {
 		if *source == "" || *target == "" || *frameWidth <= 0 {
 			fail("custom conversion requires -src, -dst and -frame-width")
 		}
-		specs = append(specs, sheetSpec{source: *source, target: *target, frameWidth: *frameWidth, frameHeight: *frameHeight, delay: *delay, colorMode: colorModeBMP})
+		mode := colorModeBMP
+		if *assetColors {
+			mode = colorModeAsset
+		}
+		specs = append(specs, sheetSpec{source: *source, target: *target, frameWidth: *frameWidth, frameHeight: *frameHeight, delay: *delay, colorMode: mode})
 	}
 	if len(specs) == 0 {
 		fail("nothing to do; use -defaults or provide -src, -dst and -frame-width")
@@ -320,6 +325,14 @@ func removeSolidEdgeColumns(frame *image.RGBA) {
 			visible++
 			colors[c] = struct{}{}
 		}
+		if visible > 0 && visible <= 2 {
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				c := frame.RGBAAt(x, y)
+				c.A = 0
+				frame.SetRGBA(x, y, c)
+			}
+			continue
+		}
 		if visible < (bounds.Dy()*3)/4 || len(colors) > 3 {
 			continue
 		}
@@ -349,6 +362,9 @@ func isTransparentKey(c color.RGBA) bool {
 		return true
 	}
 	if c.G < 48 && c.B > 160 && c.R < 220 {
+		return true
+	}
+	if c.G > 240 && c.R < 20 && c.B < 20 {
 		return true
 	}
 	return false

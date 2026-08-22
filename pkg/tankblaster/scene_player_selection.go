@@ -83,20 +83,26 @@ type playerSelectionScene struct {
 	inputRunes     []rune
 	message        string
 
-	baseImage        *ebiten.Image
-	humanPortrait    *ebiten.Image
-	computerPortrait *ebiten.Image
+	baseImage         *ebiten.Image
+	humanPortrait     *ebiten.Image
+	computerPortraits map[computerplayers.ID]*ebiten.Image
 }
 
 func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 	s := &playerSelectionScene{
-		g:                game,
-		rounds:           game.rounds,
-		focusedName:      -1,
-		openPaletteFor:   -1,
-		baseImage:        mustImageFromPNG(r.PlayerSelectionBase),
-		humanPortrait:    mustImageFromPNG(r.PlayerHuman),
-		computerPortrait: mustImageFromPNG(r.PlayerComputer),
+		g:              game,
+		rounds:         game.rounds,
+		focusedName:    -1,
+		openPaletteFor: -1,
+		baseImage:      mustImageFromPNG(r.PlayerSelectionBase),
+		humanPortrait:  mustImageFromPNG(r.PlayerHuman),
+		computerPortraits: map[computerplayers.ID]*ebiten.Image{
+			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
+			computerplayers.FrederikID: mustImageFromPNG(r.PlayerComputerFrederik),
+			computerplayers.MisterXID:  mustImageFromPNG(r.PlayerComputerMisterX),
+			computerplayers.DrNukeID:   mustImageFromPNG(r.PlayerComputerDrNuke),
+			computerplayers.HaraldID:   mustImageFromPNG(r.PlayerComputerHarald),
+		},
 	}
 	if s.rounds <= 0 {
 		s.rounds = 10
@@ -222,8 +228,9 @@ func (s *playerSelectionScene) handleSlotClick(x, y int) bool {
 	for i := range s.slots {
 		r := slotRect(i)
 		titleRect := image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+38)
-		nameRect := image.Rect(r.Min.X+5, r.Max.Y-34, r.Max.X-5, r.Max.Y-6)
+		nameRect := nameInputRectForSlot(i, s.slots[i].Kind)
 		swatchRect := image.Rect(r.Max.X-34, r.Min.Y+42, r.Max.X-12, r.Min.Y+66)
+		portraitRect := portraitRectForSlot(i, s.slots[i].Kind)
 
 		switch {
 		case p.In(titleRect):
@@ -231,13 +238,18 @@ func (s *playerSelectionScene) handleSlotClick(x, y int) bool {
 			s.focusedName = -1
 			s.openPaletteFor = -1
 			return true
-		case s.slots[i].Kind != PlayerNone && p.In(swatchRect):
-			s.openPaletteFor = i
-			s.focusedName = -1
-			return true
 		case s.slots[i].Kind != PlayerNone && p.In(nameRect):
 			s.focusedName = i
 			s.openPaletteFor = -1
+			return true
+		case s.slots[i].Kind == PlayerComputer && p.In(portraitRect):
+			s.cycleComputerPlayer(i)
+			s.focusedName = -1
+			s.openPaletteFor = -1
+			return true
+		case s.slots[i].Kind != PlayerNone && p.In(swatchRect):
+			s.openPaletteFor = i
+			s.focusedName = -1
 			return true
 		}
 	}
@@ -260,6 +272,12 @@ func (s *playerSelectionScene) cycleSlotKind(index int) {
 		slot.ComputerID = computerplayers.DoedelID
 		slot.Name = ""
 	}
+}
+
+func (s *playerSelectionScene) cycleComputerPlayer(index int) {
+	slot := &s.slots[index]
+	slot.ComputerID = computerplayers.NextID(slot.ComputerID)
+	slot.Name = computerplayers.Name(slot.ComputerID)
 }
 
 func (s *playerSelectionScene) nextHumanNumber() int {
@@ -373,26 +391,52 @@ func (s *playerSelectionScene) drawSlot(screen *ebiten.Image, index int) {
 
 	portrait := s.humanPortrait
 	if slot.Kind == PlayerComputer {
-		portrait = s.computerPortrait
+		portrait = s.computerPortraitFor(slot.ComputerID)
 	}
-	op := &ebiten.DrawImageOptions{}
-	if slot.Kind == PlayerHuman {
-		op.GeoM.Translate(float64(r.Min.X+20), float64(r.Min.Y+39))
-	} else {
-		op.GeoM.Translate(float64(r.Min.X+15), float64(r.Min.Y+40))
-	}
-	screen.DrawImage(portrait, op)
+	portraitRect := portraitRectForSlot(index, slot.Kind)
+	drawScaledImage(screen, portrait, portraitRect)
 
 	swatch := image.Rect(r.Max.X-34, r.Min.Y+42, r.Max.X-12, r.Min.Y+66)
 	drawPaintSwatch(screen, swatch, slot.Color)
 
-	nameRect := image.Rect(r.Min.X+5, r.Max.Y-34, r.Max.X-5, r.Max.Y-6)
-	fill := color.RGBA{R: 205, G: 205, B: 205, A: 255}
-	if s.focusedName == index {
-		fill = color.RGBA{R: 238, G: 238, B: 238, A: 255}
-	}
-	drawFrame(screen, nameRect, fill, colornames.Black)
+	nameRect := nameInputRectForSlot(index, slot.Kind)
 	drawText(screen, slot.Name, nameRect.Min.X+6, nameRect.Min.Y+20, colornames.Black)
+	if s.focusedName == index {
+		cursorX := nameRect.Min.X + 8 + text.BoundString(uiTextFace, slot.Name).Dx()
+		if cursorX > nameRect.Max.X-5 {
+			cursorX = nameRect.Max.X - 5
+		}
+		drawFilledRect(screen, image.Rect(cursorX, nameRect.Min.Y+5, cursorX+2, nameRect.Max.Y-5), colornames.Black)
+	}
+}
+
+func (s *playerSelectionScene) computerPortraitFor(id computerplayers.ID) *ebiten.Image {
+	if portrait := s.computerPortraits[id]; portrait != nil {
+		return portrait
+	}
+	return s.computerPortraits[computerplayers.DoedelID]
+}
+
+func portraitRectForSlot(index int, kind PlayerKind) image.Rectangle {
+	r := slotRect(index)
+	if kind == PlayerHuman || kind == PlayerComputer {
+		return image.Rect(r.Min.X+4, r.Min.Y+40, r.Max.X-4, r.Max.Y-4)
+	}
+	return image.Rectangle{}
+}
+
+func nameInputRectForSlot(index int, kind PlayerKind) image.Rectangle {
+	portraitRect := portraitRectForSlot(index, kind)
+	if portraitRect.Empty() {
+		return image.Rectangle{}
+	}
+	height := portraitRect.Dy()
+	return image.Rect(
+		portraitRect.Min.X+4,
+		portraitRect.Min.Y+int(float64(height)*0.83),
+		portraitRect.Max.X-4,
+		portraitRect.Min.Y+int(float64(height)*0.965),
+	)
 }
 
 func (s *playerSelectionScene) drawFooter(screen *ebiten.Image) {

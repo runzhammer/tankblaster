@@ -38,7 +38,9 @@ const (
 
 const (
 	layerBackground = iota
+	layerClouds
 	layerGround
+	layerPalms
 	layerTanks
 	layerProjectiles
 	numLayers
@@ -49,19 +51,20 @@ const gameHUDHeight = 132
 const weaponbarSlotCount = 20
 
 const (
-	projectileRadius         = 4
-	impactRadiusMultiplier   = 4
-	directHitCreditBonus     = 4000
-	impactSplashMinDamage    = 10
-	impactSplashMaxDamage    = 40
-	sandFallFrames           = 12
-	fallDamageStepPixels     = 20
-	fallDamagePerStep        = 10
-	zeroPowerFrames          = 216
-	zeroPowerDissolveFrames  = 12
-	creditsPerScorePoint     = 500
-	debugShopStartingCredits = 20000
-	roundTransitionSeconds   = 5
+	projectileRadius          = 4
+	impactRadiusMultiplier    = 4
+	directHitCreditBonus      = 4000
+	impactSplashMinDamage     = 10
+	impactSplashMaxDamage     = 40
+	sandFallFrames            = 12
+	fallDamageStepPixels      = 20
+	fallDamagePerStep         = 10
+	zeroPowerFrames           = 216
+	zeroPowerDissolveFrames   = 12
+	creditsPerScorePoint      = 500
+	debugShopStartingCredits  = 20000
+	roundTransitionSeconds    = 5
+	computerAdjustSpeedFactor = 1.6
 )
 
 type damageCause uint8
@@ -91,9 +94,34 @@ type battleTank struct {
 	computerPlan   *computerTurnPlan
 }
 
+type battlePalm struct {
+	sprite *engine.Sprite
+	pixels *image.RGBA
+}
+
+type battleCloud struct {
+	sprite *engine.Sprite
+	speed  float64
+	kind   cloudKind
+}
+
+type cloudAsset struct {
+	image *ebiten.Image
+	size  engine.Vec
+	kind  cloudKind
+}
+
+type cloudKind uint8
+
+const (
+	cloudKindNormal cloudKind = iota
+	cloudKindLightning
+)
+
 type computerTurnPlan struct {
 	phase          computerTurnPhase
 	delay          int
+	adjustProgress float64
 	decision       computerplayers.Decision
 	targetStrength int
 	targetAngle    float64
@@ -114,6 +142,7 @@ type computerShotRecord struct {
 	playerIndex int
 	computerID  computerplayers.ID
 	targetIndex int
+	activeX     float64
 	targetX     float64
 }
 
@@ -174,20 +203,26 @@ type GameScene struct {
 
 	// shot engine.Drawable
 
-	layers     engine.Layers
-	ground     models.Ground
-	worldWidth float64
-	cameraX    float64
-	cameraGoal float64
-	rng        *rand.Rand
+	layers      engine.Layers
+	ground      models.Ground
+	worldWidth  float64
+	cameraX     float64
+	cameraGoal  float64
+	rng         *rand.Rand
+	palmImage   *ebiten.Image
+	palmPixels  *image.RGBA
+	clouds      []*battleCloud
+	cloudAssets []cloudAsset
 
 	tanks                []*battleTank
+	palms                []*battlePalm
 	players              []PlayerConfig
 	scores               []int
 	roundScores          []int
 	credits              []int
 	inventories          []shopInventory
 	computerMemories     []computerplayers.Memory
+	effectiveComputerIDs []computerplayers.ID
 	roundNumber          int
 	spawnIndex           int
 	spawnPauseFrames     int
@@ -236,7 +271,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	s.zeroPowerAnimations = zeroPowerAnimations
 	s.shop = shopAssets{
 		human:               mustImageFromPNG(r.PlayerHuman),
-		computer:            mustImageFromPNG(r.PlayerComputer),
+		computer:            mustImageFromPNG(r.PlayerComputerDoedel),
 		storeBg:             mustImageFromPNG(r.StoreBackground),
 		storeMainLeft:       mustImageFromPNG(r.StoreMainLeft),
 		storeMainRight:      mustImageFromPNG(r.StoreMainRight),
@@ -246,6 +281,13 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		weaponbarOnStock:    mustImageFromPNG(r.WeaponbarOnStock),
 		weaponbarOutOfStock: mustImageFromPNG(r.WeaponbarOutOfStock),
 	}
+	palmImage, palmPixels, err := loadPalmAsset()
+	if err != nil {
+		return nil, err
+	}
+	s.palmImage = palmImage
+	s.palmPixels = palmPixels
+	s.cloudAssets = loadCloudAssets()
 	s.players = s.playersForRound()
 	s.scores = make([]int, len(s.players))
 	s.roundScores = make([]int, len(s.players))
@@ -296,6 +338,7 @@ func (s *GameScene) startRound() {
 	s.shopMode = shopModeEntry
 	s.shopSelectedIndex = 0
 	s.roundScores = make([]int, len(s.players))
+	s.assignEffectiveComputerIDs()
 	s.wind = s.rng.Intn(101)
 	if s.rng.Intn(2) == 0 {
 		s.windDirection = -1
@@ -310,6 +353,8 @@ func (s *GameScene) startRound() {
 	gr := models.NewRandomGroundWithSize(s.worldWidth, battlefieldHeight, s.rng.Int63())
 	s.ground = gr
 	s.tanks = nil
+	s.palms = nil
+	s.clouds = nil
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
@@ -343,9 +388,236 @@ func (s *GameScene) startRound() {
 		s.tanks = append(s.tanks, battleTank)
 		s.layers[layerTanks] = engine.AddSprites(s.layers[layerTanks], tank.Sprites)
 	}
+	s.createClouds(battlefieldHeight)
+	s.createPalms()
 	s.cameraGoal = s.cameraTargetForTank(0)
 	s.layers[layerGround] = engine.AddSprites(s.layers[layerGround], gr.Sprites)
+	s.layers[layerPalms] = engine.AddSprites(s.layers[layerPalms], s.palmSprites())
+	s.layers[layerClouds] = engine.AddSprites(s.layers[layerClouds], s.cloudSprites())
 	s.layers[layerBackground] = engine.AddSprites(s.layers[layerBackground], b.Sprites)
+}
+
+func loadCloudAssets() []cloudAsset {
+	clouds := []struct {
+		data []byte
+		kind cloudKind
+	}{
+		{data: r.CloudLightning, kind: cloudKindLightning},
+		{data: r.Cloud1, kind: cloudKindNormal},
+		{data: r.Cloud2, kind: cloudKindNormal},
+		{data: r.Cloud3, kind: cloudKindNormal},
+		{data: r.Cloud4, kind: cloudKindNormal},
+		{data: r.Cloud5, kind: cloudKindNormal},
+	}
+	assets := make([]cloudAsset, 0, len(clouds))
+	for _, cloud := range clouds {
+		img := mustImageFromPNG(cloud.data)
+		bounds := img.Bounds()
+		assets = append(assets, cloudAsset{
+			image: img,
+			size:  engine.V(float64(bounds.Dx()), float64(bounds.Dy())),
+			kind:  cloud.kind,
+		})
+	}
+	return assets
+}
+
+func (s *GameScene) createClouds(battlefieldHeight float64) {
+	if len(s.cloudAssets) == 0 {
+		return
+	}
+	count := s.randomCloudCount()
+	cfg := core.Config().Gameplay.Clouds
+	speedRange := cfg.MaxSpeed - cfg.MinSpeed
+	windBoost := 0.45 + float64(s.wind)/100*0.7
+	minY := 20.0
+	maxY := math.Max(minY, battlefieldHeight*0.28)
+	laneWidth := s.worldWidth / float64(count)
+
+	for i := 0; i < count; i++ {
+		asset := s.cloudAssets[s.rng.Intn(len(s.cloudAssets))]
+		scale := 0.55 + s.rng.Float64()*0.45
+		size := engine.V(asset.size.X*scale, asset.size.Y*scale)
+		laneCenter := laneWidth*float64(i) + laneWidth/2
+		x := laneCenter - size.X/2 + (s.rng.Float64()-0.5)*laneWidth*0.5
+		x = math.Max(-size.X, math.Min(s.worldWidth, x))
+		y := minY + s.rng.Float64()*(maxY-minY)
+		speed := (cfg.MinSpeed + s.rng.Float64()*speedRange) * windBoost
+		cloud := &battleCloud{
+			kind:  asset.kind,
+			speed: speed,
+			sprite: &engine.Sprite{
+				Tag:      cloudSpriteTag(asset.kind),
+				Pos:      &engine.Vec{X: x, Y: y},
+				Size:     &engine.Vec{X: size.X, Y: size.Y},
+				Drawable: engine.NewImageDrawable(asset.image),
+			},
+		}
+		cloud.sprite.Steps = engine.MakeBehaviors(s.behaviorDriftCloud(cloud))
+		s.clouds = append(s.clouds, cloud)
+	}
+}
+
+func cloudSpriteTag(kind cloudKind) string {
+	if kind == cloudKindLightning {
+		return "lightning-cloud"
+	}
+	return "cloud"
+}
+
+func (s *GameScene) randomCloudCount() int {
+	cfg := core.Config().Gameplay.Clouds
+	perScreen := cfg.MinCount + s.rng.Intn(cfg.MaxCount-cfg.MinCount+1)
+	screenWidth := core.Config().Screen.Width
+	if screenWidth <= 0 {
+		return perScreen
+	}
+	screenCount := math.Max(1, s.worldWidth/screenWidth)
+	return maxInt(1, int(math.Round(float64(perScreen)*math.Sqrt(screenCount))))
+}
+
+func (s *GameScene) behaviorDriftCloud(cloud *battleCloud) engine.Behavior {
+	return func(source *engine.Sprite) {
+		if source == nil || source.Pos == nil || source.Size == nil {
+			return
+		}
+		direction := s.windDirection
+		if direction == 0 {
+			direction = 1
+		}
+		source.Pos.X += float64(direction) * cloud.speed
+
+		screenWidth := core.Config().Screen.Width
+		leftEdge := s.cameraX - source.Size.X
+		rightEdge := s.cameraX + screenWidth + source.Size.X
+		if direction > 0 && source.Pos.X > rightEdge {
+			source.Pos.X = leftEdge
+		}
+		if direction > 0 && source.Pos.X+source.Size.X < s.cameraX-screenWidth {
+			source.Pos.X = s.cameraX + screenWidth
+		}
+		if direction < 0 && source.Pos.X+source.Size.X < s.cameraX {
+			source.Pos.X = s.cameraX + screenWidth
+		}
+		if direction < 0 && source.Pos.X > s.cameraX+screenWidth*2 {
+			source.Pos.X = leftEdge
+		}
+	}
+}
+
+func (s *GameScene) cloudSprites() *engine.Sprites {
+	sprites := engine.NewSprites()
+	for _, cloud := range s.clouds {
+		if cloud != nil && cloud.sprite != nil {
+			sprites.Add(cloud.sprite)
+		}
+	}
+	return sprites
+}
+
+func (s *GameScene) createPalms() {
+	if s.palmImage == nil || s.palmPixels == nil {
+		return
+	}
+	count := s.randomPalmCount()
+	if count <= 0 {
+		return
+	}
+	palmBounds := s.palmPixels.Bounds()
+	palmSize := engine.V(float64(palmBounds.Dx()), float64(palmBounds.Dy()))
+	minCenterX := palmSize.X / 2
+	maxCenterX := s.worldWidth - palmSize.X/2
+	if maxCenterX <= minCenterX {
+		return
+	}
+
+	minDistance := s.minimumPalmDistance()
+	occupied := s.tankCenterXs()
+	attempts := 0
+	for len(s.palms) < count && attempts < count*120 {
+		attempts++
+		centerX := minCenterX + s.rng.Float64()*(maxCenterX-minCenterX)
+		if tooCloseToAny(centerX, occupied, minDistance) {
+			continue
+		}
+		s.addPalm(centerX, palmSize)
+		occupied = append(occupied, centerX)
+	}
+	for len(s.palms) < count && attempts < count*180 {
+		attempts++
+		centerX := minCenterX + s.rng.Float64()*(maxCenterX-minCenterX)
+		if tooCloseToAny(centerX, occupied, minDistance*0.55) {
+			continue
+		}
+		s.addPalm(centerX, palmSize)
+		occupied = append(occupied, centerX)
+	}
+}
+
+func (s *GameScene) addPalm(centerX float64, palmSize engine.Vec) {
+	surfaceY := s.ground.SurfaceY(centerX)
+	palm := &battlePalm{
+		pixels: s.palmPixels,
+		sprite: &engine.Sprite{
+			Tag:      "palm",
+			Pos:      &engine.Vec{X: centerX - palmSize.X/2, Y: surfaceY - palmSize.Y},
+			Size:     &engine.Vec{X: palmSize.X, Y: palmSize.Y},
+			Drawable: engine.NewImageDrawable(s.palmImage),
+		},
+	}
+	s.palms = append(s.palms, palm)
+}
+
+func (s *GameScene) randomPalmCount() int {
+	cfg := core.Config().Gameplay.Palms
+	minCount := cfg.MinCount
+	if minCount <= 0 {
+		minCount = 1
+	}
+	maxCount := cfg.MaxCount
+	if maxCount <= 0 {
+		maxCount = len(s.players)
+	}
+	if maxCount < minCount {
+		maxCount = minCount
+	}
+	return minCount + s.rng.Intn(maxCount-minCount+1)
+}
+
+func (s *GameScene) minimumPalmDistance() float64 {
+	playerCount := maxInt(1, len(s.players))
+	laneWidth := s.worldWidth / float64(playerCount)
+	return math.Max(110, laneWidth*0.42)
+}
+
+func (s *GameScene) tankCenterXs() []float64 {
+	centers := make([]float64, 0, len(s.tanks))
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil {
+			continue
+		}
+		centers = append(centers, tank.body.Pos.X+tank.body.Size.X/2)
+	}
+	return centers
+}
+
+func tooCloseToAny(x float64, occupied []float64, minDistance float64) bool {
+	for _, other := range occupied {
+		if math.Abs(x-other) < minDistance {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *GameScene) palmSprites() *engine.Sprites {
+	sprites := engine.NewSprites()
+	for _, palm := range s.palms {
+		if palm != nil && palm.sprite != nil {
+			sprites.Add(palm.sprite)
+		}
+	}
+	return sprites
 }
 
 func (s *GameScene) playersForRound() []PlayerConfig {
@@ -619,6 +891,21 @@ func loadZeroPowerAnimations() ([]spriteAnimation, error) {
 	return animations, nil
 }
 
+func loadPalmAsset() (*ebiten.Image, *image.RGBA, error) {
+	decoded, _, err := image.Decode(bytes.NewReader(r.Palm))
+	if err != nil {
+		return nil, nil, err
+	}
+	bounds := decoded.Bounds()
+	pixels := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	for y := 0; y < bounds.Dy(); y++ {
+		for x := 0; x < bounds.Dx(); x++ {
+			pixels.Set(x, y, decoded.At(bounds.Min.X+x, bounds.Min.Y+y))
+		}
+	}
+	return ebiten.NewImageFromImage(pixels), pixels, nil
+}
+
 func (a spriteAnimation) frameAt(tick int) *ebiten.Image {
 	if len(a.frames) == 0 {
 		return nil
@@ -776,7 +1063,7 @@ func (s *GameScene) handleComputerTurn() {
 		return
 	}
 	if tank.computerPlan == nil {
-		decision := computerplayers.Decide(tank.player.ComputerID, s.computerPlayerState(tank), s.rng)
+		decision := computerplayers.Decide(s.effectiveComputerID(tank), s.computerPlayerState(tank), s.rng)
 		tank.computerPlan = &computerTurnPlan{
 			phase:          computerTurnWaitCamera,
 			decision:       decision,
@@ -801,21 +1088,25 @@ func (s *GameScene) updateComputerTurnPlan(tank *battleTank) {
 		}
 		plan.phase = computerTurnAdjustStrength
 	case computerTurnAdjustStrength:
-		if plan.delay > 0 {
-			plan.delay--
+		if tank.shotStrength == plan.targetStrength {
+			plan.adjustProgress = 0
+			plan.phase = computerTurnAdjustAngle
 			return
 		}
+		plan.adjustProgress += computerAdjustSpeedFactor
+		adjustInterval := float64(4)
+		if plan.adjustProgress < adjustInterval {
+			return
+		}
+		plan.adjustProgress -= adjustInterval
 		if tank.shotStrength < plan.targetStrength {
 			tank.shotStrength++
-			plan.delay = 3
 			return
 		}
 		if tank.shotStrength > plan.targetStrength {
 			tank.shotStrength--
-			plan.delay = 3
 			return
 		}
-		plan.phase = computerTurnAdjustAngle
 	case computerTurnAdjustAngle:
 		if s.adjustComputerCannonAngle(tank, plan.targetAngle) {
 			return
@@ -861,7 +1152,40 @@ func (s *GameScene) computerPlayerState(active *battleTank) computerplayers.Stat
 			Alive: tank.power > 0 && tank.landed && !tank.falling,
 		})
 	}
+	for _, palm := range s.palms {
+		if palm == nil || palm.sprite == nil {
+			continue
+		}
+		bounds := palm.sprite.Bounds()
+		state.Obstacles = append(state.Obstacles, computerplayers.ObstacleState{
+			X:      bounds.Min.X,
+			Y:      bounds.Min.Y,
+			Width:  bounds.W(),
+			Height: bounds.H(),
+		})
+	}
 	return state
+}
+
+func (s *GameScene) assignEffectiveComputerIDs() {
+	s.effectiveComputerIDs = make([]computerplayers.ID, len(s.players))
+	for i, player := range s.players {
+		id := player.ComputerID
+		if player.Kind == PlayerComputer && id == computerplayers.MisterXID {
+			id = computerplayers.RandomMisterXID(s.rng)
+		}
+		s.effectiveComputerIDs[i] = id
+	}
+}
+
+func (s *GameScene) effectiveComputerID(tank *battleTank) computerplayers.ID {
+	if tank == nil || tank.playerIndex < 0 || tank.playerIndex >= len(s.effectiveComputerIDs) {
+		if tank != nil {
+			return tank.player.ComputerID
+		}
+		return computerplayers.DoedelID
+	}
+	return s.effectiveComputerIDs[tank.playerIndex]
 }
 
 func (s *GameScene) availableComputerWeaponSlots(tank *battleTank) []int {
@@ -882,7 +1206,7 @@ func (s *GameScene) adjustComputerCannonAngle(tank *battleTank, targetAngle floa
 	if tank.cannon != nil && tank.body != nil {
 		current := s.cannonAngleDegreesForTank(tank)
 		delta := targetAngle - current
-		step := math.Max(1, float64(tank.cannon.RotationSpeed))
+		step := math.Max(1, float64(tank.cannon.RotationSpeed)*computerAdjustSpeedFactor)
 		if math.Abs(delta) <= step {
 			leftLimit := tank.body.Rot - math.Pi
 			tank.cannon.Rot = leftLimit + engine.DegToRad(targetAngle)
@@ -928,8 +1252,11 @@ func (s *GameScene) computerShotRecordFor(tank *battleTank) computerShotRecord {
 	record := computerShotRecord{
 		active:      true,
 		playerIndex: tank.playerIndex,
-		computerID:  tank.player.ComputerID,
+		computerID:  s.effectiveComputerID(tank),
 		targetIndex: tank.computerPlan.decision.TargetIndex,
+	}
+	if tank.body != nil {
+		record.activeX = tank.body.Bounds().Center().X
 	}
 	if target := s.tankByPlayerIndex(record.targetIndex); target != nil && target.body != nil {
 		record.targetX = target.body.Bounds().Center().X
@@ -946,9 +1273,11 @@ func (s *GameScene) reportComputerShot(impact engine.Vec, hitPlayerIndex int, di
 		return
 	}
 	computerplayers.Learn(record.computerID, &s.computerMemories[record.playerIndex], computerplayers.Lesson{
-		TargetX: record.targetX,
-		ImpactX: impact.X,
-		Hit:     directHit && hitPlayerIndex == record.targetIndex,
+		ActiveX:     record.activeX,
+		TargetIndex: record.targetIndex,
+		TargetX:     record.targetX,
+		ImpactX:     impact.X,
+		Hit:         directHit && hitPlayerIndex == record.targetIndex,
 	})
 	s.lastComputerShot = computerShotRecord{}
 }
@@ -1080,6 +1409,13 @@ func (s *GameScene) updateProjectile() {
 		return
 	}
 
+	if s.projectileHitsPalm(p, projectileRadiusForWeapon(s.weaponForProjectile(p))) {
+		s.reportComputerShot(p.pos, -1, false)
+		s.projectile = nil
+		s.delayTurnAdvance(s.palmHitPauseFrames())
+		return
+	}
+
 	if p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
 		if s.onGroundImpact(p) {
 			s.projectile = nil
@@ -1107,6 +1443,69 @@ func (s *GameScene) updateProjectile() {
 			return
 		}
 	}
+}
+
+func (s *GameScene) projectileHitsPalm(p *projectile, radius float64) bool {
+	if p == nil || len(s.palms) == 0 {
+		return false
+	}
+	segmentLength := math.Hypot(p.pos.X-p.prev.X, p.pos.Y-p.prev.Y)
+	stepLength := math.Max(1, radius)
+	steps := maxInt(1, int(math.Ceil(segmentLength/stepLength)))
+	for step := 0; step <= steps; step++ {
+		t := float64(step) / float64(steps)
+		center := engine.V(
+			p.prev.X+(p.pos.X-p.prev.X)*t,
+			p.prev.Y+(p.pos.Y-p.prev.Y)*t,
+		)
+		if s.projectileCenterHitsPalm(center, radius) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *GameScene) projectileCenterHitsPalm(center engine.Vec, radius float64) bool {
+	minX := int(math.Floor(center.X - radius))
+	maxX := int(math.Ceil(center.X + radius))
+	minY := int(math.Floor(center.Y - radius))
+	maxY := int(math.Ceil(center.Y + radius))
+	r2 := radius * radius
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			dx := float64(x) - center.X
+			dy := float64(y) - center.Y
+			if dx*dx+dy*dy > r2 {
+				continue
+			}
+			if s.visiblePalmPixelAt(float64(x), float64(y)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *GameScene) visiblePalmPixelAt(worldX, worldY float64) bool {
+	for _, palm := range s.palms {
+		if palm == nil || palm.sprite == nil || palm.pixels == nil {
+			continue
+		}
+		bounds := palm.sprite.Bounds()
+		if worldX < bounds.Min.X || worldX >= bounds.Max.X || worldY < bounds.Min.Y || worldY >= bounds.Max.Y {
+			continue
+		}
+		sourceX := int((worldX - bounds.Min.X) / bounds.W() * float64(palm.pixels.Bounds().Dx()))
+		sourceY := int((worldY - bounds.Min.Y) / bounds.H() * float64(palm.pixels.Bounds().Dy()))
+		if sourceX < 0 || sourceX >= palm.pixels.Bounds().Dx() || sourceY < 0 || sourceY >= palm.pixels.Bounds().Dy() {
+			continue
+		}
+		if palm.pixels.RGBAAt(sourceX, sourceY).A > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GameScene) finishProjectile() {
@@ -1319,6 +1718,13 @@ func (s *GameScene) activeTank() *battleTank {
 		return nil
 	}
 	return s.tanks[s.activePlayerIndex]
+}
+
+func (s *GameScene) hudTank() *battleTank {
+	if !s.allTanksLanded() && s.spawnIndex >= 0 && s.spawnIndex < len(s.tanks) {
+		return s.tanks[s.spawnIndex]
+	}
+	return s.activeTank()
 }
 
 func (s *GameScene) maxShotStrength() int {
@@ -1660,7 +2066,7 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 	drawFilledRect(screen, hud, color.RGBA{R: 5, G: 7, B: 10, A: 242})
 	drawFilledRect(screen, image.Rect(hud.Min.X, hud.Min.Y, hud.Max.X, hud.Min.Y+2), color.RGBA{R: 245, G: 246, B: 214, A: 255})
 
-	active := s.activeTank()
+	active := s.hudTank()
 	playerName := "Spieler"
 	playerColor := color.RGBA{R: 255, G: 160, B: 28, A: 255}
 	power := 100
@@ -1673,7 +2079,7 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 	}
 
 	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+14, 112, hud.Min.Y+44), "Stärke", shotStrength)
-	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+50, 122, hud.Min.Y+80), "Winkel", int(math.Round(s.cannonAngleDegrees())))
+	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+50, 122, hud.Min.Y+80), "Winkel", int(math.Round(s.cannonAngleDegreesForTank(active))))
 
 	centerX := int(screenCfg.Width) / 2
 	drawText(screen, playerName, centerX-42, hud.Min.Y+30, playerColor)
@@ -2015,6 +2421,10 @@ func (s *GameScene) impactPauseFrames() int {
 
 func (s *GameScene) tankHitPauseFrames() int {
 	return secondsToFrames(core.Config().Gameplay.TankHitPauseSeconds)
+}
+
+func (s *GameScene) palmHitPauseFrames() int {
+	return secondsToFrames(core.Config().Gameplay.PalmHitPauseSeconds)
 }
 
 func secondsToFrames(seconds float64) int {

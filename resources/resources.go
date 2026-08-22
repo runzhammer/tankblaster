@@ -35,8 +35,20 @@ var PlayerSelectionBase []byte
 //go:embed player_human.png
 var PlayerHuman []byte
 
-//go:embed player_computer.png
-var PlayerComputer []byte
+//go:embed player_computer_doedel.png
+var PlayerComputerDoedel []byte
+
+//go:embed player_computer_frederik.png
+var PlayerComputerFrederik []byte
+
+//go:embed player_computer_mister_x.png
+var PlayerComputerMisterX []byte
+
+//go:embed player_computer_dr_nuke.png
+var PlayerComputerDrNuke []byte
+
+//go:embed player_computer_harald.png
+var PlayerComputerHarald []byte
 
 //go:embed zero_power_dust_explosion.png
 var ZeroPowerDustExplosionPNG []byte
@@ -76,3 +88,24 @@ var WeaponbarOnStock []byte
 
 //go:embed weaponbar_outofstock.png
 var WeaponbarOutOfStock []byte
+
+//go:embed palm.png
+var Palm []byte
+
+//go:embed cloud_lightning.png
+var CloudLightning []byte
+
+//go:embed cloud_1.png
+var Cloud1 []byte
+
+//go:embed cloud_2.png
+var Cloud2 []byte
+
+//go:embed cloud_3.png
+var Cloud3 []byte
+
+//go:embed cloud_4.png
+var Cloud4 []byte
+
+//go:embed cloud_5.png
+var Cloud5 []byte

@@ -24,8 +24,8 @@ type Tank struct {
 
 func NewTank(name string, tankColor color.RGBA) Tank {
 
-	scaleFactor := float64(0.55)
-	cannonWidth := 44.0
+	scaleFactor := float64(0.40)
+	cannonWidth := 30.0
 	cannonHeight := 8.0
 
 	m := Tank{Name: name}

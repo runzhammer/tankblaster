@@ -8,10 +8,19 @@ gameplay:
   impact_animation_seconds: 0.6
   impact_pause_seconds: 1
   tank_hit_pause_seconds: 0.6
+  palm_hit_pause_seconds: 2
+  palms:
+    min_count: 1
+    max_count: 0
+  clouds:
+    min_count: 1
+    max_count: 2
+    min_speed: 0.05
+    max_speed: 0.13
 debug:
   enabled: true
   start_scene: game
-  start_shop: true
+  start_shop: false
   game:
     rounds: 10
     players:
@@ -24,7 +33,7 @@ debug:
       #     a: 255
       - kind: computer
         name: "F. Merz"
-        id: 0
+        computerID: 0
         color:
           r: 230
           g: 20
@@ -32,7 +41,7 @@ debug:
           a: 255
       - kind: computer
         name: "B. Bartislartfast"
-        id: 0
+        computerID: 1
         color:
           r: 200
           g: 90
@@ -40,7 +49,7 @@ debug:
           a: 255
       - kind: computer
         name: "C. Koch"
-        id: 0
+        computerID: 2
         color:
           r: 230
           g: 34
@@ -48,9 +57,17 @@ debug:
           a: 255
       - kind: computer
         name: "D. Dödel"
-        id: 0
+        computerID: 3
         color:
           r: 10
           g: 84
           b: 45
           a: 255
+      - kind: computer
+        name: "Harald der Dritte"
+        computerID: 4
+        color:
+          r: 100
+          g: 84
+          b: 15
+          a: 155
