@@ -33,7 +33,7 @@ debug:
       #     a: 255
       - kind: computer
         name: "F. Merz"
-        computerID: 0
+        computer_id: 0
         color:
           r: 230
           g: 20
@@ -41,7 +41,7 @@ debug:
           a: 255
       - kind: computer
         name: "B. Bartislartfast"
-        computerID: 1
+        computer_id: 1
         color:
           r: 200
           g: 90
@@ -49,7 +49,7 @@ debug:
           a: 255
       - kind: computer
         name: "C. Koch"
-        computerID: 2
+        computer_id: 2
         color:
           r: 230
           g: 34
@@ -57,7 +57,7 @@ debug:
           a: 255
       - kind: computer
         name: "D. Dödel"
-        computerID: 3
+        computer_id: 3
         color:
           r: 10
           g: 84
@@ -65,7 +65,7 @@ debug:
           a: 255
       - kind: computer
         name: "Harald der Dritte"
-        computerID: 4
+        computer_id: 4
         color:
           r: 100
           g: 84

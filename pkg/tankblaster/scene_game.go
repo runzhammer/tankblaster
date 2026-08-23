@@ -1145,11 +1145,13 @@ func (s *GameScene) computerPlayerState(active *battleTank) computerplayers.Stat
 		}
 		center := tank.body.Bounds().Center()
 		state.Tanks = append(state.Tanks, computerplayers.TankState{
-			Index: tank.playerIndex,
-			X:     center.X,
-			Y:     center.Y,
-			Power: tank.power,
-			Alive: tank.power > 0 && tank.landed && !tank.falling,
+			Index:  tank.playerIndex,
+			X:      center.X,
+			Y:      center.Y,
+			Width:  tank.body.Bounds().W(),
+			Height: tank.body.Bounds().H(),
+			Power:  tank.power,
+			Alive:  tank.power > 0 && tank.landed && !tank.falling,
 		})
 	}
 	for _, palm := range s.palms {
@@ -1162,6 +1164,19 @@ func (s *GameScene) computerPlayerState(active *battleTank) computerplayers.Stat
 			Y:      bounds.Min.Y,
 			Width:  bounds.W(),
 			Height: bounds.H(),
+		})
+	}
+	const groundSampleStep = 16
+	for x := 0.0; x <= s.worldWidth; x += groundSampleStep {
+		state.Ground = append(state.Ground, computerplayers.GroundSample{
+			X: x,
+			Y: s.ground.SurfaceY(x),
+		})
+	}
+	if len(state.Ground) == 0 || state.Ground[len(state.Ground)-1].X < s.worldWidth {
+		state.Ground = append(state.Ground, computerplayers.GroundSample{
+			X: s.worldWidth,
+			Y: s.ground.SurfaceY(s.worldWidth),
 		})
 	}
 	return state
@@ -1403,7 +1418,7 @@ func (s *GameScene) updateProjectile() {
 	}
 
 	battlefieldHeight := s.battlefieldHeight()
-	if p.pos.X < -80 || p.pos.X > s.worldWidth+80 || p.pos.Y > battlefieldHeight+80 || p.pos.Y < -battlefieldHeight {
+	if p.pos.X < -80 || p.pos.X > s.worldWidth+80 || p.pos.Y > battlefieldHeight+80 {
 		s.reportComputerShot(p.pos, -1, false)
 		s.finishProjectile()
 		return

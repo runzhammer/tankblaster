@@ -33,11 +33,13 @@ var orderedIDs = []ID{
 }
 
 type TankState struct {
-	Index int
-	X     float64
-	Y     float64
-	Power int
-	Alive bool
+	Index  int
+	X      float64
+	Y      float64
+	Width  float64
+	Height float64
+	Power  int
+	Alive  bool
 }
 
 type ObstacleState struct {
@@ -47,10 +49,16 @@ type ObstacleState struct {
 	Height float64
 }
 
+type GroundSample struct {
+	X float64
+	Y float64
+}
+
 type State struct {
 	ActiveIndex          int
 	Tanks                []TankState
 	Obstacles            []ObstacleState
+	Ground               []GroundSample
 	AvailableWeaponSlots []int
 	MaxStrength          int
 	Wind                 int

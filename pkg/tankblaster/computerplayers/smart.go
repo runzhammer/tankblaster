@@ -23,6 +23,7 @@ type smartProfile struct {
 	obstaclePenalty     float64
 	learningRate        float64
 	targetBiasLimit     float64
+	hitReward           float64
 	preferHighDamage    bool
 	preferFragileTarget bool
 }
@@ -31,46 +32,49 @@ var (
 	frederikProfile = smartProfile{
 		angleStep:          3,
 		strengthStep:       4,
-		angleNoise:         12,
-		strengthNoise:      7,
-		selfTargetChance:   0.06,
-		randomTargetChance: 0.18,
-		trainingAmmoChance: 0.12,
+		angleNoise:         7,
+		strengthNoise:      4,
+		selfTargetChance:   0.03,
+		randomTargetChance: 0.10,
+		trainingAmmoChance: 0.06,
 		delayMin:           35,
 		delayJitter:        60,
 		obstaclePenalty:    140,
 		learningRate:       0.32,
 		targetBiasLimit:    220,
+		hitReward:          600,
 	}
 	drNukeProfile = smartProfile{
-		angleStep:           2,
-		strengthStep:        2,
-		angleNoise:          3.5,
-		strengthNoise:       2,
-		selfTargetChance:    0.015,
-		randomTargetChance:  0.08,
-		trainingAmmoChance:  0.04,
+		angleStep:           1.5,
+		strengthStep:        1,
+		angleNoise:          1.7,
+		strengthNoise:       1,
+		selfTargetChance:    0.004,
+		randomTargetChance:  0.03,
+		trainingAmmoChance:  0.01,
 		delayMin:            26,
 		delayJitter:         38,
 		obstaclePenalty:     360,
 		learningRate:        0.5,
 		targetBiasLimit:     260,
+		hitReward:           900,
 		preferHighDamage:    true,
 		preferFragileTarget: true,
 	}
 	haraldProfile = smartProfile{
-		angleStep:           1,
+		angleStep:           0.75,
 		strengthStep:        1,
-		angleNoise:          1.4,
-		strengthNoise:       1,
+		angleNoise:          0.35,
+		strengthNoise:       0.25,
 		selfTargetChance:    0,
-		randomTargetChance:  0.015,
+		randomTargetChance:  0,
 		trainingAmmoChance:  0,
 		delayMin:            18,
 		delayJitter:         24,
 		obstaclePenalty:     900,
 		learningRate:        0.72,
 		targetBiasLimit:     320,
+		hitReward:           1400,
 		preferHighDamage:    true,
 		preferFragileTarget: true,
 	}
@@ -197,8 +201,14 @@ func simulatedShotError(active, target TankState, strength int, displayAngle flo
 		vy += gravity
 		x += vx
 		y += vy
+		if pointHitsTarget(x, y, target) {
+			return math.Max(0, float64(frame)*0.08-profile.hitReward)
+		}
 		if !blocked && profile.obstaclePenalty > 0 && pointHitsObstacle(x, y, state.Obstacles) {
 			blocked = true
+		}
+		if groundY, ok := groundSurfaceY(x, state.Ground); ok && y >= groundY {
+			return math.Hypot(x-target.X, y-target.Y) + 180
 		}
 		dx := x - target.X
 		dy := y - target.Y
@@ -214,6 +224,33 @@ func simulatedShotError(active, target TankState, strength int, displayAngle flo
 		best += profile.obstaclePenalty
 	}
 	return best
+}
+
+func pointHitsTarget(x, y float64, target TankState) bool {
+	halfWidth := math.Max(16, target.Width*0.42)
+	halfHeight := math.Max(10, target.Height*0.42)
+	return x >= target.X-halfWidth && x <= target.X+halfWidth &&
+		y >= target.Y-halfHeight && y <= target.Y+halfHeight
+}
+
+func groundSurfaceY(x float64, samples []GroundSample) (float64, bool) {
+	if len(samples) == 0 || x < samples[0].X || x > samples[len(samples)-1].X {
+		return 0, false
+	}
+	for i := 1; i < len(samples); i++ {
+		right := samples[i]
+		if x > right.X {
+			continue
+		}
+		left := samples[i-1]
+		width := right.X - left.X
+		if width <= 0 {
+			return right.Y, true
+		}
+		t := (x - left.X) / width
+		return left.Y + (right.Y-left.Y)*t, true
+	}
+	return samples[len(samples)-1].Y, true
 }
 
 func pointHitsObstacle(x, y float64, obstacles []ObstacleState) bool {

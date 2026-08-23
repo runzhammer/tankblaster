@@ -19,8 +19,13 @@ func (Doedel) Decide(state State, rng *rand.Rand) Decision {
 
 	target := chooseDoedelTarget(state, rng)
 	aimTarget := applyMemoryAimBias(target, state.Memory)
-	angle := doedelAngle(state, aimTarget, rng)
-	strength := doedelStrength(state, aimTarget, minStrength, maxStrength, rng)
+	shot := bestShot(state, aimTarget, minStrength, maxStrength, doedelProfile())
+	angle := clampFloat(shot.angle+rng.NormFloat64()*10, 0, 180)
+	strength := clampInt(int(math.Round(float64(shot.strength)+rng.NormFloat64()*6)), minStrength, maxStrength)
+	if rng.Float64() < 0.18 {
+		angle = doedelAngle(state, aimTarget, rng)
+		strength = doedelStrength(state, aimTarget, minStrength, maxStrength, rng)
+	}
 
 	return Decision{
 		TargetIndex:  target.Index,
@@ -28,6 +33,19 @@ func (Doedel) Decide(state State, rng *rand.Rand) Decision {
 		Strength:     strength,
 		AngleDegrees: angle,
 		DelayFrames:  45 + rng.Intn(85),
+	}
+}
+
+func doedelProfile() smartProfile {
+	return smartProfile{
+		angleStep:       5,
+		strengthStep:    6,
+		angleNoise:      10,
+		strengthNoise:   6,
+		obstaclePenalty: 35,
+		learningRate:    0.18,
+		targetBiasLimit: 160,
+		hitReward:       250,
 	}
 }
 
