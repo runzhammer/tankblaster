@@ -107,6 +107,12 @@ var PalmSmokePNG []byte
 //go:embed palm_crumble.png
 var PalmCrumblePNG []byte
 
+//go:embed water_texture.png
+var WaterTexturePNG []byte
+
+//go:embed water_blubber.png
+var WaterBlubberPNG []byte
+
 //go:embed cloud_lightning.png
 var CloudLightning []byte
 

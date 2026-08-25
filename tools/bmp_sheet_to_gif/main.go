@@ -83,6 +83,8 @@ func defaultZeroPowerSpecs() []sheetSpec {
 		{source: "original_assets/BITMAP/IDB_PALME_GERIPPE.bmp", target: "resources/palm_skeleton.png", frameWidth: 121, delay: 8, colorMode: colorModeBMP},
 		{source: "original_assets/BITMAP/IDB_PALME_RAUCH.bmp", target: "resources/palm_smoke.png", frameWidth: 73, delay: 8, colorMode: colorModeBMP},
 		{source: "original_assets/BITMAP/IDB_PALME_BROESEL.bmp", target: "resources/palm_crumble.png", frameWidth: 121, frameHeight: 152, delay: 8, colorMode: colorModeAsset},
+		{source: "original_assets/BITMAP/IDB_WATERTEXTURE.bmp", target: "resources/water_texture.png", frameWidth: 64, delay: 8, colorMode: colorModeAsset},
+		{source: "original_assets/BITMAP/IDB_WATER_BLUBBER.bmp", target: "resources/water_blubber.png", frameWidth: 19, delay: 8, colorMode: colorModeBMP},
 	}
 }
 

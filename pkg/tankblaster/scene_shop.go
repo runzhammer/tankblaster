@@ -105,6 +105,9 @@ func makeShopInventories(playerCount int) []shopInventory {
 		if core.Config().Debug.Enabled && len(inventories[i].classA) > 6 {
 			inventories[i].classA[6] = 50
 		}
+		if core.Config().Debug.Enabled && len(inventories[i].classA) > 7 {
+			inventories[i].classA[7] = 50
+		}
 		if core.Config().Debug.Enabled {
 			for itemIndex, item := range items {
 				if item.name == scrollOMatItemName {

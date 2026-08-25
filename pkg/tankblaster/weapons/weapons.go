@@ -20,6 +20,7 @@ type Weapon struct {
 	ImpactAnimationStyle        ImpactAnimationStyle
 	PlantsPalm                  bool
 	ImpactDamage                int
+	FillsWater                  bool
 }
 
 type ImpactAnimationStyle uint8
@@ -41,6 +42,7 @@ func List() []Weapon {
 		PlasmaMelter(),
 		WonderPalm(),
 		Fireball(),
+		Water(),
 	}
 }
 
