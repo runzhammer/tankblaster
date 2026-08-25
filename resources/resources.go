@@ -92,6 +92,21 @@ var WeaponbarOutOfStock []byte
 //go:embed palm.png
 var Palm []byte
 
+//go:embed fireball_impact.png
+var FireballImpactPNG []byte
+
+//go:embed palm_fire.png
+var PalmFirePNG []byte
+
+//go:embed palm_skeleton.png
+var PalmSkeletonPNG []byte
+
+//go:embed palm_smoke.png
+var PalmSmokePNG []byte
+
+//go:embed palm_crumble.png
+var PalmCrumblePNG []byte
+
 //go:embed cloud_lightning.png
 var CloudLightning []byte
 

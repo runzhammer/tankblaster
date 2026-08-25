@@ -95,9 +95,22 @@ func NewGame() (core.Game, error) {
 }
 
 func (g *GameLoop) applyDebugConfig() {
-	cfg := core.Config().Debug.Game
+	debug := core.Config().Debug
+	cfg := debug.Game
 	g.rounds = cfg.Rounds
-	g.players = debugPlayers(cfg.Players)
+	g.players = debugPlayersForMode(debug.Mode, cfg.Players)
+}
+
+func debugPlayersForMode(mode string, configured []core.DebugPlayerSettings) []PlayerConfig {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "two_humans", "2_humans", "human_vs_human", "menschen":
+		return []PlayerConfig{
+			{Kind: PlayerHuman, Name: "Spieler 1", Color: defaultTankColor(0)},
+			{Kind: PlayerHuman, Name: "Spieler 2", Color: defaultTankColor(1)},
+		}
+	default:
+		return debugPlayers(configured)
+	}
 }
 
 func debugPlayers(configured []core.DebugPlayerSettings) []PlayerConfig {

@@ -22,9 +22,11 @@ type TaggedSpriteContainer interface {
 // It is used as follows:
 //
 // iter := set.Iterator()
-// for obj, ok := iter(); ok; obj, ok = iter() {
-//   ..use obj..
-// }
+//
+//	for obj, ok := iter(); ok; obj, ok = iter() {
+//	  ..use obj..
+//	}
+//
 // Removing an sprite during iteration is undefined.
 type SpriteIterator func() (next *Sprite, ok bool)
 

@@ -29,7 +29,7 @@ const (
 )
 
 func main() {
-	defaults := flag.Bool("defaults", false, "convert the known zero-power animation sheets")
+	defaults := flag.Bool("defaults", false, "convert the known original animation sheets")
 	source := flag.String("src", "", "source BMP spritesheet")
 	target := flag.String("dst", "", "target PNG spritesheet")
 	frameWidth := flag.Int("frame-width", 0, "single frame width in pixels")
@@ -78,6 +78,11 @@ func defaultZeroPowerSpecs() []sheetSpec {
 		{source: "original_assets/BITMAP/IDB_EXPLOSION.bmp", target: "resources/zero_power_explosion.png", frameWidth: 67, frameHeight: 64, delay: 6, colorMode: colorModeBMP},
 		{source: "original_assets/BITMAP/IDB_EXPLOSION_PILZ.bmp", target: "resources/zero_power_mushroom_explosion.png", frameWidth: 51, frameHeight: 57, delay: 6, colorMode: colorModeAsset},
 		{source: "original_assets/BITMAP/IDB_PLAYER_RAUCHEN.bmp", target: "resources/zero_power_player_smoke.png", frameWidth: 21, delay: 6, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_FIREBALL.bmp", target: "resources/fireball_impact.png", frameWidth: 36, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_PALME_FEUER.bmp", target: "resources/palm_fire.png", frameWidth: 86, delay: 8, colorMode: colorModeAsset},
+		{source: "original_assets/BITMAP/IDB_PALME_GERIPPE.bmp", target: "resources/palm_skeleton.png", frameWidth: 121, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_PALME_RAUCH.bmp", target: "resources/palm_smoke.png", frameWidth: 73, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_PALME_BROESEL.bmp", target: "resources/palm_crumble.png", frameWidth: 121, frameHeight: 152, delay: 8, colorMode: colorModeAsset},
 	}
 }
 

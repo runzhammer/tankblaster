@@ -2,7 +2,7 @@ package weapons
 
 const (
 	atomBombImpactScale        = 4.0
-	atomBombImpactExtraSeconds = 0.5
+	atomBombImpactExtraSeconds = 0.8
 )
 
 func AtomBomb() Weapon {

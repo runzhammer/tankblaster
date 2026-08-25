@@ -17,7 +17,19 @@ type Weapon struct {
 	ImpactAnimationExtraSeconds float64
 	ImpactCycles                int
 	ImpactGradientOutward       bool
+	ImpactAnimationStyle        ImpactAnimationStyle
+	PlantsPalm                  bool
+	ImpactDamage                int
 }
+
+type ImpactAnimationStyle uint8
+
+const (
+	ImpactAnimationDefault ImpactAnimationStyle = iota
+	ImpactAnimationHBomb
+	ImpactAnimationPlasma
+	ImpactAnimationFireball
+)
 
 func List() []Weapon {
 	return []Weapon{
@@ -25,6 +37,10 @@ func List() []Weapon {
 		Grenade(),
 		LargeGrenade(),
 		AtomBomb(),
+		HBomb(),
+		PlasmaMelter(),
+		WonderPalm(),
+		Fireball(),
 	}
 }
 

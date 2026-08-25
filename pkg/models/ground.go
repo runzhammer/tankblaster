@@ -144,6 +144,43 @@ func (g Ground) ApplyCrater(cx, cy, radius float64) []SandFallPixel {
 	return falls
 }
 
+func (g Ground) ApplyRingCrater(cx, cy, radius, spacing, thickness float64) []SandFallPixel {
+	if g.pixels == nil || g.Image == nil || radius <= 0 {
+		return nil
+	}
+	if spacing <= 0 {
+		spacing = 2
+	}
+	if thickness <= 0 {
+		thickness = 1
+	}
+
+	bounds := g.pixels.Bounds()
+	minX := maxInt(0, int(math.Floor(cx-radius-thickness)))
+	maxX := minInt(bounds.Dx()-1, int(math.Ceil(cx+radius+thickness)))
+	minY := maxInt(0, int(math.Floor(cy-radius-thickness)))
+	maxY := minInt(bounds.Dy()-1, int(math.Ceil(cy+radius+thickness)))
+	halfThickness := thickness / 2
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			distance := math.Hypot(float64(x)-cx, float64(y)-cy)
+			if distance > radius {
+				continue
+			}
+			ring := math.Round(distance / spacing)
+			if math.Abs(distance-ring*spacing) <= halfThickness {
+				g.pixels.SetRGBA(x, y, color.RGBA{})
+			}
+		}
+	}
+
+	falls := g.settleSandRange(minX, maxX, maxY)
+	g.refreshSurfaceRange(minX, maxX)
+	g.Image.WritePixels(g.pixels.Pix)
+	return falls
+}
+
 func (g Ground) settleSandRange(minX, maxX, maxY int) []SandFallPixel {
 	if g.pixels == nil {
 		return nil

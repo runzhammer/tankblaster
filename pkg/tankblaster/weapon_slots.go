@@ -17,6 +17,26 @@ func (s *GameScene) weaponForProjectile(p *projectile) weaponspkg.Weapon {
 	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 2 {
 		return weapons[3]
 	}
+	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 3 {
+		if len(weapons) > 4 {
+			return weapons[4]
+		}
+	}
+	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 4 {
+		if len(weapons) > 5 {
+			return weapons[5]
+		}
+	}
+	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 5 {
+		if len(weapons) > 6 {
+			return weapons[6]
+		}
+	}
+	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 6 {
+		if len(weapons) > 7 {
+			return weapons[7]
+		}
+	}
 	return weapons[1]
 }
 

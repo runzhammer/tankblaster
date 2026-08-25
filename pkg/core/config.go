@@ -37,6 +37,7 @@ type FileSettings struct {
 	} `yaml:"gameplay"`
 	Debug struct {
 		Enabled    bool   `yaml:"enabled"`
+		Mode       string `yaml:"mode"`
 		StartScene string `yaml:"start_scene"`
 		StartShop  bool   `yaml:"start_shop"`
 		Game       struct {
@@ -89,6 +90,7 @@ type Settings struct {
 	}
 	Debug struct {
 		Enabled    bool
+		Mode       string
 		StartScene string
 		StartShop  bool
 		Game       struct {
@@ -165,6 +167,7 @@ func init() {
 		s.Gameplay.Clouds.MaxSpeed = s.Gameplay.Clouds.MinSpeed
 	}
 	s.Debug.Enabled = fs.Debug.Enabled
+	s.Debug.Mode = fs.Debug.Mode
 	s.Debug.StartScene = fs.Debug.StartScene
 	s.Debug.StartShop = fs.Debug.StartShop
 	if s.Debug.StartScene == "" {

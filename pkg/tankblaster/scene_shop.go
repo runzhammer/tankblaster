@@ -93,6 +93,18 @@ func makeShopInventories(playerCount int) []shopInventory {
 		if core.Config().Debug.Enabled && len(inventories[i].classA) > 2 {
 			inventories[i].classA[2] = 50
 		}
+		if core.Config().Debug.Enabled && len(inventories[i].classA) > 3 {
+			inventories[i].classA[3] = 50
+		}
+		if core.Config().Debug.Enabled && len(inventories[i].classA) > 4 {
+			inventories[i].classA[4] = 50
+		}
+		if core.Config().Debug.Enabled && len(inventories[i].classA) > 5 {
+			inventories[i].classA[5] = 50
+		}
+		if core.Config().Debug.Enabled && len(inventories[i].classA) > 6 {
+			inventories[i].classA[6] = 50
+		}
 		if core.Config().Debug.Enabled {
 			for itemIndex, item := range items {
 				if item.name == scrollOMatItemName {
@@ -473,7 +485,7 @@ func (s *GameScene) drawShopItemDetails(screen *ebiten.Image, itemIndex int, ite
 	detailRect := s.shopScaledRect(image.Rect(1085, 52, 1586, 428))
 	drawFrame(screen, detailRect, colornames.Black, color.RGBA{R: 0, G: 38, B: 255, A: 255})
 	drawText(screen, item.name, detailRect.Min.X+26, detailRect.Min.Y+46, colornames.White)
-	drawText(screen, "Anzahl: "+strconv.Itoa(s.shopStockForSelected(itemIndex)), detailRect.Min.X+26, detailRect.Min.Y+116, colornames.White)
+	drawText(screen, "Anzahl: "+strconv.Itoa(item.stock), detailRect.Min.X+26, detailRect.Min.Y+116, colornames.White)
 	drawText(screen, "Preis: "+strconv.Itoa(s.shopPriceForItem(itemIndex)), detailRect.Min.X+26, detailRect.Min.Y+166, colornames.White)
 	drawFrame(screen, s.shopDetailIconRect(), colornames.Black, colornames.Red)
 	s.drawShopItemIcon(screen, itemIndex, insetRect(s.shopDetailIconRect(), 4), false)
@@ -498,15 +510,19 @@ func (s *GameScene) buySelectedShopItem() {
 		return
 	}
 	s.credits[playerIndex] -= price
+	quantity := shopItems()[itemIndex].stock
+	if quantity <= 0 {
+		quantity = 1
+	}
 	if s.shopMode == shopModeClassB {
 		s.shopClassBStock[s.shopSelectedIndex]--
 		s.ensureInventory(playerIndex)
-		s.inventories[playerIndex].classB[itemIndex]++
+		s.inventories[playerIndex].classB[itemIndex] += quantity
 		return
 	}
 	s.shopClassAStock[itemIndex]--
 	s.ensureInventory(playerIndex)
-	s.inventories[playerIndex].classA[itemIndex]++
+	s.inventories[playerIndex].classA[itemIndex] += quantity
 }
 
 func (s *GameScene) ensureInventory(playerIndex int) {
@@ -576,8 +592,8 @@ func (s *GameScene) shopPriceForItem(itemIndex int) int {
 func (s *GameScene) resetShopStock() {
 	items := shopItems()
 	s.shopClassAStock = make([]int, len(items))
-	for i, item := range items {
-		s.shopClassAStock[i] = item.stock
+	for i := range items {
+		s.shopClassAStock[i] = 1
 	}
 	s.shopClassBStock = nil
 }

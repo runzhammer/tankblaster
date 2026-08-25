@@ -67,6 +67,14 @@ const (
 	computerAdjustSpeedFactor = 1.6
 )
 
+const (
+	plasmaImpactVisualYOffset = 38
+	plasmaRingSpacing         = 2
+	plasmaRingThickness       = 1
+	plasmaBuildProgress       = 2.5 / 6.5
+	plasmaGreenProgress       = 5.0 / 6.5
+)
+
 type damageCause uint8
 
 const (
@@ -97,7 +105,19 @@ type battleTank struct {
 type battlePalm struct {
 	sprite *engine.Sprite
 	pixels *image.RGBA
+	state  palmState
+	age    int
 }
+
+type palmState uint8
+
+const (
+	palmStateAlive palmState = iota
+	palmStateBurning
+	palmStateSkeletonSmoking
+	palmStateSkeleton
+	palmStateCrumbling
+)
 
 type battleCloud struct {
 	sprite *engine.Sprite
@@ -155,12 +175,23 @@ type projectile struct {
 }
 
 type impactAnimation struct {
-	pos      engine.Vec
-	radius   float64
-	age      int
-	duration int
-	cycles   int
-	outward  bool
+	pos            engine.Vec
+	radius         float64
+	age            int
+	duration       int
+	cycles         int
+	outward        bool
+	style          weaponspkg.ImpactAnimationStyle
+	terrainApplied bool
+}
+
+type animatedImpact struct {
+	pos       engine.Vec
+	age       int
+	duration  int
+	animation spriteAnimation
+	damage    int
+	applied   bool
 }
 
 type sandFallAnimation struct {
@@ -203,16 +234,22 @@ type GameScene struct {
 
 	// shot engine.Drawable
 
-	layers      engine.Layers
-	ground      models.Ground
-	worldWidth  float64
-	cameraX     float64
-	cameraGoal  float64
-	rng         *rand.Rand
-	palmImage   *ebiten.Image
-	palmPixels  *image.RGBA
-	clouds      []*battleCloud
-	cloudAssets []cloudAsset
+	layers               engine.Layers
+	ground               models.Ground
+	worldWidth           float64
+	cameraX              float64
+	cameraGoal           float64
+	rng                  *rand.Rand
+	palmImage            *ebiten.Image
+	palmPixels           *image.RGBA
+	palmSkeletonImage    *ebiten.Image
+	palmSkeletonPixels   *image.RGBA
+	palmFireAnimation    spriteAnimation
+	palmSmokeAnimation   spriteAnimation
+	palmCrumbleAnimation spriteAnimation
+	fireballAnimation    spriteAnimation
+	clouds               []*battleCloud
+	cloudAssets          []cloudAsset
 
 	tanks                []*battleTank
 	palms                []*battlePalm
@@ -231,6 +268,7 @@ type GameScene struct {
 	windDirection        int
 	projectile           *projectile
 	impacts              []impactAnimation
+	animatedImpacts      []animatedImpact
 	sandFalls            []sandFallAnimation
 	zeroPowerEffects     []zeroPowerAnimation
 	zeroPowerAnimations  []spriteAnimation
@@ -252,6 +290,7 @@ type GameScene struct {
 	scrollBarDragging    bool
 	zeroPowerStartDelay  int
 	lastComputerShot     computerShotRecord
+	palmCameraFocus      *battlePalm
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -287,6 +326,32 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 	s.palmImage = palmImage
 	s.palmPixels = palmPixels
+	palmSkeletonImage, palmSkeletonPixels, err := loadImageWithPixels(r.PalmSkeletonPNG)
+	if err != nil {
+		return nil, err
+	}
+	s.palmSkeletonImage = palmSkeletonImage
+	s.palmSkeletonPixels = palmSkeletonPixels
+	fireballAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.FireballImpactPNG, frameWidth: 36, delay: 8})
+	if err != nil {
+		return nil, err
+	}
+	s.fireballAnimation = repeatAnimation(fireballAnimation, 5, fireballAnimation.totalTicks*5)
+	palmFireAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.PalmFirePNG, frameWidth: 86, delay: 8})
+	if err != nil {
+		return nil, err
+	}
+	s.palmFireAnimation = repeatAnimation(palmFireAnimation, 3, secondsToFrames(2))
+	palmSmokeAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.PalmSmokePNG, frameWidth: 73, delay: 8})
+	if err != nil {
+		return nil, err
+	}
+	s.palmSmokeAnimation = fitAnimationDuration(palmSmokeAnimation, secondsToFrames(1.5))
+	palmCrumbleAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.PalmCrumblePNG, frameWidth: 121, frameHeight: 152, delay: 8})
+	if err != nil {
+		return nil, err
+	}
+	s.palmCrumbleAnimation = fitAnimationDuration(palmCrumbleAnimation, secondsToFrames(1.0))
 	s.cloudAssets = loadCloudAssets()
 	s.players = s.playersForRound()
 	s.scores = make([]int, len(s.players))
@@ -355,6 +420,7 @@ func (s *GameScene) startRound() {
 	s.tanks = nil
 	s.palms = nil
 	s.clouds = nil
+	s.animatedImpacts = nil
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
@@ -554,7 +620,7 @@ func (s *GameScene) createPalms() {
 	}
 }
 
-func (s *GameScene) addPalm(centerX float64, palmSize engine.Vec) {
+func (s *GameScene) addPalm(centerX float64, palmSize engine.Vec) *battlePalm {
 	surfaceY := s.ground.SurfaceY(centerX)
 	palm := &battlePalm{
 		pixels: s.palmPixels,
@@ -566,6 +632,74 @@ func (s *GameScene) addPalm(centerX float64, palmSize engine.Vec) {
 		},
 	}
 	s.palms = append(s.palms, palm)
+	return palm
+}
+
+func (s *GameScene) plantPalmAtImpact(pos engine.Vec) {
+	if s.palmImage == nil || s.palmPixels == nil {
+		return
+	}
+	palmBounds := s.palmPixels.Bounds()
+	palmSize := engine.V(float64(palmBounds.Dx()), float64(palmBounds.Dy()))
+	centerX := math.Max(palmSize.X/2, math.Min(s.worldWidth-palmSize.X/2, pos.X))
+	palm := s.addPalm(centerX, palmSize)
+	if palm != nil && palm.sprite != nil && s.layers[layerPalms] != nil {
+		s.layers[layerPalms].Add(palm.sprite)
+	}
+}
+
+func (s *GameScene) ignitePalm(palm *battlePalm) {
+	if palm == nil || palm.state != palmStateAlive {
+		return
+	}
+	palm.state = palmStateBurning
+	palm.age = 0
+}
+
+func (s *GameScene) crumblePalm(palm *battlePalm) {
+	if palm == nil || palm.state == palmStateCrumbling {
+		return
+	}
+	if palm.sprite != nil && s.layers[layerPalms] != nil {
+		s.layers[layerPalms].Remove(palm.sprite)
+	}
+	palm.state = palmStateCrumbling
+	palm.age = 0
+}
+
+func (s *GameScene) setPalmSkeleton(palm *battlePalm, smoking bool) {
+	if palm == nil {
+		return
+	}
+	if s.palmSkeletonImage != nil && s.palmSkeletonPixels != nil {
+		palm.pixels = s.palmSkeletonPixels
+		if palm.sprite != nil {
+			palm.sprite.Drawable = engine.NewImageDrawable(s.palmSkeletonImage)
+		}
+	}
+	if smoking {
+		palm.state = palmStateSkeletonSmoking
+	} else {
+		palm.state = palmStateSkeleton
+	}
+	palm.age = 0
+}
+
+func (s *GameScene) palmEffectDelayFrames(palm *battlePalm) int {
+	if palm == nil {
+		return s.palmHitPauseFrames()
+	}
+	pause := secondsToFrames(0.5)
+	switch palm.state {
+	case palmStateBurning:
+		return maxInt(1, s.palmFireAnimation.totalTicks-palm.age) + s.palmSmokeAnimation.totalTicks + pause
+	case palmStateSkeletonSmoking:
+		return maxInt(1, s.palmSmokeAnimation.totalTicks-palm.age) + pause
+	case palmStateCrumbling:
+		return maxInt(1, s.palmCrumbleAnimation.totalTicks-palm.age) + pause
+	default:
+		return s.palmHitPauseFrames()
+	}
 }
 
 func (s *GameScene) randomPalmCount() int {
@@ -709,7 +843,9 @@ func (s *GameScene) Update() error {
 	case phaseBattle:
 		s.updateSpawnSequence()
 		s.updateImpacts()
+		s.updateAnimatedImpacts()
 		s.updateSandFalls()
+		s.updatePalms()
 		s.updateZeroPowerEffects()
 		if s.roundTransitionDelay > 0 || s.roundSeriesComplete {
 			s.updateRoundTransition()
@@ -892,7 +1028,11 @@ func loadZeroPowerAnimations() ([]spriteAnimation, error) {
 }
 
 func loadPalmAsset() (*ebiten.Image, *image.RGBA, error) {
-	decoded, _, err := image.Decode(bytes.NewReader(r.Palm))
+	return loadImageWithPixels(r.Palm)
+}
+
+func loadImageWithPixels(data []byte) (*ebiten.Image, *image.RGBA, error) {
+	decoded, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -904,6 +1044,32 @@ func loadPalmAsset() (*ebiten.Image, *image.RGBA, error) {
 		}
 	}
 	return ebiten.NewImageFromImage(pixels), pixels, nil
+}
+
+func fitAnimationDuration(animation spriteAnimation, totalTicks int) spriteAnimation {
+	if len(animation.frames) == 0 || totalTicks <= 0 {
+		return animation
+	}
+	ticks := maxInt(1, int(math.Round(float64(totalTicks)/float64(len(animation.frames)))))
+	animation.delays = make([]int, len(animation.frames))
+	animation.totalTicks = 0
+	for i := range animation.delays {
+		animation.delays[i] = ticks
+		animation.totalTicks += ticks
+	}
+	return animation
+}
+
+func repeatAnimation(animation spriteAnimation, repeats, totalTicks int) spriteAnimation {
+	if repeats <= 1 || len(animation.frames) == 0 {
+		return fitAnimationDuration(animation, totalTicks)
+	}
+	frames := animation.frames
+	animation.frames = make([]*ebiten.Image, 0, len(frames)*repeats)
+	for i := 0; i < repeats; i++ {
+		animation.frames = append(animation.frames, frames...)
+	}
+	return fitAnimationDuration(animation, totalTicks)
 }
 
 func (a spriteAnimation) frameAt(tick int) *ebiten.Image {
@@ -933,6 +1099,8 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 
 	s.layers.Draw(&camera, screen)
 	s.drawImpacts(screen, &camera)
+	s.drawAnimatedImpacts(screen, &camera)
+	s.drawPalmEffects(screen, &camera)
 	s.drawSandFalls(screen, &camera)
 	s.drawZeroPowerEffects(screen, &camera)
 	s.drawProjectile(screen, &camera)
@@ -1424,10 +1592,17 @@ func (s *GameScene) updateProjectile() {
 		return
 	}
 
-	if s.projectileHitsPalm(p, projectileRadiusForWeapon(s.weaponForProjectile(p))) {
+	weapon := s.weaponForProjectile(p)
+	if palm := s.projectileHitsPalm(p, projectileRadiusForWeapon(weapon)); palm != nil {
 		s.reportComputerShot(p.pos, -1, false)
+		if weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationFireball && palm.state == palmStateAlive {
+			s.ignitePalm(palm)
+		} else if palm.state == palmStateSkeleton || palm.state == palmStateSkeletonSmoking {
+			s.crumblePalm(palm)
+		}
 		s.projectile = nil
-		s.delayTurnAdvance(s.palmHitPauseFrames())
+		s.focusPalmCamera(palm)
+		s.delayTurnAdvance(s.palmEffectDelayFrames(palm))
 		return
 	}
 
@@ -1460,9 +1635,9 @@ func (s *GameScene) updateProjectile() {
 	}
 }
 
-func (s *GameScene) projectileHitsPalm(p *projectile, radius float64) bool {
+func (s *GameScene) projectileHitsPalm(p *projectile, radius float64) *battlePalm {
 	if p == nil || len(s.palms) == 0 {
-		return false
+		return nil
 	}
 	segmentLength := math.Hypot(p.pos.X-p.prev.X, p.pos.Y-p.prev.Y)
 	stepLength := math.Max(1, radius)
@@ -1473,14 +1648,14 @@ func (s *GameScene) projectileHitsPalm(p *projectile, radius float64) bool {
 			p.prev.X+(p.pos.X-p.prev.X)*t,
 			p.prev.Y+(p.pos.Y-p.prev.Y)*t,
 		)
-		if s.projectileCenterHitsPalm(center, radius) {
-			return true
+		if palm := s.projectileCenterHitsPalm(center, radius); palm != nil {
+			return palm
 		}
 	}
-	return false
+	return nil
 }
 
-func (s *GameScene) projectileCenterHitsPalm(center engine.Vec, radius float64) bool {
+func (s *GameScene) projectileCenterHitsPalm(center engine.Vec, radius float64) *battlePalm {
 	minX := int(math.Floor(center.X - radius))
 	maxX := int(math.Ceil(center.X + radius))
 	minY := int(math.Floor(center.Y - radius))
@@ -1494,17 +1669,17 @@ func (s *GameScene) projectileCenterHitsPalm(center engine.Vec, radius float64) 
 			if dx*dx+dy*dy > r2 {
 				continue
 			}
-			if s.visiblePalmPixelAt(float64(x), float64(y)) {
-				return true
+			if palm := s.visiblePalmPixelAt(float64(x), float64(y)); palm != nil {
+				return palm
 			}
 		}
 	}
-	return false
+	return nil
 }
 
-func (s *GameScene) visiblePalmPixelAt(worldX, worldY float64) bool {
+func (s *GameScene) visiblePalmPixelAt(worldX, worldY float64) *battlePalm {
 	for _, palm := range s.palms {
-		if palm == nil || palm.sprite == nil || palm.pixels == nil {
+		if palm == nil || palm.sprite == nil || palm.pixels == nil || palm.state == palmStateCrumbling {
 			continue
 		}
 		bounds := palm.sprite.Bounds()
@@ -1517,10 +1692,10 @@ func (s *GameScene) visiblePalmPixelAt(worldX, worldY float64) bool {
 			continue
 		}
 		if palm.pixels.RGBAAt(sourceX, sourceY).A > 0 {
-			return true
+			return palm
 		}
 	}
-	return false
+	return nil
 }
 
 func (s *GameScene) finishProjectile() {
@@ -1539,6 +1714,7 @@ func (s *GameScene) advanceActivePlayer() {
 		return
 	}
 	s.lastDamageSource = nil
+	s.palmCameraFocus = nil
 	next := s.nextActivePlayerIndex()
 	if next < 0 {
 		return
@@ -1580,9 +1756,22 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
-	if !weapon.DamagesTerrain {
+	if !weapon.DamagesTerrain && !weapon.PlantsPalm && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
+	}
+
+	if weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationFireball {
+		s.reportComputerShot(p.pos, -1, false)
+		s.startFireballImpact(p.pos, weapon)
+		return true
+	}
+
+	if weapon.PlantsPalm {
+		s.reportComputerShot(p.pos, -1, false)
+		s.plantPalmAtImpact(p.pos)
+		s.delayTurnAdvance(s.palmHitPauseFrames())
+		return true
 	}
 
 	radius := impactRadiusForWeapon(weapon)
@@ -1591,22 +1780,33 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	defer func() {
 		s.zeroPowerStartDelay = 0
 	}()
-	s.damageTanksInImpactRadius(p.pos, radius)
 	s.reportComputerShot(p.pos, -1, false)
-	falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
-	if len(falls) > 0 {
-		s.sandFalls = append(s.sandFalls, sandFallAnimation{
-			pixels:   falls,
-			duration: sandFallFrames,
-		})
+
+	impactPos := p.pos
+	terrainApplied := true
+	if weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationPlasma {
+		impactPos.Y -= plasmaImpactVisualYOffset
+		terrainApplied = false
+		s.damageTanksInImpactRadiusFixed(impactPos, radius, weapon.Damage)
+	} else {
+		s.damageTanksInImpactRadius(p.pos, radius)
+		falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
+		if len(falls) > 0 {
+			s.sandFalls = append(s.sandFalls, sandFallAnimation{
+				pixels:   falls,
+				duration: sandFallFrames,
+			})
+		}
+		s.dropUnsupportedTanks()
 	}
-	s.dropUnsupportedTanks()
 	s.impacts = append(s.impacts, impactAnimation{
-		pos:      p.pos,
-		radius:   radius,
-		duration: duration,
-		cycles:   impactCyclesForWeapon(weapon),
-		outward:  weapon.ImpactGradientOutward,
+		pos:            impactPos,
+		radius:         radius,
+		duration:       duration,
+		cycles:         impactCyclesForWeapon(weapon),
+		outward:        weapon.ImpactGradientOutward,
+		style:          weapon.ImpactAnimationStyle,
+		terrainApplied: terrainApplied,
 	})
 	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
 		s.turnAdvanceDelay = minimumDelay
@@ -1632,6 +1832,70 @@ func (s *GameScene) damageTanksInImpactRadius(center engine.Vec, radius float64)
 	}
 }
 
+func (s *GameScene) damageTanksInImpactRadiusFixed(center engine.Vec, radius float64, damage int) {
+	if radius <= 0 || damage <= 0 {
+		return
+	}
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 {
+			continue
+		}
+		distance := distancePointToRect(center, tank.body.Bounds().ScaledAtCenter(0.78))
+		if distance > radius {
+			continue
+		}
+		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
+	}
+}
+
+func (s *GameScene) startFireballImpact(pos engine.Vec, weapon weaponspkg.Weapon) {
+	animation := s.fireballAnimation
+	if len(animation.frames) == 0 {
+		return
+	}
+	duration := maxInt(animation.totalTicks, s.impactAnimationFramesForWeapon(weapon))
+	damage := weapon.ImpactDamage
+	if damage <= 0 {
+		damage = 40
+	}
+	effect := animatedImpact{
+		pos:       pos,
+		duration:  duration,
+		animation: animation,
+		damage:    damage,
+	}
+	s.animatedImpacts = append(s.animatedImpacts, effect)
+	s.damageTanksInRectFixed(s.animationWorldRect(pos, animation), damage)
+	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
+		s.turnAdvanceDelay = minimumDelay
+	}
+}
+
+func (s *GameScene) damageTanksInRectFixed(rect engine.Rect, damage int) {
+	if damage <= 0 {
+		return
+	}
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 {
+			continue
+		}
+		if !rectsIntersect(tank.body.Bounds().ScaledAtCenter(0.78), rect) {
+			continue
+		}
+		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
+	}
+}
+
+func rectsIntersect(a, b engine.Rect) bool {
+	return a.Min.X <= b.Max.X && a.Max.X >= b.Min.X && a.Min.Y <= b.Max.Y && a.Max.Y >= b.Min.Y
+}
+
+func (s *GameScene) animationWorldRect(center engine.Vec, animation spriteAnimation) engine.Rect {
+	width := float64(animation.width) * animation.scaleX
+	height := float64(animation.height) * animation.scaleY
+	return engine.R(center.X-width/2, center.Y-height, center.X+width/2, center.Y)
+}
+
 func distancePointToRect(point engine.Vec, rect engine.Rect) float64 {
 	closestX := math.Max(rect.Min.X, math.Min(point.X, rect.Max.X))
 	closestY := math.Max(rect.Min.Y, math.Min(point.Y, rect.Max.Y))
@@ -1645,11 +1909,72 @@ func (s *GameScene) updateImpacts() {
 	active := s.impacts[:0]
 	for _, impact := range s.impacts {
 		impact.age++
+		if impact.style == weaponspkg.ImpactAnimationPlasma && !impact.terrainApplied {
+			progress := float64(impact.age) / math.Max(1, float64(impact.duration))
+			if progress >= plasmaGreenProgress {
+				falls := s.ground.ApplyRingCrater(impact.pos.X, impact.pos.Y, impact.radius, plasmaRingSpacing, plasmaRingThickness)
+				if len(falls) > 0 {
+					s.sandFalls = append(s.sandFalls, sandFallAnimation{
+						pixels:   falls,
+						duration: sandFallFrames,
+					})
+				}
+				s.dropUnsupportedTanks()
+				impact.terrainApplied = true
+			}
+		}
 		if impact.age < impact.duration {
 			active = append(active, impact)
 		}
 	}
 	s.impacts = active
+}
+
+func (s *GameScene) updateAnimatedImpacts() {
+	if len(s.animatedImpacts) == 0 {
+		return
+	}
+	active := s.animatedImpacts[:0]
+	for _, impact := range s.animatedImpacts {
+		impact.age++
+		if impact.age < impact.duration {
+			active = append(active, impact)
+		}
+	}
+	s.animatedImpacts = active
+}
+
+func (s *GameScene) updatePalms() {
+	if len(s.palms) == 0 {
+		return
+	}
+	active := s.palms[:0]
+	for _, palm := range s.palms {
+		if palm == nil {
+			continue
+		}
+		palm.age++
+		switch palm.state {
+		case palmStateBurning:
+			if palm.age >= s.palmFireAnimation.totalTicks {
+				s.setPalmSkeleton(palm, true)
+			}
+		case palmStateSkeletonSmoking:
+			if palm.age >= s.palmSmokeAnimation.totalTicks {
+				palm.state = palmStateSkeleton
+				palm.age = 0
+			}
+		case palmStateCrumbling:
+			if palm.age >= s.palmCrumbleAnimation.totalTicks {
+				if palm.sprite != nil && s.layers[layerPalms] != nil {
+					s.layers[layerPalms].Remove(palm.sprite)
+				}
+				continue
+			}
+		}
+		active = append(active, palm)
+	}
+	s.palms = active
 }
 
 func (s *GameScene) updateSandFalls() {
@@ -1689,6 +2014,9 @@ func (s *GameScene) updateZeroPowerEffects() {
 func (s *GameScene) updateTurnAdvanceDelay() {
 	s.turnAdvanceDelay--
 	if s.turnAdvanceDelay > 0 {
+		if s.updatePalmCamera() {
+			return
+		}
 		s.updateZeroPowerCamera()
 		return
 	}
@@ -1700,6 +2028,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 }
 
 func (s *GameScene) updateBattleCamera() {
+	if s.updatePalmCamera() {
+		return
+	}
 	if s.updateZeroPowerCamera() {
 		return
 	}
@@ -1711,6 +2042,29 @@ func (s *GameScene) updateBattleCamera() {
 	}
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.08, 0.35)
+}
+
+func (s *GameScene) focusPalmCamera(palm *battlePalm) {
+	s.palmCameraFocus = palm
+	s.updatePalmCamera()
+}
+
+func (s *GameScene) updatePalmCamera() bool {
+	if s.palmCameraFocus == nil || s.palmCameraFocus.sprite == nil {
+		return false
+	}
+	s.cameraGoal = s.cameraTargetForPalm(s.palmCameraFocus)
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
+	return true
+}
+
+func (s *GameScene) cameraTargetForPalm(palm *battlePalm) float64 {
+	if palm == nil || palm.sprite == nil {
+		return s.cameraX
+	}
+	screenWidth := core.Config().Screen.Width
+	centerX := palm.sprite.Bounds().Center().X
+	return math.Max(0, math.Min(s.worldWidth-screenWidth, centerX-screenWidth/2))
 }
 
 func (s *GameScene) updateZeroPowerCamera() bool {
@@ -2007,6 +2361,14 @@ func (s *GameScene) drawImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
 	for _, impact := range s.impacts {
 		projected := impact.pos.Project(camera)
 		progress := float64(impact.age) / math.Max(1, float64(impact.duration))
+		if impact.style == weaponspkg.ImpactAnimationPlasma {
+			drawPlasmaImpact(screen, projected, impact.radius, progress)
+			continue
+		}
+		if impact.style == weaponspkg.ImpactAnimationHBomb {
+			drawHBombImpact(screen, projected, impact.radius, progress)
+			continue
+		}
 		cycles := impact.cycles
 		if cycles <= 0 {
 			cycles = 2
@@ -2032,6 +2394,152 @@ func (s *GameScene) drawImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
 			vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), radius, color.RGBA{R: red, G: 0, B: 0, A: 220}, true)
 		}
 	}
+}
+
+func drawPlasmaImpact(screen *ebiten.Image, center engine.Vec, radius, progress float64) {
+	progress = math.Max(0, math.Min(1, progress))
+	black := color.RGBA{R: 0, G: 0, B: 0, A: 245}
+	green := color.RGBA{R: 148, G: 255, B: 78, A: 240}
+
+	switch {
+	case progress < plasmaBuildProgress:
+		t := easeOut(progress / plasmaBuildProgress)
+		visibleRadius := radius * t
+		drawPlasmaRings(screen, center, 0, visibleRadius, black)
+	case progress < plasmaGreenProgress:
+		drawPlasmaRings(screen, center, 0, radius, black)
+		t := easeOut((progress - plasmaBuildProgress) / (plasmaGreenProgress - plasmaBuildProgress))
+		vector.StrokeCircle(screen, float32(center.X), float32(center.Y), float32(radius*t), 5, green, true)
+	default:
+		t := easeIn((progress - plasmaGreenProgress) / (1 - plasmaGreenProgress))
+		drawPlasmaRings(screen, center, radius*t, radius, black)
+	}
+}
+
+func drawPlasmaRings(screen *ebiten.Image, center engine.Vec, minRadius, maxRadius float64, c color.RGBA) {
+	if maxRadius <= 0 {
+		return
+	}
+	if minRadius < 0 {
+		minRadius = 0
+	}
+	for r := math.Max(plasmaRingSpacing, math.Ceil(minRadius/plasmaRingSpacing)*plasmaRingSpacing); r <= maxRadius; r += plasmaRingSpacing {
+		vector.StrokeCircle(screen, float32(center.X), float32(center.Y), float32(r), plasmaRingThickness, c, true)
+	}
+}
+
+func drawHBombImpact(screen *ebiten.Image, center engine.Vec, radius, progress float64) {
+	progress = math.Max(0, math.Min(1, progress))
+	red := color.RGBA{R: 255, G: 0, B: 0, A: 225}
+	black := color.RGBA{R: 0, G: 0, B: 0, A: 245}
+	deepPurple := color.RGBA{R: 17, G: 0, B: 34, A: 230}
+
+	switch {
+	case progress < 0.12:
+		vector.DrawFilledCircle(screen, float32(center.X), float32(center.Y), float32(radius), red, true)
+	case progress < 0.34:
+		t := easeOut((progress - 0.12) / 0.22)
+		drawRadialFill(screen, center, radius, red, black, t)
+	case progress < 0.68:
+		t := 1 - easeIn((progress-0.34)/0.34)
+		drawRadialFill(screen, center, radius, red, black, t)
+	default:
+		t := easeInOut((progress - 0.68) / 0.32)
+		drawPurpleDissolve(screen, center, radius, deepPurple, t)
+	}
+}
+
+func drawRadialFill(screen *ebiten.Image, center engine.Vec, radius float64, base, fill color.RGBA, fillProgress float64) {
+	fillProgress = math.Max(0, math.Min(1, fillProgress))
+	vector.DrawFilledCircle(screen, float32(center.X), float32(center.Y), float32(radius), base, true)
+	steps := 10
+	for i := steps; i >= 1; i-- {
+		t := float64(i) / float64(steps)
+		r := radius * fillProgress * t
+		alpha := uint8(float64(fill.A) * math.Pow(t, 0.6))
+		vector.DrawFilledCircle(screen, float32(center.X), float32(center.Y), float32(r), color.RGBA{R: fill.R, G: fill.G, B: fill.B, A: alpha}, true)
+	}
+}
+
+func drawPurpleDissolve(screen *ebiten.Image, center engine.Vec, radius float64, c color.RGBA, progress float64) {
+	progress = math.Max(0, math.Min(1, progress))
+	steps := 12
+	start := radius * progress
+	for i := steps; i >= 1; i-- {
+		t := float64(i) / float64(steps)
+		r := start + (radius-start)*t
+		if r <= 0 {
+			continue
+		}
+		alpha := uint8(float64(c.A) * (1 - progress) * math.Pow(t, 0.45))
+		vector.DrawFilledCircle(screen, float32(center.X), float32(center.Y), float32(r), color.RGBA{R: c.R, G: c.G, B: c.B, A: alpha}, true)
+	}
+}
+
+func easeIn(t float64) float64 {
+	t = math.Max(0, math.Min(1, t))
+	return t * t
+}
+
+func easeOut(t float64) float64 {
+	t = math.Max(0, math.Min(1, t))
+	return 1 - (1-t)*(1-t)
+}
+
+func easeInOut(t float64) float64 {
+	t = math.Max(0, math.Min(1, t))
+	if t < 0.5 {
+		return 2 * t * t
+	}
+	return 1 - math.Pow(-2*t+2, 2)/2
+}
+
+func (s *GameScene) drawAnimatedImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, impact := range s.animatedImpacts {
+		drawAnimationBottomCentered(screen, camera, impact.animation, impact.pos, impact.age)
+	}
+}
+
+func (s *GameScene) drawPalmEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, palm := range s.palms {
+		if palm == nil || palm.sprite == nil {
+			continue
+		}
+		bounds := palm.sprite.Bounds()
+		switch palm.state {
+		case palmStateBurning:
+			pos := engine.V(bounds.Center().X, bounds.Min.Y+bounds.H()*0.24)
+			drawAnimationCentered(screen, camera, s.palmFireAnimation, pos, palm.age)
+		case palmStateSkeletonSmoking:
+			pos := engine.V(bounds.Center().X, bounds.Min.Y+bounds.H()*0.24)
+			drawAnimationCentered(screen, camera, s.palmSmokeAnimation, pos, palm.age)
+		case palmStateCrumbling:
+			pos := engine.V(bounds.Center().X, bounds.Max.Y)
+			drawAnimationBottomCentered(screen, camera, s.palmCrumbleAnimation, pos, palm.age)
+		}
+	}
+}
+
+func drawAnimationCentered(screen *ebiten.Image, camera *ebiten.GeoM, animation spriteAnimation, center engine.Vec, tick int) {
+	drawAnimationFrame(screen, camera, animation, center, tick, 0.5, 0.5)
+}
+
+func drawAnimationBottomCentered(screen *ebiten.Image, camera *ebiten.GeoM, animation spriteAnimation, bottomCenter engine.Vec, tick int) {
+	drawAnimationFrame(screen, camera, animation, bottomCenter, tick, 0.5, 1)
+}
+
+func drawAnimationFrame(screen *ebiten.Image, camera *ebiten.GeoM, animation spriteAnimation, anchor engine.Vec, tick int, anchorX, anchorY float64) {
+	frame := animation.frameAt(tick)
+	if frame == nil {
+		return
+	}
+	projected := anchor.Project(camera)
+	width := float64(animation.width) * animation.scaleX
+	height := float64(animation.height) * animation.scaleY
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(animation.scaleX, animation.scaleY)
+	op.GeoM.Translate(projected.X-width*anchorX, projected.Y-height*anchorY)
+	screen.DrawImage(frame, op)
 }
 
 func (s *GameScene) drawSandFalls(screen *ebiten.Image, camera *ebiten.GeoM) {
