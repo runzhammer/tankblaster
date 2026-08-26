@@ -1,13 +1,8 @@
 package weapons
 
-const (
-	largeGrenadeScale       = 1.2
-	largeGrenadeImpactScale = 3.0
-)
-
-func LargeGrenade() Weapon {
+func MFSTriple() Weapon {
 	return Weapon{
-		Name:            "Große Granate",
+		Name:            "MFS 3-fach",
 		Color:           whiteProjectileColor(),
 		Damage:          DirectHitDamage,
 		Unlocked:        true,
@@ -15,5 +10,6 @@ func LargeGrenade() Weapon {
 		DamagesTerrain:  true,
 		ProjectileScale: largeGrenadeScale,
 		ImpactScale:     largeGrenadeImpactScale,
+		TripleShot:      true,
 	}
 }

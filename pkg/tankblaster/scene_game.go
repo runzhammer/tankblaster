@@ -345,6 +345,7 @@ type GameScene struct {
 	wind                 int
 	windDirection        int
 	projectile           *projectile
+	projectiles          []*projectile
 	impacts              []impactAnimation
 	animatedImpacts      []animatedImpact
 	waterFills           []waterFill
@@ -488,6 +489,7 @@ func (s *GameScene) startRound() {
 	s.spawnPauseFrames = 0
 	s.activePlayerIndex = -1
 	s.projectile = nil
+	s.projectiles = nil
 	s.impacts = nil
 	s.sandFalls = nil
 	s.zeroPowerEffects = nil
@@ -738,6 +740,25 @@ func (s *GameScene) addPalm(centerX float64, palmSize engine.Vec) *battlePalm {
 	return palm
 }
 
+func (s *GameScene) updatePalmGroundSupport(palm *battlePalm) {
+	if palm == nil || palm.sprite == nil || palm.sprite.Pos == nil || palm.sprite.Size == nil {
+		return
+	}
+	if palm.state == palmStateCrumbling {
+		return
+	}
+
+	centerX := palm.sprite.Pos.X + palm.sprite.Size.X/2
+	targetBottom := s.ground.SurfaceY(centerX)
+	currentBottom := palm.sprite.Pos.Y + palm.sprite.Size.Y
+	if targetBottom <= currentBottom+0.5 {
+		return
+	}
+
+	const palmSlideSpeed = 4.0
+	palm.sprite.Pos.Y += math.Min(palmSlideSpeed, targetBottom-currentBottom)
+}
+
 func (s *GameScene) plantPalmAtImpact(pos engine.Vec) {
 	if s.palmImage == nil || s.palmPixels == nil {
 		return
@@ -959,7 +980,9 @@ func (s *GameScene) Update() error {
 			return nil
 		}
 		if s.allTanksLanded() {
-			if s.turnAdvanceDelay > 0 {
+			if s.projectilesActive() {
+				s.updateProjectile()
+			} else if s.turnAdvanceDelay > 0 {
 				s.updateTurnAdvanceDelay()
 			} else {
 				s.clampActiveShotStrength()
@@ -1309,7 +1332,7 @@ func (s *GameScene) scrollBarAvailable() bool {
 }
 
 func (s *GameScene) handleBattleInput() {
-	if s.projectile != nil || s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
+	if s.projectilesActive() || s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
 		return
 	}
 	tank := s.activeTank()
@@ -1343,7 +1366,7 @@ func (s *GameScene) handleBattleInput() {
 }
 
 func (s *GameScene) handleComputerTurn() {
-	if s.projectile != nil || s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
+	if s.projectilesActive() || s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
 		return
 	}
 	tank := s.activeTank()
@@ -1668,13 +1691,23 @@ func (s *GameScene) fireActiveWeapon() {
 	bounds := tank.cannon.Bounds()
 	muzzle := bounds.Center().Add(engine.V(bounds.W()/2+7, 0).Rotated(tank.cannon.Rot))
 	speed := 1.4 + float64(tank.shotStrength)*0.32
-	s.projectile = &projectile{
-		pos:         *muzzle,
-		prev:        *muzzle,
-		velocity:    engine.V(speed, 0).Rotated(tank.cannon.Rot),
-		weaponIndex: tank.selectedWeapon,
-		trail:       []engine.Vec{*muzzle},
+	weapon := s.weaponForSlot(tank.selectedWeapon)
+	angles := []float64{tank.cannon.Rot}
+	if weapon.TripleShot {
+		offset := 5 * math.Pi / 180
+		angles = []float64{tank.cannon.Rot, tank.cannon.Rot - offset, tank.cannon.Rot + offset}
 	}
+	projectiles := make([]*projectile, 0, len(angles))
+	for _, angle := range angles {
+		projectiles = append(projectiles, &projectile{
+			pos:         *muzzle,
+			prev:        *muzzle,
+			velocity:    engine.V(speed, 0).Rotated(angle),
+			weaponIndex: tank.selectedWeapon,
+			trail:       []engine.Vec{*muzzle},
+		})
+	}
+	s.setProjectiles(projectiles)
 	s.lastDamageSource = tank
 	if tank.player.Kind == PlayerComputer {
 		s.lastComputerShot = s.computerShotRecordFor(tank)
@@ -1682,15 +1715,34 @@ func (s *GameScene) fireActiveWeapon() {
 	tank.computerPlan = nil
 }
 
+func (s *GameScene) weaponForSlot(slot int) weaponspkg.Weapon {
+	return s.weaponForProjectile(&projectile{weaponIndex: slot})
+}
+
 func (s *GameScene) updateProjectile() {
-	if s.projectile == nil {
+	if !s.projectilesActive() {
 		return
 	}
 
 	const gravity = 0.16
 	windAcceleration := float64(s.windDirection*s.wind) * 0.00065
 
-	p := s.projectile
+	active := s.projectiles[:0]
+	for _, p := range s.projectiles {
+		if p == nil {
+			continue
+		}
+		if s.updateSingleProjectile(p, gravity, windAcceleration) {
+			active = append(active, p)
+		}
+	}
+	s.setProjectiles(active)
+	if !s.projectilesActive() && s.turnAdvanceDelay <= 0 {
+		s.finishProjectiles()
+	}
+}
+
+func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAcceleration float64) bool {
 	p.prev = p.pos
 	p.velocity.X += windAcceleration
 	p.velocity.Y += gravity
@@ -1708,16 +1760,14 @@ func (s *GameScene) updateProjectile() {
 	battlefieldHeight := s.battlefieldHeight()
 	if p.pos.X < -80 || p.pos.X > s.worldWidth+80 || p.pos.Y > battlefieldHeight+80 {
 		s.reportComputerShot(p.pos, -1, false)
-		s.finishProjectile()
-		return
+		return false
 	}
 
 	weapon := s.weaponForProjectile(p)
 	if hit, ok := s.projectileHitsWaterSurface(p, projectileRadiusForWeapon(weapon)); ok {
 		s.reportComputerShot(hit, -1, false)
-		s.projectile = nil
 		s.startWaterSurfaceImpact(hit)
-		return
+		return false
 	}
 	if palm := s.projectileHitsPalm(p, projectileRadiusForWeapon(weapon)); palm != nil {
 		s.reportComputerShot(p.pos, -1, false)
@@ -1726,39 +1776,37 @@ func (s *GameScene) updateProjectile() {
 		} else if palm.state == palmStateSkeleton || palm.state == palmStateSkeletonSmoking {
 			s.crumblePalm(palm)
 		}
-		s.projectile = nil
 		s.focusPalmCamera(palm)
 		s.delayTurnAdvance(s.palmEffectDelayFrames(palm))
-		return
+		return false
 	}
 
 	if p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
 		if s.onGroundImpact(p) {
-			s.projectile = nil
-			return
+			return false
 		}
-		s.finishProjectile()
-		return
+		s.reportComputerShot(p.pos, -1, false)
+		return false
 	}
 
-	hitRadius := projectileRadiusForWeapon(s.weaponForProjectile(p))
+	hitRadius := projectileRadiusForWeapon(weapon)
 	hitBounds := engine.R(p.pos.X-hitRadius, p.pos.Y-hitRadius, p.pos.X+hitRadius, p.pos.Y+hitRadius)
 	for _, tank := range s.tanks {
 		if tank == nil || tank.body == nil {
 			continue
 		}
 		if engine.Collision(hitBounds, tank.body.Bounds().ScaledAtCenter(0.78)) {
-			if damage := s.weaponForProjectile(p).Damage; damage > 0 {
+			if damage := weapon.Damage; damage > 0 {
 				s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
 				s.awardDirectHitCredits(tank, s.lastDamageSource)
 				s.darkenTank(tank, 0.10)
 			}
 			s.reportComputerShot(p.pos, tank.playerIndex, true)
-			s.projectile = nil
 			s.delayTurnAdvance(s.tankHitPauseFrames())
-			return
+			return false
 		}
 	}
+	return true
 }
 
 func (s *GameScene) projectileHitsPalm(p *projectile, radius float64) *battlePalm {
@@ -1824,8 +1872,21 @@ func (s *GameScene) visiblePalmPixelAt(worldX, worldY float64) *battlePalm {
 	return nil
 }
 
-func (s *GameScene) finishProjectile() {
+func (s *GameScene) projectilesActive() bool {
+	return len(s.projectiles) > 0
+}
+
+func (s *GameScene) setProjectiles(projectiles []*projectile) {
+	s.projectiles = projectiles
 	s.projectile = nil
+	if len(projectiles) > 0 {
+		s.projectile = projectiles[0]
+	}
+}
+
+func (s *GameScene) finishProjectiles() {
+	s.projectile = nil
+	s.projectiles = nil
 	if len(s.tanks) == 0 {
 		return
 	}
@@ -2467,6 +2528,7 @@ func (s *GameScene) updatePalms() {
 		if palm == nil {
 			continue
 		}
+		s.updatePalmGroundSupport(palm)
 		palm.age++
 		switch palm.state {
 		case palmStateBurning:
@@ -2563,7 +2625,7 @@ func (s *GameScene) updateBattleCamera() {
 	if s.scrollOMatActive() || s.scrollBarDragging {
 		return
 	}
-	if s.projectile != nil || s.activePlayerIndex < 0 {
+	if s.projectilesActive() || s.activePlayerIndex < 0 {
 		return
 	}
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
@@ -2882,14 +2944,23 @@ func (s *GameScene) darkenTank(tank *battleTank, amount float64) {
 }
 
 func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
-	if s.projectile == nil {
+	if !s.projectilesActive() {
 		return
 	}
 
-	weapon := s.weaponForProjectile(s.projectile)
+	for _, p := range s.projectiles {
+		if p == nil {
+			continue
+		}
+		s.drawSingleProjectile(screen, camera, p)
+	}
+}
+
+func (s *GameScene) drawSingleProjectile(screen *ebiten.Image, camera *ebiten.GeoM, p *projectile) {
+	weapon := s.weaponForProjectile(p)
 	c := weapon.Color
 	if weapon.ShowTrail {
-		for i, point := range s.projectile.trail {
+		for i, point := range p.trail {
 			if i%2 != 0 {
 				continue
 			}
@@ -2898,7 +2969,7 @@ func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
 			drawFilledRect(screen, image.Rect(int(projected.X)-2, int(projected.Y)-2, int(projected.X)+2, int(projected.Y)+2), color.RGBA{R: c.R, G: c.G, B: c.B, A: alpha})
 		}
 	}
-	projected := s.projectile.pos.Project(camera)
+	projected := p.pos.Project(camera)
 	radius := projectileRadiusForWeapon(weapon)
 	if weapon.RoundProjectile {
 		vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), float32(radius), c, true)
@@ -3762,7 +3833,7 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 		s.clampCannonRotationToTank(source, tank.body)
 		return
 	}
-	if s.projectile != nil || s.roundTransitionDelay > 0 || s.roundSeriesComplete {
+	if s.projectilesActive() || s.roundTransitionDelay > 0 || s.roundSeriesComplete {
 		return
 	}
 	if s.scrollOMatActive() {
