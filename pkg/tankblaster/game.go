@@ -54,8 +54,16 @@ type GameLoop struct {
 
 	rounds  int
 	players []PlayerConfig
+	options gameOptions
 
 	// bgm *audio.Player
+}
+
+type gameOptions struct {
+	projectileReentry int
+	palmCount         int
+	cloudAggression   int
+	quickRoundStart   bool
 }
 
 func NewGame() (core.Game, error) {
@@ -69,7 +77,8 @@ func NewGame() (core.Game, error) {
 	// 	bgm: bgm,
 	// }
 	game := &GameLoop{
-		rounds: 10,
+		rounds:  10,
+		options: defaultGameOptions(),
 	}
 
 	if core.Config().Debug.Enabled {
@@ -92,6 +101,16 @@ func NewGame() (core.Game, error) {
 	// bgm.Play()
 
 	return game, nil
+}
+
+func defaultGameOptions() gameOptions {
+	cfg := core.Config().Gameplay
+	return gameOptions{
+		projectileReentry: cfg.ProjectileReentry,
+		palmCount:         cfg.PalmCount,
+		cloudAggression:   cfg.CloudAggression,
+		quickRoundStart:   cfg.QuickRoundStart,
+	}
 }
 
 func (g *GameLoop) applyDebugConfig() {

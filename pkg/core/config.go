@@ -24,6 +24,10 @@ type FileSettings struct {
 		ImpactPauseSeconds       float64 `yaml:"impact_pause_seconds"`
 		TankHitPauseSeconds      float64 `yaml:"tank_hit_pause_seconds"`
 		PalmHitPauseSeconds      float64 `yaml:"palm_hit_pause_seconds"`
+		ProjectileReentry        *int    `yaml:"projectile_reentry"`
+		PalmCount                *int    `yaml:"palm_count"`
+		CloudAggression          *int    `yaml:"cloud_aggression"`
+		QuickRoundStart          *bool   `yaml:"quick_round_start"`
 		Palms                    struct {
 			MinCount int `yaml:"min_count"`
 			MaxCount int `yaml:"max_count"`
@@ -77,6 +81,10 @@ type Settings struct {
 		ImpactPauseSeconds       float64
 		TankHitPauseSeconds      float64
 		PalmHitPauseSeconds      float64
+		ProjectileReentry        int
+		PalmCount                int
+		CloudAggression          int
+		QuickRoundStart          bool
 		Palms                    struct {
 			MinCount int
 			MaxCount int
@@ -141,6 +149,34 @@ func init() {
 	s.Gameplay.PalmHitPauseSeconds = fs.Gameplay.PalmHitPauseSeconds
 	if s.Gameplay.PalmHitPauseSeconds <= 0 {
 		s.Gameplay.PalmHitPauseSeconds = 2
+	}
+	s.Gameplay.ProjectileReentry = 1
+	if fs.Gameplay.ProjectileReentry != nil {
+		s.Gameplay.ProjectileReentry = *fs.Gameplay.ProjectileReentry
+	}
+	if s.Gameplay.ProjectileReentry < 0 || s.Gameplay.ProjectileReentry > 2 {
+		s.Gameplay.ProjectileReentry = 1
+	}
+	s.Gameplay.PalmCount = -1
+	if fs.Gameplay.PalmCount != nil {
+		s.Gameplay.PalmCount = *fs.Gameplay.PalmCount
+	}
+	if s.Gameplay.PalmCount < -1 || s.Gameplay.PalmCount > 2 {
+		s.Gameplay.PalmCount = -1
+	}
+	s.Gameplay.CloudAggression = 0
+	if fs.Gameplay.CloudAggression != nil {
+		s.Gameplay.CloudAggression = *fs.Gameplay.CloudAggression
+	}
+	if s.Gameplay.CloudAggression < 0 {
+		s.Gameplay.CloudAggression = 0
+	}
+	if s.Gameplay.CloudAggression > 100 {
+		s.Gameplay.CloudAggression = 100
+	}
+	s.Gameplay.QuickRoundStart = true
+	if fs.Gameplay.QuickRoundStart != nil {
+		s.Gameplay.QuickRoundStart = *fs.Gameplay.QuickRoundStart
 	}
 	s.Gameplay.Palms.MinCount = fs.Gameplay.Palms.MinCount
 	s.Gameplay.Palms.MaxCount = fs.Gameplay.Palms.MaxCount

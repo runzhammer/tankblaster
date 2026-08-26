@@ -11,6 +11,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	_ "image/jpeg"
@@ -75,10 +76,10 @@ const (
 	palmRevengeAggroMin        = 20.0
 	palmRevengeAggroMax        = 40.0
 	palmRevengeTrigger         = 100.0
-	palmRevengeFocusFrames     = 60
-	palmRevengeAttackFrames    = 48
-	palmRevengeLightningFrames = 54
-	palmRevengeRecoverFrames   = 120
+	palmRevengeFocusFrames     = 150
+	palmRevengeAttackFrames    = 120
+	palmRevengeLightningFrames = 240
+	palmRevengeRecoverFrames   = 150
 )
 
 const (
@@ -178,7 +179,8 @@ type palmRevengeEvent struct {
 	cloudOriginal engine.Vec
 	targetCameraX float64
 	damageDone    bool
-	tankRemoved   bool
+	smokeDone     bool
+	smokeAge      int
 }
 
 type cloudAsset struct {
@@ -381,6 +383,8 @@ type GameScene struct {
 	cloudGrinImage        *ebiten.Image
 	cloudGrinAnimation    spriteAnimation
 	lightningImage        *ebiten.Image
+	humanPortrait         *ebiten.Image
+	computerPortraits     map[computerplayers.ID]*ebiten.Image
 	zeroPowerSmoke        spriteAnimation
 	fireballAnimation     spriteAnimation
 	waterAnimation        spriteAnimation
@@ -415,6 +419,7 @@ type GameScene struct {
 	sandFalls            []sandFallAnimation
 	palmLeafFalls        []palmLeafFall
 	palmRevenge          *palmRevengeEvent
+	palmRevengeRemoval   *battleTank
 	zeroPowerEffects     []zeroPowerAnimation
 	zeroPowerAnimations  []spriteAnimation
 	shop                 shopAssets
@@ -422,6 +427,11 @@ type GameScene struct {
 	roundTransitionDelay int
 	roundSeriesComplete  bool
 	showScoreTable       bool
+	showPlayerNames      bool
+	gameHelpOpen         bool
+	playerInfoOpen       bool
+	playerInfoIndex      int
+	gamePaused           bool
 	lastDamageSource     *battleTank
 	shopPlayerOrder      []int
 	shopPlayerCursor     int
@@ -449,6 +459,16 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		rng:               rand.New(rand.NewSource(time.Now().UnixNano())),
 		activePlayerIndex: -1,
 		roundNumber:       1,
+		showPlayerNames:   false,
+		playerInfoIndex:   -1,
+		humanPortrait:     mustImageFromPNG(r.PlayerHuman),
+		computerPortraits: map[computerplayers.ID]*ebiten.Image{
+			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
+			computerplayers.FrederikID: mustImageFromPNG(r.PlayerComputerFrederik),
+			computerplayers.MisterXID:  mustImageFromPNG(r.PlayerComputerMisterX),
+			computerplayers.DrNukeID:   mustImageFromPNG(r.PlayerComputerDrNuke),
+			computerplayers.HaraldID:   mustImageFromPNG(r.PlayerComputerHarald),
+		},
 	}
 	zeroPowerAnimations, err := loadZeroPowerAnimations()
 	if err != nil {
@@ -519,7 +539,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		return nil, err
 	}
 	s.cloudGrinAnimation = cloudGrinAnimation
-	zeroPowerSmoke, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 21, delay: 6, scaleX: 1.0, scaleY: 1.3})
+	zeroPowerSmoke, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 15, delay: 6, scaleX: 1.0, scaleY: 1.0})
 	if err != nil {
 		return nil, err
 	}
@@ -581,6 +601,7 @@ func (s *GameScene) startRound() {
 	s.sandFalls = nil
 	s.palmLeafFalls = nil
 	s.palmRevenge = nil
+	s.palmRevengeRemoval = nil
 	s.zeroPowerEffects = nil
 	s.turnAdvanceDelay = 0
 	s.roundTransitionDelay = 0
@@ -650,6 +671,9 @@ func (s *GameScene) startRound() {
 	}
 	s.createClouds(battlefieldHeight)
 	s.createPalms()
+	if s.g.options.quickRoundStart {
+		s.placeTanksOnGroundForQuickStart()
+	}
 	s.cameraGoal = s.cameraTargetForTank(0)
 	s.layers[layerGround] = engine.AddSprites(s.layers[layerGround], gr.Sprites)
 	s.layers[layerPalms] = engine.AddSprites(s.layers[layerPalms], s.palmSprites())
@@ -696,7 +720,7 @@ func (s *GameScene) createClouds(battlefieldHeight float64) {
 
 	for i := 0; i < count; i++ {
 		asset := s.cloudAssets[s.rng.Intn(len(s.cloudAssets))]
-		scale := 0.55 + s.rng.Float64()*0.45
+		scale := 1.0
 		size := engine.V(asset.size.X*scale, asset.size.Y*scale)
 		laneCenter := laneWidth*float64(i) + laneWidth/2
 		x := laneCenter - size.X/2 + (s.rng.Float64()-0.5)*laneWidth*0.5
@@ -1089,6 +1113,9 @@ func (s *GameScene) palmEffectDelayFrames(palm *battlePalm) int {
 }
 
 func (s *GameScene) randomPalmCount() int {
+	if s.g != nil && s.g.options.palmCount >= 0 {
+		return s.g.options.palmCount
+	}
 	cfg := core.Config().Gameplay.Palms
 	minCount := cfg.MinCount
 	if minCount <= 0 {
@@ -1102,6 +1129,26 @@ func (s *GameScene) randomPalmCount() int {
 		maxCount = minCount
 	}
 	return minCount + s.rng.Intn(maxCount-minCount+1)
+}
+
+func (s *GameScene) placeTanksOnGroundForQuickStart() {
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil {
+			continue
+		}
+		tank.body.Velocity = engine.Vec{}
+		tank.body.Steps = nil
+		s.ground.AlignSpriteToSurface(tank.body)
+		tank.landed = true
+		tank.falling = false
+		tank.fallDamage = false
+		tank.fallTargetY = 0
+		if tank.cannon != nil {
+			s.clampCannonRotationToTank(tank.cannon, tank.body)
+		}
+	}
+	s.spawnIndex = len(s.tanks)
+	s.spawnPauseFrames = 0
 }
 
 func (s *GameScene) minimumPalmDistance() float64 {
@@ -1205,6 +1252,14 @@ func (g *GameScene) Movement(source *engine.Sprite) {
 
 func (s *GameScene) Update() error {
 	s.time += 1
+	if s.phase != phaseShop {
+		if err := s.handleGameDialogInput(); err != nil {
+			return err
+		}
+		if s.gameHelpOpen || s.playerInfoOpen || s.gamePaused {
+			return nil
+		}
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		s.showScoreTable = !s.showScoreTable
 	}
@@ -1412,7 +1467,7 @@ func loadZeroPowerAnimations() ([]spriteAnimation, error) {
 		{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 0.5, scaleY: 0.5},
 		{data: r.ZeroPowerExplosionPNG, frameWidth: 67, frameHeight: 64, delay: 6},
 		{data: r.ZeroPowerMushroomExplosionPNG, frameWidth: 51, frameHeight: 57, delay: 6, anchor: zeroPowerAnchorTankBottom},
-		{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 21, delay: 6, scaleX: 1.0, scaleY: 1.3},
+		{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 15, delay: 6, scaleX: 1.0, scaleY: 1.0},
 	}
 	animations := make([]spriteAnimation, 0, len(sources))
 	for _, source := range sources {
@@ -1538,9 +1593,12 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawZeroPowerEffects(screen, &camera)
 	s.drawProjectile(screen, &camera)
 	s.drawGameHUD(screen)
+	s.drawPalmRevengeScreenFlash(screen)
 	s.drawDebugScrollBar(screen)
+	s.drawPlayerNames(screen, &camera)
 	s.drawScoreTable(screen)
 	s.drawRoundTransitionBanner(screen)
+	s.drawGameDialogs(screen)
 
 	switch s.phase {
 	case phaseBattle:
@@ -1582,6 +1640,85 @@ func (s *GameScene) handleCameraScrollControls() {
 		maxCameraX := math.Max(0, s.worldWidth-core.Config().Screen.Width)
 		s.cameraX = math.Min(maxCameraX, s.cameraX+scrollOMatKeyboardStep)
 	}
+}
+
+func (s *GameScene) handleGameDialogInput() error {
+	if inpututil.IsKeyJustPressed(ebiten.KeyF1) {
+		s.gameHelpOpen = true
+		s.playerInfoOpen = false
+		return nil
+	}
+	if s.gameHelpOpen || s.playerInfoOpen {
+		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
+			s.gameHelpOpen = false
+			s.playerInfoOpen = false
+			return nil
+		}
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			x, y := ebiten.CursorPosition()
+			if s.gameHelpOpen && image.Pt(x, y).In(gameHelpOKRect()) {
+				s.gameHelpOpen = false
+				return nil
+			}
+			if s.playerInfoOpen && image.Pt(x, y).In(playerInfoOKRect()) {
+				s.playerInfoOpen = false
+				return nil
+			}
+		}
+		if index, ok := pressedPlayerInfoIndex(); ok {
+			s.openPlayerInfo(index)
+		}
+		return nil
+	}
+	if index, ok := pressedPlayerInfoIndex(); ok {
+		s.openPlayerInfo(index)
+		return nil
+	}
+	if controlPressed() {
+		switch {
+		case inpututil.IsKeyJustPressed(ebiten.KeyP):
+			s.gamePaused = !s.gamePaused
+			return nil
+		case inpututil.IsKeyJustPressed(ebiten.KeyN):
+			s.showPlayerNames = !s.showPlayerNames
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *GameScene) openPlayerInfo(index int) {
+	if index < 0 || index >= len(s.tanks) {
+		return
+	}
+	s.playerInfoIndex = index
+	s.playerInfoOpen = true
+	s.gameHelpOpen = false
+}
+
+func pressedPlayerInfoIndex() (int, bool) {
+	keys := []ebiten.Key{
+		ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4, ebiten.Key5,
+		ebiten.Key6, ebiten.Key7, ebiten.Key8, ebiten.Key9, ebiten.Key0,
+	}
+	keypad := []ebiten.Key{
+		ebiten.KeyKP1, ebiten.KeyKP2, ebiten.KeyKP3, ebiten.KeyKP4, ebiten.KeyKP5,
+		ebiten.KeyKP6, ebiten.KeyKP7, ebiten.KeyKP8, ebiten.KeyKP9, ebiten.KeyKP0,
+	}
+	for index, key := range keys {
+		if inpututil.IsKeyJustPressed(key) || inpututil.IsKeyJustPressed(keypad[index]) {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func controlPressed() bool {
+	return ebiten.IsKeyPressed(ebiten.KeyControl) || ebiten.IsKeyPressed(ebiten.KeyControlLeft) || ebiten.IsKeyPressed(ebiten.KeyControlRight)
+}
+
+func shiftPressed() bool {
+	return ebiten.IsKeyPressed(ebiten.KeyShift) || ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight)
 }
 
 func (s *GameScene) setCameraFromScrollBarX(x int) {
@@ -1633,11 +1770,34 @@ func (s *GameScene) handleBattleInput() {
 		return
 	}
 
+	strengthStep := 1
+	if shiftPressed() {
+		strengthStep = 10
+	}
 	if shouldAdjustStrength(ebiten.KeyArrowUp) {
-		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+1)
+		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+strengthStep)
 	}
 	if shouldAdjustStrength(ebiten.KeyArrowDown) {
-		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-1)
+		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-strengthStep)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
+		if shiftPressed() {
+			s.selectPreviousWeapon(tank)
+		} else {
+			s.selectNextWeapon(tank)
+		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEqual) || inpututil.IsKeyJustPressed(ebiten.KeyKPAdd) {
+		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+10)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyMinus) || inpututil.IsKeyJustPressed(ebiten.KeyKPSubtract) {
+		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-10)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyI) {
+		s.invertCannonAngle(tank)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
+		s.toggleScrollOMat(tank)
 	}
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
@@ -1925,6 +2085,59 @@ func (s *GameScene) canSelectWeaponSlot(tank *battleTank, slot int) bool {
 	return s.ammoForWeaponSlot(tank.playerIndex, slot) > 0
 }
 
+func (s *GameScene) selectNextWeapon(tank *battleTank) {
+	if tank == nil {
+		return
+	}
+	for step := 1; step <= s.weaponSlotCount(); step++ {
+		slot := (tank.selectedWeapon + step) % s.weaponSlotCount()
+		if s.canSelectWeaponSlot(tank, slot) {
+			tank.selectedWeapon = slot
+			return
+		}
+	}
+}
+
+func (s *GameScene) selectPreviousWeapon(tank *battleTank) {
+	if tank == nil {
+		return
+	}
+	count := s.weaponSlotCount()
+	for step := 1; step <= count; step++ {
+		slot := (tank.selectedWeapon - step + count) % count
+		if s.canSelectWeaponSlot(tank, slot) {
+			tank.selectedWeapon = slot
+			return
+		}
+	}
+}
+
+func (s *GameScene) invertCannonAngle(tank *battleTank) {
+	if tank == nil || tank.cannon == nil || tank.body == nil {
+		return
+	}
+	current := s.cannonAngleDegreesForTank(tank)
+	leftLimit := tank.body.Rot - math.Pi
+	tank.cannon.Rot = leftLimit + engine.DegToRad(180-current)
+	s.clampCannonRotationToTank(tank.cannon, tank.body)
+}
+
+func (s *GameScene) toggleScrollOMat(tank *battleTank) {
+	if tank == nil {
+		return
+	}
+	scrollSlot := s.scrollOMatItemIndex() + 1
+	if scrollSlot <= 0 || scrollSlot >= s.weaponSlotCount() || !s.canSelectWeaponSlot(tank, scrollSlot) {
+		return
+	}
+	if tank.selectedWeapon == scrollSlot {
+		tank.selectedWeapon = 0
+		s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+		return
+	}
+	tank.selectedWeapon = scrollSlot
+}
+
 func (s *GameScene) consumeSelectedWeaponAmmo(tank *battleTank) bool {
 	if tank == nil {
 		return false
@@ -2048,7 +2261,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 
 	battlefieldHeight := s.battlefieldHeight()
-	if p.pos.X < -80 || p.pos.X > s.worldWidth+80 || p.pos.Y > battlefieldHeight+80 {
+	if p.pos.Y > battlefieldHeight+80 {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
 	}
@@ -2075,6 +2288,11 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 			s.focusPalmCamera(palm)
 		}
 		s.delayTurnAdvance(s.palmEffectDelayFrames(palm))
+		return false
+	}
+
+	if (p.pos.X < 0 || p.pos.X > s.worldWidth) && p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
+		s.reportComputerShot(p.pos, -1, false)
 		return false
 	}
 
@@ -2922,16 +3140,27 @@ func (s *GameScene) updatePalmRevenge() {
 		if event.age >= palmRevengeAttackFrames {
 			event.age = 0
 			event.phase = palmRevengeLightning
-			s.applyPalmRevengeDamage(event)
 		}
 	case palmRevengeLightning:
 		s.cameraGoal = event.targetCameraX
 		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.22, 0.8)
+		if s.palmRevengeLightningVisible(event) && !event.damageDone {
+			s.blackenPalmRevengeTank(event)
+		}
+		if event.age >= 48 && event.age < 66 && !event.smokeDone {
+			s.startPalmRevengeSmoke(event)
+		}
+		if event.smokeDone {
+			event.smokeAge++
+		}
 		if event.age >= palmRevengeLightningFrames {
 			event.age = 0
 			event.phase = palmRevengeRecover
 		}
 	case palmRevengeRecover:
+		if event.smokeDone {
+			event.smokeAge++
+		}
 		progress := easeOut(float64(event.age) / float64(palmRevengeRecoverFrames))
 		if event.cloud != nil && event.cloud.sprite != nil && event.cloud.sprite.Pos != nil {
 			event.cloud.sprite.Pos.X = event.cloudAttack.X + (event.cloudOriginal.X-event.cloudAttack.X)*progress
@@ -2953,7 +3182,7 @@ func (s *GameScene) moveRevengeCloud(event *palmRevengeEvent, progress float64) 
 	event.cloud.sprite.Pos.Y = event.cloudStart.Y + (event.cloudAttack.Y-event.cloudStart.Y)*progress
 }
 
-func (s *GameScene) applyPalmRevengeDamage(event *palmRevengeEvent) {
+func (s *GameScene) blackenPalmRevengeTank(event *palmRevengeEvent) {
 	if event == nil || event.damageDone || event.target == nil {
 		return
 	}
@@ -2972,12 +3201,15 @@ func (s *GameScene) applyPalmRevengeDamage(event *palmRevengeEvent) {
 	if previousPower > 0 && tank.power == 0 {
 		s.awardZeroPowerScore(tank, nil, damageCauseDirect)
 		tank.zeroPowerShown = true
-		s.zeroPowerEffects = append(s.zeroPowerEffects, zeroPowerAnimation{
-			tank:      tank,
-			animation: s.zeroPowerSmoke,
-			duration:  maxInt(1, s.zeroPowerSmoke.totalTicks),
-		})
 	}
+}
+
+func (s *GameScene) startPalmRevengeSmoke(event *palmRevengeEvent) {
+	if event == nil || event.smokeDone || event.target == nil || len(s.zeroPowerSmoke.frames) == 0 {
+		return
+	}
+	event.smokeDone = true
+	event.smokeAge = 0
 }
 
 func (s *GameScene) finishPalmRevenge(event *palmRevengeEvent) {
@@ -2985,9 +3217,7 @@ func (s *GameScene) finishPalmRevenge(event *palmRevengeEvent) {
 		return
 	}
 	if event.target != nil && event.target.power <= 0 {
-		event.target.zeroPowerGone = true
-		s.removeTankSprites(event.target)
-		s.removeZeroPowerEffectsForTank(event.target)
+		s.palmRevengeRemoval = event.target
 	}
 	if event.cloud != nil {
 		event.cloud.revengeActive = false
@@ -3061,10 +3291,21 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 		return
 	}
 	s.turnAdvanceDelay = 0
+	s.removePendingPalmRevengeTank()
 	if s.endRoundIfOnlyOneTankRemains() {
 		return
 	}
 	s.advanceActivePlayer()
+}
+
+func (s *GameScene) removePendingPalmRevengeTank() {
+	if s.palmRevengeRemoval == nil {
+		return
+	}
+	tank := s.palmRevengeRemoval
+	tank.zeroPowerGone = true
+	s.removeTankSprites(tank)
+	s.palmRevengeRemoval = nil
 }
 
 func (s *GameScene) updateBattleCamera() {
@@ -3816,6 +4057,11 @@ func (s *GameScene) drawPalmRevenge(screen *ebiten.Image, camera *ebiten.GeoM) {
 		lightningOp.GeoM.Translate(cloudCenter.X-float64(s.lightningImage.Bounds().Dx())/2, cloudCenter.Y)
 		screen.DrawImage(s.lightningImage, lightningOp)
 	}
+
+	if event.smokeDone && event.target != nil && event.target.body != nil {
+		body := event.target.body.Bounds()
+		drawAnimationCenteredLooping(screen, camera, s.zeroPowerSmoke, engine.V(body.Min.X+body.W()/2, body.Min.Y-body.H()+12), event.smokeAge)
+	}
 }
 
 func (s *GameScene) palmRevengeCloudBrightness(event *palmRevengeEvent) float32 {
@@ -3859,7 +4105,47 @@ func (s *GameScene) palmRevengeLightningVisible(event *palmRevengeEvent) bool {
 	if event == nil || event.phase != palmRevengeLightning {
 		return false
 	}
-	return event.age < 18 || (event.age >= 27 && event.age < 45)
+	return event.age < 18 || (event.age >= 48 && event.age < 66)
+}
+
+func (s *GameScene) drawPalmRevengeScreenFlash(screen *ebiten.Image) {
+	event := s.palmRevenge
+	if event == nil || event.phase != palmRevengeLightning {
+		return
+	}
+	alpha := s.palmRevengeScreenFlashAlpha(event.age)
+	if alpha <= 0 {
+		return
+	}
+	drawFilledRect(screen, screen.Bounds(), color.RGBA{R: 255, G: 255, B: 255, A: alpha})
+}
+
+func (s *GameScene) palmRevengeScreenFlashAlpha(age int) uint8 {
+	localAge, ok := lightningVisibleLocalAge(age)
+	if !ok {
+		return 0
+	}
+	pulseLength := 9
+	pulse := localAge % pulseLength
+	half := pulseLength / 2
+	var strength float64
+	if pulse <= half {
+		strength = float64(pulse) / float64(maxInt(1, half))
+	} else {
+		strength = float64(pulseLength-pulse) / float64(maxInt(1, pulseLength-half))
+	}
+	return uint8(math.Round(165 * math.Max(0, math.Min(1, strength))))
+}
+
+func lightningVisibleLocalAge(age int) (int, bool) {
+	switch {
+	case age >= 0 && age < 18:
+		return age, true
+	case age >= 48 && age < 66:
+		return age - 48, true
+	default:
+		return 0, false
+	}
 }
 
 func (s *GameScene) drawPalmLeafFalls(screen *ebiten.Image, camera *ebiten.GeoM) {
@@ -4040,6 +4326,212 @@ func (s *GameScene) drawScoreTable(screen *ebiten.Image) {
 		drawText(screen, tank.player.Name, nameX, y, textColor)
 		drawText(screen, strconv.Itoa(s.scoreForPlayer(tank.playerIndex)), scoreX+28, y, textColor)
 		drawText(screen, status, statusX+18, y, textColor)
+	}
+}
+
+func (s *GameScene) drawPlayerNames(screen *ebiten.Image, camera *ebiten.GeoM) {
+	if !s.showPlayerNames {
+		return
+	}
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 || tank.zeroPowerGone {
+			continue
+		}
+		body := tank.body.Bounds()
+		center := engine.V(body.Min.X+body.W()/2, body.Min.Y-26).Project(camera)
+		label := tank.player.Name
+		b := text.BoundString(dialogTextFace, label)
+		drawTextFace(screen, label, dialogTextFace, int(center.X)-b.Dx()/2, int(center.Y), tank.player.Color)
+	}
+}
+
+func (s *GameScene) drawGameDialogs(screen *ebiten.Image) {
+	if s.gamePaused {
+		drawFilledRect(screen, image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height)), color.RGBA{A: 70})
+		drawCenteredText(screen, "Pause", image.Rect(0, int(core.Config().Screen.Height)/2-24, int(core.Config().Screen.Width), int(core.Config().Screen.Height)/2+24), colornames.White)
+	}
+	if s.gameHelpOpen {
+		s.drawGameHelpDialog(screen)
+	}
+	if s.playerInfoOpen {
+		s.drawPlayerInfoDialog(screen)
+	}
+}
+
+func gameHelpRect() image.Rectangle {
+	return centerDialogRect(500, 395)
+}
+
+func gameHelpOKRect() image.Rectangle {
+	r := gameHelpRect()
+	return image.Rect(r.Max.X-75, r.Max.Y-31, r.Max.X-15, r.Max.Y-9)
+}
+
+func playerInfoRect() image.Rectangle {
+	return centerDialogRect(477, 318)
+}
+
+func playerInfoOKRect() image.Rectangle {
+	r := playerInfoRect()
+	return image.Rect(r.Max.X-86, r.Max.Y-47, r.Max.X-15, r.Max.Y-23)
+}
+
+func centerDialogRect(w, h int) image.Rectangle {
+	screen := core.Config().Screen
+	return image.Rect(0, 0, w, h).Add(image.Pt((int(screen.Width)-w)/2, (int(screen.Height)-h)/2))
+}
+
+func (s *GameScene) drawGameHelpDialog(screen *ebiten.Image) {
+	r := gameHelpRect()
+	drawDialogWindow(screen, r, "Tank Blaster Hilfe")
+
+	keysBox := image.Rect(r.Min.X+12, r.Min.Y+63, r.Min.X+400, r.Max.Y-14)
+	drawGroupBox(screen, keysBox, "Tasten")
+
+	lines := []struct {
+		key  string
+		desc string
+	}{
+		{"Enter:", "Feuer!"},
+		{"Tab (+ Shift):", "Nächste (vorige) Waffe wählen"},
+		{"Pfeil links (+ Shift):", "Winkel um 1° (10°) im UZS drehen"},
+		{"Pfeil rechts (+ Shift):", "Winkel um 1° (10°) gegen UZS drehen"},
+		{"Pfeil hoch (+ Shift):", "Kraft um 1 (10) erhöhen"},
+		{"Pfeil runter (+ Shift):", "Kraft um 1 (10) verringern"},
+		{"m:", "Motor anlassen (nur XM-V12 Panzer)"},
+		{"i:", "Winkel invertieren"},
+		{"s:", "Scroll-o-Mat ein-/ausschalten (mit Pfeiltasten scrollen)"},
+		{"+:", "Kraft um 10 erhöhen"},
+		{"-:", "Kraft um 10 verringern"},
+		{"1, 2, ..., 0:", "Info über Spieler 1, 2, ..., 10"},
+		{"Leertaste:", "Punkte-Zwischenstand anzeigen"},
+		{"", ""},
+		{"Strg Q:", "Spiel beenden (zurück zu Windows)"},
+		{"Strg E:", "Laufende Runde abbrechen"},
+		{"Strg P:", "Pause"},
+		{"Strg N:", "Spielernamen ein-/ausblenden"},
+	}
+	y := keysBox.Min.Y + 28
+	for _, line := range lines {
+		if line.key != "" {
+			drawTextFace(screen, line.key, dialogTextFace, keysBox.Min.X+12, y, colornames.Black)
+			drawTextFace(screen, line.desc, dialogTextFace, keysBox.Min.X+130, y, colornames.Black)
+		}
+		y += 18
+	}
+
+	logo := image.Rect(r.Max.X-88, r.Min.Y+67, r.Max.X-17, r.Max.Y-90)
+	drawFilledRect(screen, logo, color.RGBA{R: 0, G: 105, B: 100, A: 255})
+	drawVerticalLogo(screen, logo)
+	drawDialogButton(screen, gameHelpOKRect(), "OK")
+}
+
+func drawVerticalLogo(screen *ebiten.Image, r image.Rectangle) {
+	chars := []string{"TANK", "BLASTER"}
+	x := r.Min.X + r.Dx()/2 - 8
+	y := r.Min.Y + 38
+	for _, word := range chars {
+		for _, ch := range word {
+			drawTextFace(screen, string(ch), uiTextFace, x+2, y+2, colornames.Black)
+			drawTextFace(screen, string(ch), uiTextFace, x, y, color.RGBA{R: 0, G: 220, B: 220, A: 255})
+			y += 18
+		}
+		y += 10
+	}
+}
+
+func (s *GameScene) drawPlayerInfoDialog(screen *ebiten.Image) {
+	r := playerInfoRect()
+	drawDialogWindow(screen, r, "Spieler-Information")
+
+	tank := s.tankByPlayerIndex(s.playerInfoIndex)
+	if tank == nil {
+		drawCenteredTextFace(screen, "Spieler nicht vorhanden", r, dialogTextFace, colornames.Black)
+		drawDialogButton(screen, playerInfoOKRect(), "OK")
+		return
+	}
+
+	left := image.Rect(r.Min.X+12, r.Min.Y+61, r.Min.X+213, r.Max.Y-23)
+	drawGroupBox(screen, left, tank.player.Name)
+	portraitRect := image.Rect(left.Min.X+10, left.Min.Y+15, left.Min.X+122, left.Min.Y+124)
+	drawFrame(screen, portraitRect, colornames.White, color.RGBA{R: 170, G: 170, B: 170, A: 255})
+	if portrait := s.portraitForPlayer(tank.player); portrait != nil {
+		drawScaledImage(screen, portrait, insetRect(portraitRect, 2))
+	}
+	drawTextFace(screen, "Panzermodell", dialogTextFace, left.Min.X+134, left.Min.Y+28, colornames.Black)
+	modelRect := image.Rect(left.Min.X+149, left.Min.Y+40, left.Min.X+190, left.Min.Y+82)
+	drawFilledRect(screen, modelRect, colornames.Black)
+	if tank.body != nil && tank.body.Image != nil {
+		drawScaledImage(screen, tank.body.Image, insetRect(modelRect, 5))
+	}
+	drawCenteredTextFace(screen, "Standard", image.Rect(left.Min.X+126, left.Min.Y+88, left.Max.X-8, left.Min.Y+108), dialogTextFace, colornames.Black)
+
+	status := "aktiv"
+	if tank.power <= 0 || tank.zeroPowerGone {
+		status = "ausgeschieden"
+	}
+	infoY := left.Min.Y + 146
+	infoRows := []struct {
+		label string
+		value string
+	}{
+		{"Status:", status},
+		{"Energie:", strconv.Itoa(tank.power)},
+		{"Geld:", "$" + strconv.Itoa(s.creditForPlayer(tank.playerIndex))},
+		{"Energieschild", "0%"},
+	}
+	for _, row := range infoRows {
+		drawTextFace(screen, row.label, dialogTextFace, left.Min.X+10, infoY, colornames.Black)
+		drawTextFace(screen, row.value, dialogTextFace, left.Min.X+112, infoY, colornames.Black)
+		infoY += 24
+	}
+
+	arsenalLabelX := r.Min.X + 227
+	drawTextFace(screen, "Waffenarsenal", dialogTextFace, arsenalLabelX, r.Min.Y+56, colornames.Black)
+	arsenal := image.Rect(arsenalLabelX, r.Min.Y+63, r.Max.X-13, r.Max.Y-62)
+	drawFrame(screen, arsenal, colornames.White, color.RGBA{R: 150, G: 150, B: 150, A: 255})
+	s.drawPlayerArsenal(screen, tank, insetRect(arsenal, 4))
+	drawDialogButton(screen, playerInfoOKRect(), "OK")
+}
+
+func (s *GameScene) portraitForPlayer(player PlayerConfig) *ebiten.Image {
+	if player.Kind == PlayerComputer {
+		if portrait := s.computerPortraits[player.ComputerID]; portrait != nil {
+			return portrait
+		}
+		return s.computerPortraits[computerplayers.DoedelID]
+	}
+	return s.humanPortrait
+}
+
+func (s *GameScene) creditForPlayer(playerIndex int) int {
+	if playerIndex < 0 || playerIndex >= len(s.credits) {
+		return 0
+	}
+	return s.credits[playerIndex]
+}
+
+func (s *GameScene) drawPlayerArsenal(screen *ebiten.Image, tank *battleTank, r image.Rectangle) {
+	if tank == nil {
+		return
+	}
+	y := r.Min.Y + 12
+	drawTextFace(screen, "Spurgeschoß", dialogTextFace, r.Min.X, y, colornames.Black)
+	drawTextFace(screen, "10000", dialogTextFace, r.Max.X-82, y, colornames.Black)
+	y += 16
+
+	weaponList := weaponspkg.List()
+	for slot := 1; slot < s.weaponSlotCount() && slot < len(weaponList); slot++ {
+		count := s.ammoForWeaponSlot(tank.playerIndex, slot)
+		if count <= 0 {
+			continue
+		}
+		drawTextFace(screen, weaponList[slot].Name, dialogTextFace, r.Min.X, y, colornames.Black)
+		drawTextFace(screen, strconv.Itoa(count), dialogTextFace, r.Max.X-82, y, colornames.Black)
+		y += 16
+		if y > r.Max.Y-8 {
+			break
+		}
 	}
 }
 
@@ -4406,10 +4898,14 @@ func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behav
 }
 
 func (s *GameScene) behaviorRotateOnButton(source *engine.Sprite) {
+	step := float64(source.RotationSpeed)
+	if shiftPressed() {
+		step *= 10
+	}
 	if RotateLeft() {
-		source.Rot -= engine.DegToRad(float64(source.RotationSpeed))
+		source.Rot -= engine.DegToRad(step)
 	} else if RotateRight() {
-		source.Rot += engine.DegToRad(float64(source.RotationSpeed))
+		source.Rot += engine.DegToRad(step)
 	}
 }
 

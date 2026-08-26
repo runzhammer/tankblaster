@@ -9,6 +9,10 @@ gameplay:
   impact_pause_seconds: 1
   tank_hit_pause_seconds: 0.6
   palm_hit_pause_seconds: 2
+  projectile_reentry: 1
+  palm_count: -1
+  cloud_aggression: 0
+  quick_round_start: true
   palms:
     min_count: 1
     max_count: 0

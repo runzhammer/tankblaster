@@ -2,7 +2,7 @@ package weapons
 
 func Training() Weapon {
 	return Weapon{
-		Name:      "Training",
+		Name:      "Spurgeschoß",
 		Color:     whiteProjectileColor(),
 		Damage:    DirectHitDamage,
 		Unlocked:  true,
