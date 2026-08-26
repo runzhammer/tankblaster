@@ -274,6 +274,15 @@ type sandFallAnimation struct {
 	duration int
 }
 
+type palmLeafFall struct {
+	image    *ebiten.Image
+	pos      engine.Vec
+	velocity engine.Vec
+	age      int
+	landed   bool
+	maxAge   int
+}
+
 type zeroPowerAnimation struct {
 	tank      *battleTank
 	animation spriteAnimation
@@ -322,6 +331,7 @@ type GameScene struct {
 	palmFireAnimation     spriteAnimation
 	palmSmokeAnimation    spriteAnimation
 	palmCrumbleAnimation  spriteAnimation
+	palmLeafImages        []*ebiten.Image
 	fireballAnimation     spriteAnimation
 	waterAnimation        spriteAnimation
 	waterBlubberAnimation spriteAnimation
@@ -353,6 +363,7 @@ type GameScene struct {
 	waterBlotches        []*waterSurfaceImpact
 	moleImpacts          []*moleImpact
 	sandFalls            []sandFallAnimation
+	palmLeafFalls        []palmLeafFall
 	zeroPowerEffects     []zeroPowerAnimation
 	zeroPowerAnimations  []spriteAnimation
 	shop                 shopAssets
@@ -411,6 +422,11 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 	s.palmImage = palmImage
 	s.palmPixels = palmPixels
+	palmLeafImages, err := loadPalmLeafImages(r.PalmLeavesPNG)
+	if err != nil {
+		return nil, err
+	}
+	s.palmLeafImages = palmLeafImages
 	palmSkeletonImage, palmSkeletonPixels, err := loadImageWithPixels(r.PalmSkeletonPNG)
 	if err != nil {
 		return nil, err
@@ -492,6 +508,7 @@ func (s *GameScene) startRound() {
 	s.projectiles = nil
 	s.impacts = nil
 	s.sandFalls = nil
+	s.palmLeafFalls = nil
 	s.zeroPowerEffects = nil
 	s.turnAdvanceDelay = 0
 	s.roundTransitionDelay = 0
@@ -809,6 +826,26 @@ func (s *GameScene) setPalmSkeleton(palm *battlePalm, smoking bool) {
 	palm.age = 0
 }
 
+func (s *GameScene) spawnPalmLeafFall(palm *battlePalm) {
+	if palm == nil || palm.sprite == nil || len(s.palmLeafImages) == 0 {
+		return
+	}
+	bounds := palm.sprite.Bounds()
+	leafCount := 18
+	for i := 0; i < leafCount; i++ {
+		crownWidth := bounds.W() * 0.86
+		x := bounds.Center().X - crownWidth/2 + s.rng.Float64()*crownWidth
+		y := bounds.Min.Y + bounds.H()*(0.27+s.rng.Float64()*0.08)
+		leaf := palmLeafFall{
+			image:    s.palmLeafImages[s.rng.Intn(len(s.palmLeafImages))],
+			pos:      engine.V(x, y),
+			velocity: engine.V((s.rng.Float64()-0.5)*0.45, 0.75+s.rng.Float64()*1.65),
+			maxAge:   240,
+		}
+		s.palmLeafFalls = append(s.palmLeafFalls, leaf)
+	}
+}
+
 func (s *GameScene) palmEffectDelayFrames(palm *battlePalm) int {
 	if palm == nil {
 		return s.palmHitPauseFrames()
@@ -974,6 +1011,7 @@ func (s *GameScene) Update() error {
 		s.updateMoleImpacts()
 		s.updateSandFalls()
 		s.updatePalms()
+		s.updatePalmLeafFalls()
 		s.updateZeroPowerEffects()
 		if s.roundTransitionDelay > 0 || s.roundSeriesComplete {
 			s.updateRoundTransition()
@@ -1163,6 +1201,26 @@ func loadPalmAsset() (*ebiten.Image, *image.RGBA, error) {
 	return loadImageWithPixels(r.Palm)
 }
 
+func loadPalmLeafImages(data []byte) ([]*ebiten.Image, error) {
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	bounds := decoded.Bounds()
+	if bounds.Dx() < 3 || bounds.Dy() == 0 {
+		return nil, nil
+	}
+	sheet := ebiten.NewImageFromImage(decoded)
+	leaves := make([]*ebiten.Image, 0, bounds.Dx()/3)
+	for x := bounds.Min.X; x+3 <= bounds.Max.X; x += 3 {
+		rect := image.Rect(x, bounds.Min.Y, x+3, bounds.Max.Y)
+		if leaf, ok := sheet.SubImage(rect).(*ebiten.Image); ok {
+			leaves = append(leaves, leaf)
+		}
+	}
+	return leaves, nil
+}
+
 func loadImageWithPixels(data []byte) (*ebiten.Image, *image.RGBA, error) {
 	decoded, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
@@ -1244,6 +1302,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawWaterBlotches(screen, &camera)
 	s.drawMoleImpacts(screen, &camera)
 	s.drawPalmEffects(screen, &camera)
+	s.drawPalmLeafFalls(screen, &camera)
 	s.drawSandFalls(screen, &camera)
 	s.drawZeroPowerEffects(screen, &camera)
 	s.drawProjectile(screen, &camera)
@@ -1771,6 +1830,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 	if palm := s.projectileHitsPalm(p, projectileRadiusForWeapon(weapon)); palm != nil {
 		s.reportComputerShot(p.pos, -1, false)
+		s.spawnPalmLeafFall(palm)
 		if weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationFireball && palm.state == palmStateAlive {
 			s.ignitePalm(palm)
 		} else if palm.state == palmStateSkeleton || palm.state == palmStateSkeletonSmoking {
@@ -2553,6 +2613,39 @@ func (s *GameScene) updatePalms() {
 	s.palms = active
 }
 
+func (s *GameScene) updatePalmLeafFalls() {
+	if len(s.palmLeafFalls) == 0 {
+		return
+	}
+	active := s.palmLeafFalls[:0]
+	for _, leaf := range s.palmLeafFalls {
+		leaf.age++
+		surfaceY := s.ground.SurfaceY(leaf.pos.X)
+		if leaf.landed {
+			if surfaceY <= leaf.pos.Y+3.5 {
+				active = append(active, leaf)
+				continue
+			}
+			leaf.landed = false
+			leaf.age = 0
+			leaf.velocity = engine.V((s.rng.Float64()-0.5)*0.2, 0.65+s.rng.Float64()*0.8)
+		}
+
+		leaf.pos.X += leaf.velocity.X
+		leaf.pos.Y += leaf.velocity.Y
+		leaf.velocity.Y = math.Min(leaf.velocity.Y+0.025, 2.8)
+		if leaf.pos.Y+3 >= surfaceY {
+			leaf.pos.Y = surfaceY - 3
+			leaf.velocity = engine.Vec{}
+			leaf.landed = true
+		}
+		if leaf.age < leaf.maxAge || leaf.landed {
+			active = append(active, leaf)
+		}
+	}
+	s.palmLeafFalls = active
+}
+
 func (s *GameScene) updateSandFalls() {
 	if len(s.sandFalls) == 0 {
 		return
@@ -3283,6 +3376,22 @@ func (s *GameScene) drawPalmEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
 			pos := engine.V(bounds.Center().X, bounds.Max.Y)
 			drawAnimationBottomCentered(screen, camera, s.palmCrumbleAnimation, pos, palm.age)
 		}
+	}
+}
+
+func (s *GameScene) drawPalmLeafFalls(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, leaf := range s.palmLeafFalls {
+		if leaf.image == nil {
+			continue
+		}
+		projected := leaf.pos.Project(camera)
+		op := &ebiten.DrawImageOptions{}
+		w := float64(leaf.image.Bounds().Dx())
+		h := float64(leaf.image.Bounds().Dy())
+		op.GeoM.Translate(-w/2, -h/2)
+		op.GeoM.Rotate(math.Sin(float64(leaf.age)*0.19+leaf.pos.X) * 0.35)
+		op.GeoM.Translate(projected.X, projected.Y)
+		screen.DrawImage(leaf.image, op)
 	}
 }
 

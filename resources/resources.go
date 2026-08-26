@@ -92,6 +92,9 @@ var WeaponbarOutOfStock []byte
 //go:embed palm.png
 var Palm []byte
 
+//go:embed palm_leaves.png
+var PalmLeavesPNG []byte
+
 //go:embed fireball_impact.png
 var FireballImpactPNG []byte
 
