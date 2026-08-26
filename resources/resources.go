@@ -95,6 +95,15 @@ var Palm []byte
 //go:embed palm_leaves.png
 var PalmLeavesPNG []byte
 
+//go:embed palm_eyes_open.png
+var PalmEyesOpenPNG []byte
+
+//go:embed palm_scream.png
+var PalmScreamPNG []byte
+
+//go:embed palm_grin.png
+var PalmGrinPNG []byte
+
 //go:embed fireball_impact.png
 var FireballImpactPNG []byte
 
@@ -121,6 +130,18 @@ var WaterBlotchPNG []byte
 
 //go:embed cloud_lightning.png
 var CloudLightning []byte
+
+//go:embed cloud_aerger.png
+var CloudAngryPNG []byte
+
+//go:embed cloud_aerger2grinse.png
+var CloudAngryToGrinPNG []byte
+
+//go:embed cloud_grinse.png
+var CloudGrinPNG []byte
+
+//go:embed lightning.png
+var LightningPNG []byte
 
 //go:embed cloud_1.png
 var Cloud1 []byte

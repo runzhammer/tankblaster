@@ -58,20 +58,27 @@ const gameHUDHeight = 132
 const weaponbarSlotCount = 20
 
 const (
-	projectileRadius          = 4
-	impactRadiusMultiplier    = 4
-	directHitCreditBonus      = 4000
-	impactSplashMinDamage     = 10
-	impactSplashMaxDamage     = 40
-	sandFallFrames            = 12
-	fallDamageStepPixels      = 20
-	fallDamagePerStep         = 10
-	zeroPowerFrames           = 216
-	zeroPowerDissolveFrames   = 12
-	creditsPerScorePoint      = 500
-	debugShopStartingCredits  = 20000
-	roundTransitionSeconds    = 5
-	computerAdjustSpeedFactor = 1.6
+	projectileRadius           = 4
+	impactRadiusMultiplier     = 4
+	directHitCreditBonus       = 4000
+	impactSplashMinDamage      = 10
+	impactSplashMaxDamage      = 40
+	sandFallFrames             = 12
+	fallDamageStepPixels       = 20
+	fallDamagePerStep          = 10
+	zeroPowerFrames            = 216
+	zeroPowerDissolveFrames    = 12
+	creditsPerScorePoint       = 500
+	debugShopStartingCredits   = 20000
+	roundTransitionSeconds     = 5
+	computerAdjustSpeedFactor  = 1.6
+	palmRevengeAggroMin        = 20.0
+	palmRevengeAggroMax        = 40.0
+	palmRevengeTrigger         = 100.0
+	palmRevengeFocusFrames     = 60
+	palmRevengeAttackFrames    = 48
+	palmRevengeLightningFrames = 54
+	palmRevengeRecoverFrames   = 120
 )
 
 const (
@@ -117,10 +124,19 @@ type battleTank struct {
 }
 
 type battlePalm struct {
-	sprite *engine.Sprite
-	pixels *image.RGBA
-	state  palmState
-	age    int
+	sprite               *engine.Sprite
+	pixels               *image.RGBA
+	state                palmState
+	age                  int
+	eyeAge               int
+	eyesOn               bool
+	screamAge            int
+	screaming            bool
+	grinAge              int
+	grinning             bool
+	grinHideAt           int
+	aggression           float64
+	aggressionMultiplier float64
 }
 
 type palmState uint8
@@ -134,9 +150,35 @@ const (
 )
 
 type battleCloud struct {
-	sprite *engine.Sprite
-	speed  float64
-	kind   cloudKind
+	sprite        *engine.Sprite
+	speed         float64
+	kind          cloudKind
+	image         *ebiten.Image
+	revengeActive bool
+}
+
+type palmRevengePhase uint8
+
+const (
+	palmRevengeNone palmRevengePhase = iota
+	palmRevengeCloudFocus
+	palmRevengeCloudAttack
+	palmRevengeLightning
+	palmRevengeRecover
+)
+
+type palmRevengeEvent struct {
+	phase         palmRevengePhase
+	age           int
+	palm          *battlePalm
+	cloud         *battleCloud
+	target        *battleTank
+	cloudStart    engine.Vec
+	cloudAttack   engine.Vec
+	cloudOriginal engine.Vec
+	targetCameraX float64
+	damageDone    bool
+	tankRemoved   bool
 }
 
 type cloudAsset struct {
@@ -331,7 +373,15 @@ type GameScene struct {
 	palmFireAnimation     spriteAnimation
 	palmSmokeAnimation    spriteAnimation
 	palmCrumbleAnimation  spriteAnimation
+	palmEyesAnimation     spriteAnimation
+	palmScreamImage       *ebiten.Image
+	palmGrinImage         *ebiten.Image
 	palmLeafImages        []*ebiten.Image
+	cloudAngryImage       *ebiten.Image
+	cloudGrinImage        *ebiten.Image
+	cloudGrinAnimation    spriteAnimation
+	lightningImage        *ebiten.Image
+	zeroPowerSmoke        spriteAnimation
 	fireballAnimation     spriteAnimation
 	waterAnimation        spriteAnimation
 	waterBlubberAnimation spriteAnimation
@@ -364,6 +414,7 @@ type GameScene struct {
 	moleImpacts          []*moleImpact
 	sandFalls            []sandFallAnimation
 	palmLeafFalls        []palmLeafFall
+	palmRevenge          *palmRevengeEvent
 	zeroPowerEffects     []zeroPowerAnimation
 	zeroPowerAnimations  []spriteAnimation
 	shop                 shopAssets
@@ -453,6 +504,26 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		return nil, err
 	}
 	s.palmCrumbleAnimation = fitAnimationDuration(palmCrumbleAnimation, secondsToFrames(1.0))
+	palmEyesAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.PalmEyesOpenPNG, frameWidth: 30, delay: 3})
+	if err != nil {
+		return nil, err
+	}
+	s.palmEyesAnimation = palmEyesAnimation
+	s.palmScreamImage = mustImageFromPNG(r.PalmScreamPNG)
+	s.palmGrinImage = mustImageFromPNG(r.PalmGrinPNG)
+	s.cloudAngryImage = mustImageFromPNG(r.CloudAngryPNG)
+	s.cloudGrinImage = mustImageFromPNG(r.CloudGrinPNG)
+	s.lightningImage = mustImageFromPNG(r.LightningPNG)
+	cloudGrinAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.CloudAngryToGrinPNG, frameWidth: 54, delay: 6})
+	if err != nil {
+		return nil, err
+	}
+	s.cloudGrinAnimation = cloudGrinAnimation
+	zeroPowerSmoke, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 21, delay: 6, scaleX: 1.0, scaleY: 1.3})
+	if err != nil {
+		return nil, err
+	}
+	s.zeroPowerSmoke = zeroPowerSmoke
 	waterAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.WaterTexturePNG, frameWidth: 64, delay: 8})
 	if err != nil {
 		return nil, err
@@ -509,6 +580,7 @@ func (s *GameScene) startRound() {
 	s.impacts = nil
 	s.sandFalls = nil
 	s.palmLeafFalls = nil
+	s.palmRevenge = nil
 	s.zeroPowerEffects = nil
 	s.turnAdvanceDelay = 0
 	s.roundTransitionDelay = 0
@@ -634,6 +706,7 @@ func (s *GameScene) createClouds(battlefieldHeight float64) {
 		cloud := &battleCloud{
 			kind:  asset.kind,
 			speed: speed,
+			image: asset.image,
 			sprite: &engine.Sprite{
 				Tag:      cloudSpriteTag(asset.kind),
 				Pos:      &engine.Vec{X: x, Y: y},
@@ -669,6 +742,9 @@ func (s *GameScene) behaviorDriftCloud(cloud *battleCloud) engine.Behavior {
 		if source == nil || source.Pos == nil || source.Size == nil {
 			return
 		}
+		if cloud != nil && cloud.revengeActive {
+			return
+		}
 		direction := s.windDirection
 		if direction == 0 {
 			direction = 1
@@ -701,6 +777,15 @@ func (s *GameScene) cloudSprites() *engine.Sprites {
 		}
 	}
 	return sprites
+}
+
+func (s *GameScene) cloudImageForKind(kind cloudKind) *ebiten.Image {
+	for _, asset := range s.cloudAssets {
+		if asset.kind == kind {
+			return asset.image
+		}
+	}
+	return nil
 }
 
 func (s *GameScene) createPalms() {
@@ -745,7 +830,8 @@ func (s *GameScene) createPalms() {
 func (s *GameScene) addPalm(centerX float64, palmSize engine.Vec) *battlePalm {
 	surfaceY := s.ground.SurfaceY(centerX)
 	palm := &battlePalm{
-		pixels: s.palmPixels,
+		pixels:               s.palmPixels,
+		aggressionMultiplier: 1.0 + s.rng.Float64()*0.35,
 		sprite: &engine.Sprite{
 			Tag:      "palm",
 			Pos:      &engine.Vec{X: centerX - palmSize.X/2, Y: surfaceY - palmSize.Y},
@@ -844,6 +930,145 @@ func (s *GameScene) spawnPalmLeafFall(palm *battlePalm) {
 		}
 		s.palmLeafFalls = append(s.palmLeafFalls, leaf)
 	}
+}
+
+func (s *GameScene) startPalmEyes(palm *battlePalm) {
+	if palm == nil || palm.state != palmStateAlive || len(s.palmEyesAnimation.frames) == 0 {
+		return
+	}
+	palm.eyesOn = true
+	palm.eyeAge = 0
+}
+
+func (s *GameScene) addPalmAggression(palm *battlePalm, attacker *battleTank) bool {
+	if palm == nil || palm.state != palmStateAlive || attacker == nil || s.palmRevenge != nil {
+		return false
+	}
+	increase := (palmRevengeAggroMin + s.rng.Float64()*(palmRevengeAggroMax-palmRevengeAggroMin)) * palm.aggressionMultiplier
+	palm.aggression += increase
+	if palm.aggression < palmRevengeTrigger {
+		return false
+	}
+	palm.aggression = palmRevengeTrigger
+	s.startPalmRevenge(palm, attacker)
+	return true
+}
+
+func (s *GameScene) startPalmRevenge(palm *battlePalm, target *battleTank) {
+	cloud := s.lightningCloudForRevenge()
+	if palm == nil || cloud == nil || cloud.sprite == nil || cloud.sprite.Pos == nil || cloud.sprite.Size == nil || target == nil || target.body == nil {
+		return
+	}
+	palm.eyesOn = false
+	palm.screaming = true
+	palm.screamAge = 0
+	cloud.revengeActive = true
+	if s.layers[layerClouds] != nil {
+		s.layers[layerClouds].Remove(cloud.sprite)
+	}
+	start := *cloud.sprite.Pos
+	targetBounds := target.body.Bounds()
+	attack := engine.V(
+		targetBounds.Center().X-cloud.sprite.Size.X/2,
+		math.Max(0, targetBounds.Min.Y-130-cloud.sprite.Size.Y),
+	)
+	s.palmCameraFocus = nil
+	s.palmRevenge = &palmRevengeEvent{
+		phase:         palmRevengeCloudFocus,
+		palm:          palm,
+		cloud:         cloud,
+		target:        target,
+		cloudStart:    start,
+		cloudOriginal: start,
+		cloudAttack:   attack,
+		targetCameraX: s.cameraTargetForWorldX(targetBounds.Center().X),
+	}
+	s.delayTurnAdvance(palmRevengeFocusFrames + palmRevengeAttackFrames + palmRevengeLightningFrames + palmRevengeRecoverFrames + secondsToFrames(0.5))
+}
+
+func (s *GameScene) lightningCloudForRevenge() *battleCloud {
+	for _, cloud := range s.clouds {
+		if cloud != nil && cloud.kind == cloudKindLightning && cloud.sprite != nil {
+			return cloud
+		}
+	}
+	for _, asset := range s.cloudAssets {
+		if asset.kind != cloudKindLightning {
+			continue
+		}
+		size := engine.V(asset.size.X*0.8, asset.size.Y*0.8)
+		cloud := &battleCloud{
+			kind:  asset.kind,
+			speed: 0.35,
+			image: asset.image,
+			sprite: &engine.Sprite{
+				Tag:      cloudSpriteTag(asset.kind),
+				Pos:      &engine.Vec{X: s.cameraX + core.Config().Screen.Width*0.5, Y: 30},
+				Size:     &engine.Vec{X: size.X, Y: size.Y},
+				Drawable: engine.NewImageDrawable(asset.image),
+			},
+		}
+		cloud.sprite.Steps = engine.MakeBehaviors(s.behaviorDriftCloud(cloud))
+		s.clouds = append(s.clouds, cloud)
+		if s.layers[layerClouds] != nil {
+			s.layers[layerClouds].Add(cloud.sprite)
+		}
+		return cloud
+	}
+	return nil
+}
+
+func (s *GameScene) updatePalmEyes(palm *battlePalm) {
+	if palm == nil || !palm.eyesOn {
+		return
+	}
+	palm.eyeAge++
+	if palm.eyeAge > s.palmEyesTotalTicks() {
+		palm.eyesOn = false
+		palm.eyeAge = 0
+	}
+}
+
+func (s *GameScene) updatePalmGrin(palm *battlePalm) {
+	if palm == nil || !palm.grinning {
+		return
+	}
+	palm.grinAge++
+	if palm.grinHideAt > 0 && palm.grinAge >= palm.grinHideAt {
+		palm.grinning = false
+		palm.grinAge = 0
+		palm.grinHideAt = 0
+	}
+}
+
+func (s *GameScene) palmEyesTotalTicks() int {
+	openTicks := maxInt(1, len(s.palmEyesAnimation.frames)) * 3
+	return openTicks + secondsToFrames(0.4) + openTicks + secondsToFrames(0.1)
+}
+
+func (s *GameScene) palmEyesFrame(age int) *ebiten.Image {
+	frames := s.palmEyesAnimation.frames
+	if len(frames) == 0 {
+		return nil
+	}
+	frameTicks := 4
+	openTicks := len(frames) * frameTicks
+	holdTicks := secondsToFrames(0.4)
+	if age < openTicks {
+		return frames[minInt(len(frames)-1, age/frameTicks)]
+	}
+	age -= openTicks
+	if age < holdTicks {
+		return frames[len(frames)-1]
+	}
+	age -= holdTicks
+	if age < openTicks {
+		return frames[maxInt(0, len(frames)-1-age/frameTicks)]
+	}
+	if age < openTicks+secondsToFrames(0.1) {
+		return frames[0]
+	}
+	return nil
 }
 
 func (s *GameScene) palmEffectDelayFrames(palm *battlePalm) int {
@@ -1012,6 +1237,7 @@ func (s *GameScene) Update() error {
 		s.updateSandFalls()
 		s.updatePalms()
 		s.updatePalmLeafFalls()
+		s.updatePalmRevenge()
 		s.updateZeroPowerEffects()
 		if s.roundTransitionDelay > 0 || s.roundSeriesComplete {
 			s.updateRoundTransition()
@@ -1095,9 +1321,13 @@ func (s *GameScene) cameraTargetForTank(index int) float64 {
 		return s.cameraX
 	}
 
-	screenWidth := core.Config().Screen.Width
 	body := s.tanks[index].body
 	centerX := body.Pos.X + body.Size.X/2
+	return s.cameraTargetForWorldX(centerX)
+}
+
+func (s *GameScene) cameraTargetForWorldX(centerX float64) float64 {
+	screenWidth := core.Config().Screen.Width
 	return math.Max(0, math.Min(s.worldWidth-screenWidth, centerX-screenWidth/2))
 }
 
@@ -1303,6 +1533,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawMoleImpacts(screen, &camera)
 	s.drawPalmEffects(screen, &camera)
 	s.drawPalmLeafFalls(screen, &camera)
+	s.drawPalmRevenge(screen, &camera)
 	s.drawSandFalls(screen, &camera)
 	s.drawZeroPowerEffects(screen, &camera)
 	s.drawProjectile(screen, &camera)
@@ -1835,8 +2066,14 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 			s.ignitePalm(palm)
 		} else if palm.state == palmStateSkeleton || palm.state == palmStateSkeletonSmoking {
 			s.crumblePalm(palm)
+		} else {
+			if !s.addPalmAggression(palm, s.lastDamageSource) {
+				s.startPalmEyes(palm)
+			}
 		}
-		s.focusPalmCamera(palm)
+		if s.palmRevenge == nil {
+			s.focusPalmCamera(palm)
+		}
 		s.delayTurnAdvance(s.palmEffectDelayFrames(palm))
 		return false
 	}
@@ -2589,6 +2826,8 @@ func (s *GameScene) updatePalms() {
 			continue
 		}
 		s.updatePalmGroundSupport(palm)
+		s.updatePalmEyes(palm)
+		s.updatePalmGrin(palm)
 		palm.age++
 		switch palm.state {
 		case palmStateBurning:
@@ -2644,6 +2883,132 @@ func (s *GameScene) updatePalmLeafFalls() {
 		}
 	}
 	s.palmLeafFalls = active
+}
+
+func (s *GameScene) updatePalmRevenge() {
+	if s.palmRevenge == nil || s.palmRevenge.phase == palmRevengeNone {
+		return
+	}
+	event := s.palmRevenge
+	event.age++
+	if event.palm != nil && event.palm.screaming {
+		event.palm.screamAge++
+	}
+
+	switch event.phase {
+	case palmRevengeCloudFocus:
+		if event.cloud != nil && event.cloud.sprite != nil {
+			s.cameraGoal = s.cameraTargetForWorldX(event.cloud.sprite.Bounds().Center().X)
+			shake := math.Sin(float64(event.age)*math.Pi*6/float64(palmRevengeFocusFrames)) * 9
+			s.cameraX = approach(s.cameraX, s.cameraGoal+shake, 0.18, 0.8)
+		}
+		if event.age >= palmRevengeFocusFrames {
+			event.age = 0
+			event.phase = palmRevengeCloudAttack
+			if event.palm != nil {
+				event.palm.screaming = false
+				event.palm.grinning = true
+				event.palm.grinAge = 0
+				event.palm.grinHideAt = 0
+			}
+		}
+	case palmRevengeCloudAttack:
+		progress := easeOut(float64(event.age) / float64(palmRevengeAttackFrames))
+		s.moveRevengeCloud(event, progress)
+		if event.cloud != nil && event.cloud.sprite != nil {
+			s.cameraGoal = s.cameraTargetForWorldX(event.cloud.sprite.Bounds().Center().X)
+			s.cameraX = approach(s.cameraX, s.cameraGoal, 0.2, 0.8)
+		}
+		if event.age >= palmRevengeAttackFrames {
+			event.age = 0
+			event.phase = palmRevengeLightning
+			s.applyPalmRevengeDamage(event)
+		}
+	case palmRevengeLightning:
+		s.cameraGoal = event.targetCameraX
+		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.22, 0.8)
+		if event.age >= palmRevengeLightningFrames {
+			event.age = 0
+			event.phase = palmRevengeRecover
+		}
+	case palmRevengeRecover:
+		progress := easeOut(float64(event.age) / float64(palmRevengeRecoverFrames))
+		if event.cloud != nil && event.cloud.sprite != nil && event.cloud.sprite.Pos != nil {
+			event.cloud.sprite.Pos.X = event.cloudAttack.X + (event.cloudOriginal.X-event.cloudAttack.X)*progress
+			event.cloud.sprite.Pos.Y = event.cloudAttack.Y + (event.cloudOriginal.Y-event.cloudAttack.Y)*progress
+		}
+		s.cameraGoal = event.targetCameraX
+		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.22, 0.8)
+		if event.age >= palmRevengeRecoverFrames {
+			s.finishPalmRevenge(event)
+		}
+	}
+}
+
+func (s *GameScene) moveRevengeCloud(event *palmRevengeEvent, progress float64) {
+	if event == nil || event.cloud == nil || event.cloud.sprite == nil || event.cloud.sprite.Pos == nil {
+		return
+	}
+	event.cloud.sprite.Pos.X = event.cloudStart.X + (event.cloudAttack.X-event.cloudStart.X)*progress
+	event.cloud.sprite.Pos.Y = event.cloudStart.Y + (event.cloudAttack.Y-event.cloudStart.Y)*progress
+}
+
+func (s *GameScene) applyPalmRevengeDamage(event *palmRevengeEvent) {
+	if event == nil || event.damageDone || event.target == nil {
+		return
+	}
+	event.damageDone = true
+	tank := event.target
+	previousPower := tank.power
+	tank.power = maxInt(0, tank.power-100)
+	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
+	tank.tint = color.RGBA{A: 255}
+	models.RecolorTankBody(tank.body, tank.tint)
+	models.RecolorCannon(tank.cannon, tank.tint)
+	if event.palm != nil && event.palm.grinning {
+		event.palm.grinAge = 0
+		event.palm.grinHideAt = secondsToFrames(2)
+	}
+	if previousPower > 0 && tank.power == 0 {
+		s.awardZeroPowerScore(tank, nil, damageCauseDirect)
+		tank.zeroPowerShown = true
+		s.zeroPowerEffects = append(s.zeroPowerEffects, zeroPowerAnimation{
+			tank:      tank,
+			animation: s.zeroPowerSmoke,
+			duration:  maxInt(1, s.zeroPowerSmoke.totalTicks),
+		})
+	}
+}
+
+func (s *GameScene) finishPalmRevenge(event *palmRevengeEvent) {
+	if event == nil {
+		return
+	}
+	if event.target != nil && event.target.power <= 0 {
+		event.target.zeroPowerGone = true
+		s.removeTankSprites(event.target)
+		s.removeZeroPowerEffectsForTank(event.target)
+	}
+	if event.cloud != nil {
+		event.cloud.revengeActive = false
+		if event.cloud.sprite != nil && s.layers[layerClouds] != nil {
+			s.layers[layerClouds].Add(event.cloud.sprite)
+		}
+	}
+	s.palmRevenge = nil
+}
+
+func (s *GameScene) removeZeroPowerEffectsForTank(tank *battleTank) {
+	if tank == nil || len(s.zeroPowerEffects) == 0 {
+		return
+	}
+	active := s.zeroPowerEffects[:0]
+	for _, effect := range s.zeroPowerEffects {
+		if effect.tank != tank {
+			active = append(active, effect)
+		}
+	}
+	s.zeroPowerEffects = active
 }
 
 func (s *GameScene) updateSandFalls() {
@@ -3365,6 +3730,39 @@ func (s *GameScene) drawPalmEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
 			continue
 		}
 		bounds := palm.sprite.Bounds()
+		if palm.screaming && s.palmScreamImage != nil {
+			pos := engine.V(bounds.Center().X, bounds.Min.Y+bounds.H()*0.24)
+			projected := pos.Project(camera)
+			op := &ebiten.DrawImageOptions{}
+			op.GeoM.Translate(
+				projected.X-float64(s.palmScreamImage.Bounds().Dx())/2,
+				projected.Y-float64(s.palmScreamImage.Bounds().Dy())/2,
+			)
+			screen.DrawImage(s.palmScreamImage, op)
+		}
+		if palm.grinning && s.palmGrinImage != nil {
+			pos := engine.V(bounds.Center().X, bounds.Min.Y+bounds.H()*0.24)
+			projected := pos.Project(camera)
+			op := &ebiten.DrawImageOptions{}
+			op.GeoM.Translate(
+				projected.X-float64(s.palmGrinImage.Bounds().Dx())/2,
+				projected.Y-float64(s.palmGrinImage.Bounds().Dy())/2,
+			)
+			screen.DrawImage(s.palmGrinImage, op)
+		}
+		if palm.eyesOn {
+			frame := s.palmEyesFrame(palm.eyeAge)
+			if frame != nil {
+				pos := engine.V(bounds.Center().X, bounds.Min.Y+bounds.H()*0.24)
+				projected := pos.Project(camera)
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(
+					projected.X-float64(frame.Bounds().Dx())/2,
+					projected.Y-float64(frame.Bounds().Dy())/2,
+				)
+				screen.DrawImage(frame, op)
+			}
+		}
 		switch palm.state {
 		case palmStateBurning:
 			pos := engine.V(bounds.Center().X, bounds.Min.Y+bounds.H()*0.24)
@@ -3377,6 +3775,91 @@ func (s *GameScene) drawPalmEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
 			drawAnimationBottomCentered(screen, camera, s.palmCrumbleAnimation, pos, palm.age)
 		}
 	}
+}
+
+func (s *GameScene) drawPalmRevenge(screen *ebiten.Image, camera *ebiten.GeoM) {
+	event := s.palmRevenge
+	if event == nil || event.cloud == nil || event.cloud.sprite == nil || event.cloud.sprite.Pos == nil || event.cloud.sprite.Size == nil {
+		return
+	}
+	cloudImg := event.cloud.image
+	if cloudImg == nil {
+		cloudImg = s.cloudImageForKind(event.cloud.kind)
+	}
+	if cloudImg == nil {
+		return
+	}
+	bounds := event.cloud.sprite.Bounds()
+	projected := engine.V(bounds.Min.X, bounds.Min.Y).Project(camera)
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(bounds.W()/float64(cloudImg.Bounds().Dx()), bounds.H()/float64(cloudImg.Bounds().Dy()))
+	op.GeoM.Translate(projected.X, projected.Y)
+	brightness := s.palmRevengeCloudBrightness(event)
+	op.ColorScale.Scale(brightness, brightness, brightness, 1)
+	screen.DrawImage(cloudImg, op)
+
+	face := s.palmRevengeCloudFace(event)
+	if face != nil {
+		center := bounds.Center().Project(camera)
+		faceOp := &ebiten.DrawImageOptions{}
+		faceOp.GeoM.Translate(center.X-float64(face.Bounds().Dx())/2, center.Y-float64(face.Bounds().Dy())/2)
+		screen.DrawImage(face, faceOp)
+	}
+
+	if s.palmRevengeLightningVisible(event) && event.target != nil && event.target.body != nil && s.lightningImage != nil {
+		cloudCenter := bounds.Center().Project(camera)
+		tankBounds := event.target.body.Bounds()
+		tankTop := engine.V(tankBounds.Center().X, tankBounds.Min.Y).Project(camera)
+		lightningOp := &ebiten.DrawImageOptions{}
+		scaleY := math.Max(0.2, (tankTop.Y-cloudCenter.Y)/float64(s.lightningImage.Bounds().Dy()))
+		lightningOp.GeoM.Scale(1, scaleY)
+		lightningOp.GeoM.Translate(cloudCenter.X-float64(s.lightningImage.Bounds().Dx())/2, cloudCenter.Y)
+		screen.DrawImage(s.lightningImage, lightningOp)
+	}
+}
+
+func (s *GameScene) palmRevengeCloudBrightness(event *palmRevengeEvent) float32 {
+	if event == nil {
+		return 1
+	}
+	minBrightness := 0.38
+	switch event.phase {
+	case palmRevengeCloudFocus:
+		progress := math.Min(1, float64(event.age)/float64(palmRevengeFocusFrames))
+		return float32(1 - (1-minBrightness)*progress)
+	case palmRevengeCloudAttack, palmRevengeLightning:
+		return float32(minBrightness)
+	case palmRevengeRecover:
+		progress := math.Min(1, float64(event.age)/float64(palmRevengeRecoverFrames))
+		return float32(minBrightness + (1-minBrightness)*progress)
+	default:
+		return 1
+	}
+}
+
+func (s *GameScene) palmRevengeCloudFace(event *palmRevengeEvent) *ebiten.Image {
+	if event == nil {
+		return nil
+	}
+	switch event.phase {
+	case palmRevengeCloudFocus, palmRevengeCloudAttack, palmRevengeLightning:
+		return s.cloudAngryImage
+	case palmRevengeRecover:
+		frame := s.cloudGrinAnimation.frameAt(event.age)
+		if frame != nil {
+			return frame
+		}
+		return s.cloudGrinImage
+	default:
+		return nil
+	}
+}
+
+func (s *GameScene) palmRevengeLightningVisible(event *palmRevengeEvent) bool {
+	if event == nil || event.phase != palmRevengeLightning {
+		return false
+	}
+	return event.age < 18 || (event.age >= 27 && event.age < 45)
 }
 
 func (s *GameScene) drawPalmLeafFalls(screen *ebiten.Image, camera *ebiten.GeoM) {
