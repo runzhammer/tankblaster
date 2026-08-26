@@ -113,6 +113,9 @@ var WaterTexturePNG []byte
 //go:embed water_blubber.png
 var WaterBlubberPNG []byte
 
+//go:embed water_blotch.png
+var WaterBlotchPNG []byte
+
 //go:embed cloud_lightning.png
 var CloudLightning []byte
 

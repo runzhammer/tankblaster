@@ -13,12 +13,14 @@ import (
 )
 
 type sheetSpec struct {
-	source      string
-	target      string
-	frameWidth  int
-	frameHeight int
-	delay       int
-	colorMode   colorMode
+	source           string
+	target           string
+	frameWidth       int
+	frameHeight      int
+	delay            int
+	colorMode        colorMode
+	opaqueBackground color.RGBA
+	opaque           bool
 }
 
 type colorMode uint8
@@ -61,7 +63,7 @@ func main() {
 		if err != nil {
 			fail(err.Error())
 		}
-		if err := writeSheetPNG(spec.target, img, spec.frameWidth, spec.frameHeight); err != nil {
+		if err := writeSheetPNG(spec.target, img, spec.frameWidth, spec.frameHeight, spec.opaque, spec.opaqueBackground); err != nil {
 			fail(err.Error())
 		}
 		frameHeight := spec.frameHeight
@@ -83,8 +85,9 @@ func defaultZeroPowerSpecs() []sheetSpec {
 		{source: "original_assets/BITMAP/IDB_PALME_GERIPPE.bmp", target: "resources/palm_skeleton.png", frameWidth: 121, delay: 8, colorMode: colorModeBMP},
 		{source: "original_assets/BITMAP/IDB_PALME_RAUCH.bmp", target: "resources/palm_smoke.png", frameWidth: 73, delay: 8, colorMode: colorModeBMP},
 		{source: "original_assets/BITMAP/IDB_PALME_BROESEL.bmp", target: "resources/palm_crumble.png", frameWidth: 121, frameHeight: 152, delay: 8, colorMode: colorModeAsset},
-		{source: "original_assets/BITMAP/IDB_WATERTEXTURE.bmp", target: "resources/water_texture.png", frameWidth: 64, delay: 8, colorMode: colorModeAsset},
+		{source: "original_assets/BITMAP/IDB_WATERTEXTURE.bmp", target: "resources/water_texture.png", frameWidth: 64, delay: 8, colorMode: colorModeAsset, opaque: true, opaqueBackground: color.RGBA{R: 6, G: 48, B: 164, A: 255}},
 		{source: "original_assets/BITMAP/IDB_WATER_BLUBBER.bmp", target: "resources/water_blubber.png", frameWidth: 19, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_WATER_BLOTSCH.bmp", target: "resources/water_blotch.png", frameWidth: 22, delay: 8, colorMode: colorModeBMP},
 	}
 }
 
@@ -215,7 +218,7 @@ func sourceRGB(first, second, third byte, mode colorMode) color.RGBA {
 	return bmpRGB(first, second, third)
 }
 
-func writeSheetPNG(path string, sheet *image.RGBA, frameWidth, frameHeight int) error {
+func writeSheetPNG(path string, sheet *image.RGBA, frameWidth, frameHeight int, opaque bool, background color.RGBA) error {
 	bounds := sheet.Bounds()
 	if frameWidth <= 0 || bounds.Dx()%frameWidth != 0 {
 		return fmt.Errorf("%s: width %d is not divisible by frame width %d", path, bounds.Dx(), frameWidth)
@@ -241,6 +244,9 @@ func writeSheetPNG(path string, sheet *image.RGBA, frameWidth, frameHeight int) 
 			frame := image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight))
 			draw.Draw(frame, frame.Bounds(), sheet, src.Min, draw.Src)
 			makeFrameBackgroundTransparent(frame)
+			if opaque {
+				fillTransparentPixels(frame, background)
+			}
 			draw.Draw(out, image.Rect(col*frameWidth, row*frameHeight, (col+1)*frameWidth, (row+1)*frameHeight), frame, image.Point{}, draw.Src)
 		}
 	}
@@ -254,6 +260,19 @@ func writeSheetPNG(path string, sheet *image.RGBA, frameWidth, frameHeight int) 
 	}
 	defer file.Close()
 	return png.Encode(file, out)
+}
+
+func fillTransparentPixels(img *image.RGBA, background color.RGBA) {
+	background.A = 255
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := img.RGBAAt(x, y)
+			if c.A == 0 {
+				img.SetRGBA(x, y, background)
+			}
+		}
+	}
 }
 
 func makeFrameBackgroundTransparent(frame *image.RGBA) {

@@ -181,6 +181,75 @@ func (g Ground) ApplyRingCrater(cx, cy, radius, spacing, thickness float64) []Sa
 	return falls
 }
 
+func (g Ground) ClearCircle(cx, cy, radius float64) image.Rectangle {
+	if g.pixels == nil || g.Image == nil || radius <= 0 {
+		return image.Rectangle{}
+	}
+
+	bounds := g.pixels.Bounds()
+	minX := maxInt(0, int(math.Floor(cx-radius)))
+	maxX := minInt(bounds.Dx()-1, int(math.Ceil(cx+radius)))
+	minY := maxInt(0, int(math.Floor(cy-radius)))
+	maxY := minInt(bounds.Dy()-1, int(math.Ceil(cy+radius)))
+	r2 := radius * radius
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			dx := float64(x) - cx
+			dy := float64(y) - cy
+			if dx*dx+dy*dy <= r2 {
+				g.pixels.SetRGBA(x, y, color.RGBA{})
+			}
+		}
+	}
+
+	g.refreshSurfaceRange(minX, maxX)
+	g.Image.WritePixels(g.pixels.Pix)
+	return image.Rect(minX, minY, maxX+1, maxY+1)
+}
+
+func (g Ground) ClearLine(x1, y1, x2, y2, thickness float64) image.Rectangle {
+	if g.pixels == nil || g.Image == nil || thickness <= 0 {
+		return image.Rectangle{}
+	}
+
+	bounds := g.pixels.Bounds()
+	radius := thickness / 2
+	minX := maxInt(0, int(math.Floor(math.Min(x1, x2)-radius)))
+	maxX := minInt(bounds.Dx()-1, int(math.Ceil(math.Max(x1, x2)+radius)))
+	minY := maxInt(0, int(math.Floor(math.Min(y1, y2)-radius)))
+	maxY := minInt(bounds.Dy()-1, int(math.Ceil(math.Max(y1, y2)+radius)))
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			if distancePointToSegment(float64(x), float64(y), x1, y1, x2, y2) <= radius {
+				g.pixels.SetRGBA(x, y, color.RGBA{})
+			}
+		}
+	}
+
+	g.refreshSurfaceRange(minX, maxX)
+	g.Image.WritePixels(g.pixels.Pix)
+	return image.Rect(minX, minY, maxX+1, maxY+1)
+}
+
+func (g Ground) SettleArea(area image.Rectangle) []SandFallPixel {
+	if g.pixels == nil || area.Empty() {
+		return nil
+	}
+	bounds := g.pixels.Bounds()
+	minX := maxInt(0, area.Min.X)
+	maxX := minInt(bounds.Dx()-1, area.Max.X-1)
+	maxY := minInt(bounds.Dy()-1, area.Max.Y-1)
+	if minX > maxX || maxY < 0 {
+		return nil
+	}
+	falls := g.settleSandRange(minX, maxX, maxY)
+	g.refreshSurfaceRange(minX, maxX)
+	g.Image.WritePixels(g.pixels.Pix)
+	return falls
+}
+
 func (g Ground) settleSandRange(minX, maxX, maxY int) []SandFallPixel {
 	if g.pixels == nil {
 		return nil
@@ -207,6 +276,20 @@ func (g Ground) settleSandRange(minX, maxX, maxY int) []SandFallPixel {
 	}
 
 	return falls
+}
+
+func distancePointToSegment(px, py, x1, y1, x2, y2 float64) float64 {
+	dx := x2 - x1
+	dy := y2 - y1
+	lengthSquared := dx*dx + dy*dy
+	if lengthSquared == 0 {
+		return math.Hypot(px-x1, py-y1)
+	}
+	t := ((px-x1)*dx + (py-y1)*dy) / lengthSquared
+	t = math.Max(0, math.Min(1, t))
+	closestX := x1 + dx*t
+	closestY := y1 + dy*t
+	return math.Hypot(px-closestX, py-closestY)
 }
 
 func (g Ground) refreshSurfaceRange(minX, maxX int) {

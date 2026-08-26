@@ -27,6 +27,12 @@ import (
 
 var _ core.Scene = (*GameScene)(nil)
 
+var solidWhiteImage = func() *ebiten.Image {
+	img := ebiten.NewImage(1, 1)
+	img.Fill(colornames.White)
+	return img
+}()
+
 type Phase uint8
 
 const (
@@ -74,6 +80,13 @@ const (
 	plasmaRingThickness       = 1
 	plasmaBuildProgress       = 2.5 / 6.5
 	plasmaGreenProgress       = 5.0 / 6.5
+	moleTunnelFrames          = 44
+	moleStarFrames            = 28
+	moleTunnelDepth           = 76.0
+	moleTunnelWidth           = 7.0
+	moleStarLineCount         = 36
+	moleStarRadius            = 110.25
+	moleStarLineThickness     = 2.0
 )
 
 type damageCause uint8
@@ -196,12 +209,15 @@ type animatedImpact struct {
 }
 
 type waterFill struct {
-	leftX    int
-	rightX   int
-	topY     float64
-	surfaceY []float64
-	age      int
-	duration int
+	leftX      int
+	rightX     int
+	topY       float64
+	surfaceY   []float64
+	age        int
+	duration   int
+	image      *ebiten.Image
+	cacheAge   int
+	cacheFrame int
 }
 
 type waterBlubberEffect struct {
@@ -223,6 +239,35 @@ func (e waterBlubberEffect) position() engine.Vec {
 	)
 }
 
+type waterSurfaceImpact struct {
+	pos       engine.Vec
+	age       int
+	duration  int
+	animation spriteAnimation
+}
+
+type moleImpact struct {
+	start      engine.Vec
+	pos        engine.Vec
+	age        int
+	phase      moleImpactPhase
+	tunnelPath []engine.Vec
+	starLines  []moleStarLine
+	editArea   image.Rectangle
+}
+
+type moleImpactPhase uint8
+
+const (
+	molePhaseTunnel moleImpactPhase = iota
+	molePhaseStar
+)
+
+type moleStarLine struct {
+	angle  float64
+	length float64
+}
+
 type sandFallAnimation struct {
 	pixels   []models.SandFallPixel
 	age      int
@@ -239,6 +284,7 @@ type zeroPowerAnimation struct {
 
 type spriteAnimation struct {
 	frames     []*ebiten.Image
+	pixels     []*image.RGBA
 	delays     []int
 	totalTicks int
 	width      int
@@ -279,6 +325,7 @@ type GameScene struct {
 	fireballAnimation     spriteAnimation
 	waterAnimation        spriteAnimation
 	waterBlubberAnimation spriteAnimation
+	waterBlotchAnimation  spriteAnimation
 	clouds                []*battleCloud
 	cloudAssets           []cloudAsset
 
@@ -302,6 +349,8 @@ type GameScene struct {
 	animatedImpacts      []animatedImpact
 	waterFills           []waterFill
 	waterBlubbers        []*waterBlubberEffect
+	waterBlotches        []*waterSurfaceImpact
+	moleImpacts          []*moleImpact
 	sandFalls            []sandFallAnimation
 	zeroPowerEffects     []zeroPowerAnimation
 	zeroPowerAnimations  []spriteAnimation
@@ -325,6 +374,7 @@ type GameScene struct {
 	lastComputerShot     computerShotRecord
 	palmCameraFocus      *battlePalm
 	waterCameraFocus     *waterBlubberEffect
+	waterBlotchFocus     *waterSurfaceImpact
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -396,6 +446,11 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		return nil, err
 	}
 	s.waterBlubberAnimation = waterBlubberAnimation
+	waterBlotchAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.WaterBlotchPNG, frameWidth: 22, delay: 8, scaleX: 1.5, scaleY: 1.5})
+	if err != nil {
+		return nil, err
+	}
+	s.waterBlotchAnimation = waterBlotchAnimation
 	s.cloudAssets = loadCloudAssets()
 	s.players = s.playersForRound()
 	s.scores = make([]int, len(s.players))
@@ -467,6 +522,8 @@ func (s *GameScene) startRound() {
 	s.animatedImpacts = nil
 	s.waterFills = nil
 	s.waterBlubbers = nil
+	s.waterBlotches = nil
+	s.moleImpacts = nil
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
@@ -892,6 +949,8 @@ func (s *GameScene) Update() error {
 		s.updateAnimatedImpacts()
 		s.updateWaterFills()
 		s.updateWaterBlubbers()
+		s.updateWaterBlotches()
+		s.updateMoleImpacts()
 		s.updateSandFalls()
 		s.updatePalms()
 		s.updateZeroPowerEffects()
@@ -1022,6 +1081,7 @@ func loadSpriteAnimation(spec zeroPowerAnimationSheet) (spriteAnimation, error) 
 	}
 	animation := spriteAnimation{
 		frames: make([]*ebiten.Image, 0, cols*rows),
+		pixels: make([]*image.RGBA, 0, cols*rows),
 		delays: make([]int, 0, cols*rows),
 		width:  spec.frameWidth,
 		height: frameHeight,
@@ -1045,6 +1105,7 @@ func loadSpriteAnimation(spec zeroPowerAnimationSheet) (spriteAnimation, error) 
 				}
 			}
 			animation.frames = append(animation.frames, ebiten.NewImageFromImage(frame))
+			animation.pixels = append(animation.pixels, frame)
 			animation.delays = append(animation.delays, ticks)
 			animation.totalTicks += ticks
 		}
@@ -1113,9 +1174,12 @@ func repeatAnimation(animation spriteAnimation, repeats, totalTicks int) spriteA
 		return fitAnimationDuration(animation, totalTicks)
 	}
 	frames := animation.frames
+	pixels := animation.pixels
 	animation.frames = make([]*ebiten.Image, 0, len(frames)*repeats)
+	animation.pixels = make([]*image.RGBA, 0, len(pixels)*repeats)
 	for i := 0; i < repeats; i++ {
 		animation.frames = append(animation.frames, frames...)
+		animation.pixels = append(animation.pixels, pixels...)
 	}
 	return fitAnimationDuration(animation, totalTicks)
 }
@@ -1154,6 +1218,8 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawImpacts(screen, &camera)
 	s.drawAnimatedImpacts(screen, &camera)
 	s.drawWaterBlubbers(screen, &camera)
+	s.drawWaterBlotches(screen, &camera)
+	s.drawMoleImpacts(screen, &camera)
 	s.drawPalmEffects(screen, &camera)
 	s.drawSandFalls(screen, &camera)
 	s.drawZeroPowerEffects(screen, &camera)
@@ -1647,6 +1713,12 @@ func (s *GameScene) updateProjectile() {
 	}
 
 	weapon := s.weaponForProjectile(p)
+	if hit, ok := s.projectileHitsWaterSurface(p, projectileRadiusForWeapon(weapon)); ok {
+		s.reportComputerShot(hit, -1, false)
+		s.projectile = nil
+		s.startWaterSurfaceImpact(hit)
+		return
+	}
 	if palm := s.projectileHitsPalm(p, projectileRadiusForWeapon(weapon)); palm != nil {
 		s.reportComputerShot(p.pos, -1, false)
 		if weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationFireball && palm.state == palmStateAlive {
@@ -1770,6 +1842,7 @@ func (s *GameScene) advanceActivePlayer() {
 	s.lastDamageSource = nil
 	s.palmCameraFocus = nil
 	s.waterCameraFocus = nil
+	s.waterBlotchFocus = nil
 	next := s.nextActivePlayerIndex()
 	if next < 0 {
 		return
@@ -1811,9 +1884,15 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
-	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
+	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
+	}
+
+	if weapon.Moles {
+		s.reportComputerShot(p.pos, -1, false)
+		s.startMoleImpact(p.pos)
+		return true
 	}
 
 	if weapon.FillsWater {
@@ -1982,6 +2061,126 @@ func (s *GameScene) waterFillAt(pos engine.Vec) (waterFill, bool) {
 	}, true
 }
 
+func (s *GameScene) projectileHitsWaterSurface(p *projectile, radius float64) (engine.Vec, bool) {
+	if p == nil || len(s.waterFills) == 0 {
+		return engine.Vec{}, false
+	}
+	delta := p.pos.Sub(p.prev)
+	steps := maxInt(4, int(math.Ceil(delta.Len()/2)))
+	for step := 0; step <= steps; step++ {
+		t := float64(step) / float64(steps)
+		point := engine.V(p.prev.X+delta.X*t, p.prev.Y+delta.Y*t)
+		for i := range s.waterFills {
+			top, bottom, ok := s.waterColumnAt(&s.waterFills[i], point.X)
+			if !ok {
+				continue
+			}
+			if point.Y+radius < top || point.Y-radius > bottom {
+				continue
+			}
+			return engine.V(point.X, top), true
+		}
+	}
+	return engine.Vec{}, false
+}
+
+func (s *GameScene) startMoleImpact(pos engine.Vec) {
+	lines := make([]moleStarLine, moleStarLineCount)
+	for i := range lines {
+		angle := -math.Pi + float64(i)*2*math.Pi/float64(len(lines)) + (s.rng.Float64()-0.5)*0.08
+		lines[i] = moleStarLine{angle: angle, length: moleStarRadius}
+	}
+	impact := &moleImpact{
+		start:      pos,
+		pos:        pos,
+		tunnelPath: []engine.Vec{pos},
+		starLines:  lines,
+	}
+	impact.editArea = s.ground.ClearCircle(pos.X, pos.Y, moleTunnelWidth/2)
+	s.moleImpacts = append(s.moleImpacts, impact)
+	s.delayTurnAdvance(moleTunnelFrames + moleStarFrames + s.impactPauseFrames())
+}
+
+func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
+	if len(s.waterBlotchAnimation.frames) == 0 {
+		s.delayTurnAdvance(s.impactPauseFrames())
+		return
+	}
+	effect := &waterSurfaceImpact{
+		pos:       pos,
+		duration:  s.waterBlotchAnimation.totalTicks,
+		animation: s.waterBlotchAnimation,
+	}
+	s.waterBlotches = append(s.waterBlotches, effect)
+	s.waterBlotchFocus = effect
+	s.updateWaterBlotchCamera()
+	s.delayTurnAdvance(effect.duration + secondsToFrames(0.5))
+}
+
+func (s *GameScene) updateMoleImpacts() {
+	if len(s.moleImpacts) == 0 {
+		return
+	}
+	active := s.moleImpacts[:0]
+	for _, impact := range s.moleImpacts {
+		if impact == nil {
+			continue
+		}
+		switch impact.phase {
+		case molePhaseTunnel:
+			s.updateMoleTunnel(impact)
+		case molePhaseStar:
+			s.updateMoleStar(impact)
+		}
+		impact.age++
+		if impact.phase == molePhaseTunnel && impact.age >= moleTunnelFrames {
+			impact.phase = molePhaseStar
+			impact.age = 0
+		}
+		if impact.phase == molePhaseStar && impact.age >= moleStarFrames {
+			if falls := s.ground.SettleArea(impact.editArea); len(falls) > 0 {
+				s.sandFalls = append(s.sandFalls, sandFallAnimation{
+					pixels:   falls,
+					duration: sandFallFrames,
+				})
+			}
+			s.dropUnsupportedTanks()
+			continue
+		}
+		active = append(active, impact)
+	}
+	s.moleImpacts = active
+}
+
+func (s *GameScene) updateMoleTunnel(impact *moleImpact) {
+	progress := easeInOut(float64(impact.age) / math.Max(1, moleTunnelFrames-1))
+	wobble := math.Sin(float64(impact.age)*0.82)*5 + math.Sin(float64(impact.age)*2.17)*2
+	next := engine.V(impact.start.X+wobble, impact.start.Y+moleTunnelDepth*progress)
+	impact.pos = next
+	impact.tunnelPath = append(impact.tunnelPath, next)
+	area := s.ground.ClearCircle(next.X, next.Y, moleTunnelWidth/2)
+	impact.editArea = unionRect(impact.editArea, area)
+}
+
+func (s *GameScene) updateMoleStar(impact *moleImpact) {
+	progress := easeOut(float64(impact.age) / math.Max(1, moleStarFrames-1))
+	for _, line := range impact.starLines {
+		end := impact.pos.Add(engine.V(line.length*progress, 0).Rotated(line.angle))
+		area := s.ground.ClearLine(impact.pos.X, impact.pos.Y, end.X, end.Y, moleStarLineThickness)
+		impact.editArea = unionRect(impact.editArea, area)
+	}
+}
+
+func unionRect(a, b image.Rectangle) image.Rectangle {
+	if a.Empty() {
+		return b
+	}
+	if b.Empty() {
+		return a
+	}
+	return a.Union(b)
+}
+
 func (s *GameScene) damageTanksTouchingWater(fill *waterFill) {
 	if fill == nil {
 		return
@@ -2035,15 +2234,28 @@ func (s *GameScene) waterColumnAt(fill *waterFill, x float64) (float64, float64,
 	if bottom <= fill.topY {
 		return 0, 0, false
 	}
-	progress := 1.0
-	if fill.duration > 0 && fill.age < fill.duration {
-		progress = easeOut(float64(fill.age) / float64(fill.duration))
-	}
-	top := bottom - (bottom-fill.topY)*progress
+	top := s.currentWaterTop(fill)
 	if bottom-top < 1 {
 		return 0, 0, false
 	}
 	return top, bottom, true
+}
+
+func (s *GameScene) currentWaterTop(fill *waterFill) float64 {
+	if fill == nil || len(fill.surfaceY) == 0 {
+		return 0
+	}
+	deepestY := fill.topY
+	for _, y := range fill.surfaceY {
+		if y > deepestY {
+			deepestY = y
+		}
+	}
+	progress := 1.0
+	if fill.duration > 0 && fill.age < fill.duration {
+		progress = easeOut(float64(fill.age) / float64(fill.duration))
+	}
+	return deepestY - (deepestY-fill.topY)*progress
 }
 
 func (s *GameScene) drownTank(tank *battleTank, fill *waterFill) {
@@ -2055,13 +2267,23 @@ func (s *GameScene) drownTank(tank *battleTank, fill *waterFill) {
 	tank.shotStrength = 0
 	tank.zeroPowerShown = true
 	tank.zeroPowerGone = true
-	tank.tint.A = 0
-	models.RecolorTankBody(tank.body, tank.tint)
-	models.RecolorCannon(tank.cannon, tank.tint)
+	s.removeTankSprites(tank)
 	if previousPower > 0 {
 		s.awardZeroPowerScore(tank, s.lastDamageSource, damageCauseDirect)
 	}
 	s.startWaterBlubberForTank(tank, fill)
+}
+
+func (s *GameScene) removeTankSprites(tank *battleTank) {
+	if tank == nil || s.layers == nil || layerTanks >= len(s.layers) || s.layers[layerTanks] == nil {
+		return
+	}
+	if tank.body != nil {
+		s.layers[layerTanks].Remove(tank.body)
+	}
+	if tank.cannon != nil {
+		s.layers[layerTanks].Remove(tank.cannon)
+	}
 }
 
 func (s *GameScene) startWaterBlubberForTank(tank *battleTank, fill *waterFill) {
@@ -2219,6 +2441,23 @@ func (s *GameScene) updateWaterBlubbers() {
 	s.waterBlubbers = active
 }
 
+func (s *GameScene) updateWaterBlotches() {
+	if len(s.waterBlotches) == 0 {
+		return
+	}
+	active := s.waterBlotches[:0]
+	for _, effect := range s.waterBlotches {
+		if effect == nil {
+			continue
+		}
+		effect.age++
+		if effect.age < effect.duration {
+			active = append(active, effect)
+		}
+	}
+	s.waterBlotches = active
+}
+
 func (s *GameScene) updatePalms() {
 	if len(s.palms) == 0 {
 		return
@@ -2289,6 +2528,9 @@ func (s *GameScene) updateZeroPowerEffects() {
 func (s *GameScene) updateTurnAdvanceDelay() {
 	s.turnAdvanceDelay--
 	if s.turnAdvanceDelay > 0 {
+		if s.updateWaterBlotchCamera() {
+			return
+		}
 		if s.updateWaterCamera() {
 			return
 		}
@@ -2306,6 +2548,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 }
 
 func (s *GameScene) updateBattleCamera() {
+	if s.updateWaterBlotchCamera() {
+		return
+	}
 	if s.updateWaterCamera() {
 		return
 	}
@@ -2335,6 +2580,16 @@ func (s *GameScene) updatePalmCamera() bool {
 		return false
 	}
 	s.cameraGoal = s.cameraTargetForPalm(s.palmCameraFocus)
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
+	return true
+}
+
+func (s *GameScene) updateWaterBlotchCamera() bool {
+	if s.waterBlotchFocus == nil || s.waterBlotchFocus.age >= s.waterBlotchFocus.duration {
+		return false
+	}
+	screenWidth := core.Config().Screen.Width
+	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, s.waterBlotchFocus.pos.X-screenWidth/2))
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
 	return true
 }
@@ -2804,60 +3059,140 @@ func (s *GameScene) drawWaterBlubbers(screen *ebiten.Image, camera *ebiten.GeoM)
 	}
 }
 
+func (s *GameScene) drawWaterBlotches(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, effect := range s.waterBlotches {
+		if effect == nil {
+			continue
+		}
+		drawAnimationBottomCentered(screen, camera, effect.animation, effect.pos, effect.age)
+	}
+}
+
+func (s *GameScene) drawMoleImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, impact := range s.moleImpacts {
+		if impact == nil {
+			continue
+		}
+		switch impact.phase {
+		case molePhaseTunnel:
+			drawMoleArrow(screen, camera, impact.pos)
+		}
+	}
+}
+
+func drawMoleArrow(screen *ebiten.Image, camera *ebiten.GeoM, pos engine.Vec) {
+	projected := pos.Project(camera)
+	width := float32(19)
+	height := float32(12)
+	x := float32(projected.X)
+	y := float32(projected.Y)
+	vertices := []ebiten.Vertex{
+		{DstX: x, DstY: y + height*0.55, SrcX: 0, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+		{DstX: x - width/2, DstY: y - height*0.45, SrcX: 0, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+		{DstX: x + width/2, DstY: y - height*0.45, SrcX: 0, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+	}
+	screen.DrawTriangles(vertices, []uint16{0, 1, 2}, solidWhiteImage, nil)
+}
+
 func (s *GameScene) drawWaterFills(screen *ebiten.Image, camera *ebiten.GeoM) {
-	if len(s.waterFills) == 0 || len(s.waterAnimation.frames) == 0 {
+	if len(s.waterFills) == 0 || len(s.waterAnimation.pixels) == 0 {
 		return
 	}
-	frame := s.waterAnimation.frames[(int(s.time)/8)%len(s.waterAnimation.frames)]
-	if frame == nil {
-		return
-	}
-	bounds := frame.Bounds()
-	frameW := bounds.Dx()
-	frameH := bounds.Dy()
-	if frameW <= 0 || frameH <= 0 {
-		return
-	}
+	frameIndex := (int(s.time) / 8) % len(s.waterAnimation.pixels)
 	screenWidth := int(core.Config().Screen.Width)
 	visibleLeft := maxInt(0, int(math.Floor(s.cameraX))-1)
 	visibleRight := int(math.Ceil(s.cameraX)) + screenWidth + 1
 
-	for _, fill := range s.waterFills {
-		progress := 1.0
-		if fill.duration > 0 && fill.age < fill.duration {
-			progress = easeOut(float64(fill.age) / float64(fill.duration))
+	for i := range s.waterFills {
+		fill := &s.waterFills[i]
+		if fill.rightX < visibleLeft || fill.leftX > visibleRight {
+			continue
 		}
-		left := maxInt(fill.leftX, visibleLeft)
-		right := minInt(fill.rightX, visibleRight)
-		for x := left; x <= right; x++ {
-			index := x - fill.leftX
-			if index < 0 || index >= len(fill.surfaceY) {
+		img := s.waterFillImage(fill, frameIndex)
+		if img == nil {
+			continue
+		}
+		projected := engine.V(float64(fill.leftX), math.Floor(fill.topY)).Project(camera)
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(math.Round(projected.X), math.Round(projected.Y))
+		screen.DrawImage(img, op)
+	}
+}
+
+func (s *GameScene) waterFillImage(fill *waterFill, frameIndex int) *ebiten.Image {
+	if fill == nil || len(fill.surfaceY) == 0 || len(s.waterAnimation.pixels) == 0 {
+		return nil
+	}
+	if fill.image != nil && fill.cacheAge == fill.age && fill.cacheFrame == frameIndex {
+		return fill.image
+	}
+	frame := s.waterAnimation.pixels[frameIndex%len(s.waterAnimation.pixels)]
+	if frame == nil {
+		return nil
+	}
+	frameBounds := frame.Bounds()
+	frameW := frameBounds.Dx()
+	frameH := frameBounds.Dy()
+	if frameW <= 0 || frameH <= 0 {
+		return nil
+	}
+
+	y0 := int(math.Floor(fill.topY))
+	y1 := int(math.Ceil(deepestWaterBottom(fill)))
+	width := fill.rightX - fill.leftX + 1
+	height := y1 - y0
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+
+	base := color.RGBA{R: 6, G: 48, B: 164, A: 255}
+	pixels := make([]byte, width*height*4)
+	top := int(math.Floor(s.currentWaterTop(fill)))
+	for x := 0; x < width; x++ {
+		bottom := int(math.Ceil(fill.surfaceY[x]))
+		if bottom <= top {
+			continue
+		}
+		for y := top; y < bottom; y++ {
+			if y < y0 || y >= y1 {
 				continue
 			}
-			bottom := fill.surfaceY[index]
-			if bottom <= fill.topY {
-				continue
+			textureX := positiveMod(fill.leftX+x, frameW)
+			textureY := positiveMod(y, frameH)
+			c := frame.RGBAAt(frameBounds.Min.X+textureX, frameBounds.Min.Y+textureY)
+			if c.A == 0 {
+				c = base
+			} else {
+				c.A = 255
 			}
-			top := bottom - (bottom-fill.topY)*progress
-			if bottom-top < 1 {
-				continue
-			}
-			screenX, _ := camera.Apply(float64(x), 0)
-			srcX := positiveMod(x+int(s.time/2), frameW)
-			for y := int(math.Floor(top)); y < int(math.Ceil(bottom)); y += frameH {
-				height := minInt(frameH, int(math.Ceil(bottom))-y)
-				if height <= 0 {
-					continue
-				}
-				_, screenY := camera.Apply(0, float64(y))
-				src := image.Rect(srcX, 0, srcX+1, height)
-				column := frame.SubImage(src).(*ebiten.Image)
-				op := &ebiten.DrawImageOptions{}
-				op.GeoM.Translate(screenX, screenY)
-				screen.DrawImage(column, op)
-			}
+			offset := ((y-y0)*width + x) * 4
+			pixels[offset] = c.R
+			pixels[offset+1] = c.G
+			pixels[offset+2] = c.B
+			pixels[offset+3] = c.A
 		}
 	}
+
+	if fill.image == nil || fill.image.Bounds().Dx() != width || fill.image.Bounds().Dy() != height {
+		fill.image = ebiten.NewImage(width, height)
+	}
+	fill.image.WritePixels(pixels)
+	fill.cacheAge = fill.age
+	fill.cacheFrame = frameIndex
+	return fill.image
+}
+
+func deepestWaterBottom(fill *waterFill) float64 {
+	if fill == nil || len(fill.surfaceY) == 0 {
+		return 0
+	}
+	deepest := fill.topY
+	for _, y := range fill.surfaceY {
+		if y > deepest {
+			deepest = y
+		}
+	}
+	return deepest
 }
 
 func (s *GameScene) drawPalmEffects(screen *ebiten.Image, camera *ebiten.GeoM) {

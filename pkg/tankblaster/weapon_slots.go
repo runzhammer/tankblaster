@@ -42,6 +42,11 @@ func (s *GameScene) weaponForProjectile(p *projectile) weaponspkg.Weapon {
 			return weapons[8]
 		}
 	}
+	if p != nil && s.itemIndexForWeaponSlot(p.weaponIndex) == 8 {
+		if len(weapons) > 9 {
+			return weapons[9]
+		}
+	}
 	return weapons[1]
 }
 
