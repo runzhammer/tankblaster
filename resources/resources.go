@@ -11,6 +11,12 @@ var TankSprite []byte
 //go:embed tank.yaml
 var TankSpec []byte
 
+//go:embed tank_small.png
+var TankSmallSprite []byte
+
+//go:embed tank_small.yaml
+var TankSmallSpec []byte
+
 //go:embed cannon.png
 var CannonSprite []byte
 

@@ -53,6 +53,9 @@ type Sprite struct {
 	// initially such that its default orientation is right-facing,
 	// or 0 degrees.
 	RotNormal float64
+	// RotAnchor optionally defines the source-pixel point to rotate around.
+	// When nil, sprites rotate around their center.
+	RotAnchor *Vec
 
 	// PreSteps is Behaviors to execute before Steps and
 	// PostSteps during an Update performed by sprites.
@@ -152,6 +155,9 @@ func (s *Sprite) Draw(camera *ebiten.GeoM, screen *ebiten.Image) {
 	}
 	bounds := s.Bounds()
 	mat := FitRotated(s.Rot+s.RotNormal, s.Drawable.Bounds(), bounds)
+	if s.RotAnchor != nil {
+		mat = FitRotatedAt(s.Rot+s.RotNormal, s.Drawable.Bounds(), bounds, *s.RotAnchor)
+	}
 	if camera != nil {
 		mat.Concat(*camera)
 	}

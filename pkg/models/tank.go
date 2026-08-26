@@ -22,17 +22,21 @@ type Tank struct {
 	PostSteps engine.Behavior
 }
 
+var SmallTankCannonMount = engine.V(8, 0)
+
 func NewTank(name string, tankColor color.RGBA) Tank {
 
-	scaleFactor := float64(0.40)
-	cannonWidth := 30.0
-	cannonHeight := 8.0
+	scaleFactor := float64(1.0)
+	cannonLength := 11
+	cannonAnchor := engine.V(8, 1)
+	cannonWidth := float64(int(cannonAnchor.X) + cannonLength)
+	cannonHeight := 3.0
 
 	m := Tank{Name: name}
 	m.Sprites = engine.NewSprites()
 
-	tankSprite := engine.NewSprite(r.TankSprite, r.TankSpec)
-	tankSprite.Image = colorizedSpriteImage(r.TankSprite, tankColor)
+	tankSprite := engine.NewSprite(r.TankSmallSprite, r.TankSmallSpec)
+	tankSprite.Image = colorizedSpriteImage(r.TankSmallSprite, tankColor)
 	tankSprite.Drawable = engine.NewImageDrawableFrames(tankSprite.Image, engine.R(0, 0, tankSprite.Drawable.Bounds().W(), tankSprite.Drawable.Bounds().H()))
 	m.Position = &engine.Vec{X: 200, Y: 600} //core.Config().Screen.Height/2 - t.Sprite.Bounds().H()/2}
 	m.Size = &engine.Vec{X: tankSprite.Drawable.Bounds().W() * scaleFactor, Y: tankSprite.Drawable.Bounds().H() * scaleFactor}
@@ -51,10 +55,14 @@ func NewTank(name string, tankColor color.RGBA) Tank {
 	cannonSprite.RotationSpeed = 2
 
 	cannonSprite.Tag = "cannon"
-	cannonSprite.Pos = &engine.Vec{X: m.Position.X + m.Size.X/2 - cannonWidth/2, Y: m.Position.Y + 5}
+	cannonSprite.Pos = &engine.Vec{
+		X: m.Position.X + SmallTankCannonMount.X - cannonAnchor.X,
+		Y: m.Position.Y + SmallTankCannonMount.Y - cannonAnchor.Y,
+	}
 	cannonSprite.Size = &engine.Vec{X: cannonWidth, Y: cannonHeight}
+	cannonSprite.RotAnchor = &cannonAnchor
 	cannonSprite.Rot = engine.DegToRad(-55)
-	cannonSprite.Drawable = engine.NewImageDrawable(generateCannonImage(int(cannonWidth), int(cannonHeight), tankColor))
+	cannonSprite.Drawable = engine.NewImageDrawable(generateCannonImage(int(cannonWidth), int(cannonHeight), int(cannonAnchor.X), int(cannonAnchor.Y), cannonLength, tankColor))
 
 	m.Sprites.Add(cannonSprite)
 
@@ -94,7 +102,7 @@ func RecolorTankBody(body *engine.Sprite, tankColor color.RGBA) {
 		return
 	}
 	bounds := body.Drawable.Bounds()
-	body.Image = colorizedSpriteImage(r.TankSprite, tankColor)
+	body.Image = colorizedSpriteImage(r.TankSmallSprite, tankColor)
 	body.Drawable = engine.NewImageDrawableFrames(body.Image, engine.R(0, 0, bounds.W(), bounds.H()))
 }
 
@@ -103,21 +111,23 @@ func RecolorCannon(cannon *engine.Sprite, tankColor color.RGBA) {
 		return
 	}
 	bounds := cannon.Drawable.Bounds()
-	cannon.Image = generateCannonImage(int(bounds.W()), int(bounds.H()), tankColor)
+	anchorX := int(bounds.W() / 2)
+	anchorY := int(bounds.H() / 2)
+	if cannon.RotAnchor != nil {
+		anchorX = int(cannon.RotAnchor.X)
+		anchorY = int(cannon.RotAnchor.Y)
+	}
+	length := int(bounds.W()) - anchorX
+	cannon.Image = generateCannonImage(int(bounds.W()), int(bounds.H()), anchorX, anchorY, length, tankColor)
 	cannon.Drawable = engine.NewImageDrawable(cannon.Image)
 }
 
-func generateCannonImage(width, height int, tankColor color.RGBA) *ebiten.Image {
+func generateCannonImage(width, height, anchorX, anchorY, length int, tankColor color.RGBA) *ebiten.Image {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
-	pivotX := width / 2
-	centerY := height / 2
-
-	for x := pivotX; x < width-1; x++ {
-		for y := centerY - 2; y <= centerY+1; y++ {
-			if y >= 0 && y < height {
-				img.SetRGBA(x, y, tankColor)
-			}
+	for x := anchorX; x < anchorX+length && x < width; x++ {
+		if anchorY >= 0 && anchorY < height {
+			img.SetRGBA(x, anchorY, tankColor)
 		}
 	}
 

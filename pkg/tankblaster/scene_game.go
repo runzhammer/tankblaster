@@ -2191,8 +2191,7 @@ func (s *GameScene) fireActiveWeapon() {
 		return
 	}
 
-	bounds := tank.cannon.Bounds()
-	muzzle := bounds.Center().Add(engine.V(bounds.W()/2+7, 0).Rotated(tank.cannon.Rot))
+	muzzle := s.cannonMuzzle(tank.cannon)
 	speed := 1.4 + float64(tank.shotStrength)*0.32
 	weapon := s.weaponForSlot(tank.selectedWeapon)
 	angles := []float64{tank.cannon.Rot}
@@ -2216,6 +2215,33 @@ func (s *GameScene) fireActiveWeapon() {
 		s.lastComputerShot = s.computerShotRecordFor(tank)
 	}
 	tank.computerPlan = nil
+}
+
+func (s *GameScene) cannonMuzzle(cannon *engine.Sprite) *engine.Vec {
+	if cannon == nil {
+		return &engine.Vec{}
+	}
+	bounds := cannon.Bounds()
+	if cannon.RotAnchor == nil {
+		return bounds.Center().Add(engine.V(bounds.W()/2+7, 0).Rotated(cannon.Rot))
+	}
+	scaleX := 1.0
+	scaleY := 1.0
+	if cannon.Drawable != nil {
+		source := cannon.Drawable.Bounds()
+		if source.W() != 0 {
+			scaleX = cannon.Size.X / source.W()
+		}
+		if source.H() != 0 {
+			scaleY = cannon.Size.Y / source.H()
+		}
+	}
+	anchorWorld := engine.V(
+		cannon.Pos.X+cannon.RotAnchor.X*scaleX,
+		cannon.Pos.Y+cannon.RotAnchor.Y*scaleY,
+	)
+	length := math.Max(1, cannon.Size.X-cannon.RotAnchor.X*scaleX)
+	return anchorWorld.Add(engine.V(length+2, 0).Rotated(cannon.Rot))
 }
 
 func (s *GameScene) weaponForSlot(slot int) weaponspkg.Weapon {
@@ -4888,6 +4914,13 @@ func (s *GameScene) creditRoundScores() {
 func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behavior {
 	return func(source *engine.Sprite) {
 		if tank == nil {
+			return
+		}
+		if source.RotAnchor != nil {
+			source.Pos = &engine.Vec{
+				X: tank.Pos.X + models.SmallTankCannonMount.X - source.RotAnchor.X,
+				Y: tank.Pos.Y + models.SmallTankCannonMount.Y - source.RotAnchor.Y,
+			}
 			return
 		}
 		source.Pos = &engine.Vec{
