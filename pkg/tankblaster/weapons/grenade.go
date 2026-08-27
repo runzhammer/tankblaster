@@ -1,5 +1,9 @@
 package weapons
 
+const (
+	grenadeScale = 0.6
+)
+
 func Grenade() Weapon {
 	return Weapon{
 		Name:            "Granate",
@@ -8,5 +12,6 @@ func Grenade() Weapon {
 		Unlocked:        true,
 		RoundProjectile: true,
 		DamagesTerrain:  true,
+		ProjectileScale: grenadeScale,
 	}
 }

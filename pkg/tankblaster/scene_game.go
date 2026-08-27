@@ -383,6 +383,7 @@ type GameScene struct {
 	cloudGrinImage        *ebiten.Image
 	cloudGrinAnimation    spriteAnimation
 	lightningImage        *ebiten.Image
+	reentrySymbol         *ebiten.Image
 	humanPortrait         *ebiten.Image
 	computerPortraits     map[computerplayers.ID]*ebiten.Image
 	zeroPowerSmoke        spriteAnimation
@@ -408,6 +409,7 @@ type GameScene struct {
 	activePlayerIndex    int
 	wind                 int
 	windDirection        int
+	projectileReentry    bool
 	projectile           *projectile
 	projectiles          []*projectile
 	impacts              []impactAnimation
@@ -461,6 +463,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		roundNumber:       1,
 		showPlayerNames:   false,
 		playerInfoIndex:   -1,
+		reentrySymbol:     mustImageFromPNG(r.SymbolReentry),
 		humanPortrait:     mustImageFromPNG(r.PlayerHuman),
 		computerPortraits: map[computerplayers.ID]*ebiten.Image{
 			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
@@ -621,6 +624,7 @@ func (s *GameScene) startRound() {
 	} else {
 		s.windDirection = 1
 	}
+	s.projectileReentry = s.projectileReentryEnabledForRound()
 
 	s.worldWidth = worldWidthForPlayers(len(s.players))
 
@@ -679,6 +683,17 @@ func (s *GameScene) startRound() {
 	s.layers[layerPalms] = engine.AddSprites(s.layers[layerPalms], s.palmSprites())
 	s.layers[layerClouds] = engine.AddSprites(s.layers[layerClouds], s.cloudSprites())
 	s.layers[layerBackground] = engine.AddSprites(s.layers[layerBackground], b.Sprites)
+}
+
+func (s *GameScene) projectileReentryEnabledForRound() bool {
+	switch s.g.options.projectileReentry {
+	case 1:
+		return true
+	case 2:
+		return s.rng.Intn(2) == 0
+	default:
+		return false
+	}
 }
 
 func loadCloudAssets() []cloudAsset {
@@ -1138,7 +1153,7 @@ func (s *GameScene) placeTanksOnGroundForQuickStart() {
 		}
 		tank.body.Velocity = engine.Vec{}
 		tank.body.Steps = nil
-		s.ground.AlignSpriteToSurface(tank.body)
+		s.alignTankBodyToSurface(tank.body)
 		tank.landed = true
 		tank.falling = false
 		tank.fallDamage = false
@@ -2280,6 +2295,10 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	if len(p.trail) > 260 {
 		p.trail = p.trail[len(p.trail)-260:]
 	}
+	if !s.handleProjectileWorldEdge(p) {
+		s.reportComputerShot(p.pos, -1, false)
+		return false
+	}
 
 	if p.pos.X >= 0 && p.pos.X <= s.worldWidth {
 		s.cameraGoal = math.Max(0, math.Min(s.worldWidth-core.Config().Screen.Width, p.pos.X-core.Config().Screen.Width/2))
@@ -2347,6 +2366,25 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 			return false
 		}
 	}
+	return true
+}
+
+func (s *GameScene) handleProjectileWorldEdge(p *projectile) bool {
+	if p == nil || s.worldWidth <= 0 || (p.pos.X >= 0 && p.pos.X <= s.worldWidth) {
+		return true
+	}
+	if !s.projectileReentry {
+		return false
+	}
+
+	for p.pos.X < 0 {
+		p.pos.X += s.worldWidth
+	}
+	for p.pos.X > s.worldWidth {
+		p.pos.X -= s.worldWidth
+	}
+	p.prev = p.pos
+	p.trail = []engine.Vec{p.pos}
 	return true
 }
 
@@ -3589,7 +3627,7 @@ func (s *GameScene) dropUnsupportedTanks() {
 		}
 		if targetY <= currentBottom+1 {
 			startY := tank.body.Pos.Y
-			s.ground.AlignSpriteToSurface(tank.body)
+			s.alignTankBodyToSurface(tank.body)
 			s.applyFallDamage(tank, tank.body.Pos.Y-startY)
 			continue
 		}
@@ -3610,11 +3648,35 @@ func (s *GameScene) alignedTankBottomY(tank *engine.Sprite) float64 {
 	if tank == nil {
 		return 0
 	}
+	if models.IsSmallTankBody(tank) {
+		return s.uprightTankBottomY(tank)
+	}
 	copy := *tank
 	pos := *tank.Pos
 	copy.Pos = &pos
 	s.ground.AlignSpriteToSurface(&copy)
 	return copy.Pos.Y + copy.Size.Y
+}
+
+func (s *GameScene) uprightTankBottomY(tank *engine.Sprite) float64 {
+	if tank == nil {
+		return 0
+	}
+	minX := int(math.Floor(tank.Pos.X))
+	maxX := int(math.Ceil(tank.Pos.X + tank.Size.X))
+	bottomY := s.ground.SurfaceY(tank.Pos.X + tank.Size.X/2)
+	for x := minX; x <= maxX; x++ {
+		bottomY = math.Max(bottomY, s.ground.SurfaceY(float64(x)))
+	}
+	return bottomY
+}
+
+func (s *GameScene) alignTankBodyToSurface(tank *engine.Sprite) {
+	if models.IsSmallTankBody(tank) {
+		s.ground.AlignSpriteUprightToSurface(tank)
+		return
+	}
+	s.ground.AlignSpriteToSurface(tank)
 }
 
 func (s *GameScene) tankSupportState(tank *engine.Sprite) (float64, bool) {
@@ -4290,6 +4352,9 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 		windArrow = "<-"
 	}
 	rightX := int(screenCfg.Width) - 170
+	if s.projectileReentry && s.reentrySymbol != nil {
+		drawScaledImage(screen, s.reentrySymbol, image.Rect(rightX-60, hud.Min.Y+24, rightX-12, hud.Min.Y+56))
+	}
 	drawText(screen, "Wind: "+strconv.Itoa(s.wind)+" ("+windArrow+")", rightX, hud.Min.Y+30, colornames.White)
 	drawText(screen, "Power: "+strconv.Itoa(power), rightX, hud.Min.Y+55, colornames.White)
 
@@ -4767,6 +4832,9 @@ func (s *GameScene) behaviorFallOntoGround(ground models.Ground, tank *battleTan
 
 		centerX := source.Pos.X + source.Size.X/2
 		landingY := ground.SurfaceY(centerX)
+		if tank != nil && models.IsSmallTankBody(source) {
+			landingY = s.uprightTankBottomY(source)
+		}
 		if tank != nil && tank.fallDamage {
 			landingY = math.Max(landingY, tank.fallTargetY)
 		}
@@ -4777,10 +4845,9 @@ func (s *GameScene) behaviorFallOntoGround(ground models.Ground, tank *battleTan
 		source.Velocity = engine.Vec{}
 		if tank != nil {
 			if tank.fallDamage {
-				source.Pos = &engine.Vec{X: source.Pos.X, Y: landingY - source.Size.Y}
-				source.Rot = 0
+				s.alignTankBodyToSurface(source)
 			} else {
-				ground.AlignSpriteToSurface(source)
+				s.alignTankBodyToSurface(source)
 			}
 			tank.landed = true
 			tank.falling = false

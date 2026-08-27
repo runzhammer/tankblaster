@@ -95,6 +95,9 @@ var WeaponbarOnStock []byte
 //go:embed weaponbar_outofstock.png
 var WeaponbarOutOfStock []byte
 
+//go:embed symbol_reentry.png
+var SymbolReentry []byte
+
 //go:embed palm.png
 var Palm []byte
 

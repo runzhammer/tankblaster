@@ -24,10 +24,18 @@ type Tank struct {
 
 var SmallTankCannonMount = engine.V(8, 0)
 
+func IsSmallTankBody(body *engine.Sprite) bool {
+	if body == nil || body.Drawable == nil {
+		return false
+	}
+	bounds := body.Drawable.Bounds()
+	return int(bounds.W()) == 17 && int(bounds.H()) == 14
+}
+
 func NewTank(name string, tankColor color.RGBA) Tank {
 
 	scaleFactor := float64(1.0)
-	cannonLength := 11
+	cannonLength := 9
 	cannonAnchor := engine.V(8, 1)
 	cannonWidth := float64(int(cannonAnchor.X) + cannonLength)
 	cannonHeight := 3.0

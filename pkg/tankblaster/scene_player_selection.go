@@ -435,8 +435,9 @@ func (s *playerSelectionScene) cycleSlotKind(index int) {
 	slot := &s.slots[index]
 	switch slot.Kind {
 	case PlayerNone:
+		name := "Spieler " + strconv.Itoa(s.nextHumanNumber())
 		slot.Kind = PlayerHuman
-		slot.Name = "Spieler " + strconv.Itoa(s.nextHumanNumber())
+		slot.Name = name
 	case PlayerHuman:
 		slot.Kind = PlayerComputer
 		slot.ComputerID = computerplayers.DoedelID

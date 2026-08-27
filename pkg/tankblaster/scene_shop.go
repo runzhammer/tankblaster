@@ -133,9 +133,10 @@ func (s *GameScene) beginShop() {
 	s.shopMode = shopModeEntry
 	s.shopSelectedIndex = 0
 	s.shopComputerPlan = nil
-	s.shopPlayerOrder = make([]int, len(s.players))
-	for i := range s.shopPlayerOrder {
-		s.shopPlayerOrder[i] = i
+	s.shopPlayerOrder = s.shopPlayersWithCredits()
+	if len(s.shopPlayerOrder) == 0 {
+		s.startRound()
+		return
 	}
 	s.resetShopStock()
 	s.pickClassBItems()
@@ -144,6 +145,16 @@ func (s *GameScene) beginShop() {
 		right := s.shopPlayerOrder[j]
 		return s.roundScoreForPlayer(left) > s.roundScoreForPlayer(right)
 	})
+}
+
+func (s *GameScene) shopPlayersWithCredits() []int {
+	order := make([]int, 0, len(s.players))
+	for i := range s.players {
+		if i >= 0 && i < len(s.credits) && s.credits[i] > 0 {
+			order = append(order, i)
+		}
+	}
+	return order
 }
 
 func (s *GameScene) handleShopInput() {

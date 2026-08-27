@@ -233,6 +233,31 @@ func (g Ground) ClearLine(x1, y1, x2, y2, thickness float64) image.Rectangle {
 	return image.Rect(minX, minY, maxX+1, maxY+1)
 }
 
+func (g Ground) ClearRect(area image.Rectangle) image.Rectangle {
+	if g.pixels == nil || g.Image == nil || area.Empty() {
+		return image.Rectangle{}
+	}
+
+	bounds := g.pixels.Bounds()
+	minX := maxInt(0, area.Min.X)
+	maxX := minInt(bounds.Dx()-1, area.Max.X-1)
+	minY := maxInt(0, area.Min.Y)
+	maxY := minInt(bounds.Dy()-1, area.Max.Y-1)
+	if minX > maxX || minY > maxY {
+		return image.Rectangle{}
+	}
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			g.pixels.SetRGBA(x, y, color.RGBA{})
+		}
+	}
+
+	g.refreshSurfaceRange(minX, maxX)
+	g.Image.WritePixels(g.pixels.Pix)
+	return image.Rect(minX, minY, maxX+1, maxY+1)
+}
+
 func (g Ground) SettleArea(area image.Rectangle) []SandFallPixel {
 	if g.pixels == nil || area.Empty() {
 		return nil
@@ -339,6 +364,36 @@ func (g Ground) AlignSpriteToSurface(source *engine.Sprite) {
 		X: math.Max(0, math.Min(g.Size.X-source.Size.X, source.Pos.X)),
 		Y: centerY - source.Size.Y/2,
 	}
+}
+
+func (g Ground) AlignSpriteUprightToSurface(source *engine.Sprite) {
+	if source == nil {
+		return
+	}
+
+	source.Rot = 0
+	source.Pos = &engine.Vec{
+		X: math.Max(0, math.Min(g.Size.X-source.Size.X, source.Pos.X)),
+		Y: source.Pos.Y,
+	}
+
+	minX := int(math.Floor(source.Pos.X))
+	maxX := int(math.Ceil(source.Pos.X + source.Size.X))
+	bottomY := g.SurfaceY(source.Pos.X + source.Size.X/2)
+	for x := minX; x <= maxX; x++ {
+		bottomY = math.Max(bottomY, g.SurfaceY(float64(x)))
+	}
+
+	source.Pos = &engine.Vec{
+		X: source.Pos.X,
+		Y: bottomY - source.Size.Y,
+	}
+	g.ClearRect(image.Rect(
+		int(math.Floor(source.Pos.X)),
+		int(math.Floor(source.Pos.Y)),
+		int(math.Ceil(source.Pos.X+source.Size.X)),
+		int(math.Ceil(source.Pos.Y+source.Size.Y)),
+	))
 }
 
 func defaultTerrainProfile() terrainProfile {
