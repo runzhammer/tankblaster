@@ -97,17 +97,30 @@ const (
 	moleStarLineCount         = 36
 	moleStarRadius            = 110.25
 	moleStarLineThickness     = 2.0
-	smallCrumblerCount        = 50
+	smallCrumblerCount        = 80
 	smallCrumblerWidth        = 2
-	smallCrumblerHeight       = 3
-	smallCrumblerMaxDepth     = 200.0
+	smallCrumblerHeight       = 2
+	smallCrumblerMaxDepth     = 300.0
 	smallCrumblerFreezeFrames = 12
 	smallCrumblerMinSpeed     = 1.6
 	smallCrumblerMaxSpeed     = 3.2
 	smallCrumblerStartWidth   = 50.0
-	smallCrumblerFunnelSpread = 210.0
-	smallCrumblerJitter       = 3.8
-	smallCrumblerWobble       = 2.2
+	smallCrumblerHiddenStart  = 68.0
+	smallCrumblerFunnelSpread = 280.0
+	smallCrumblerJitter       = 4.8
+	smallCrumblerWobble       = 3.2
+	largeCrumblerCount        = 120
+	largeCrumblerWidth        = 2
+	largeCrumblerHeight       = 3
+	largeCrumblerMaxDepth     = 450.0
+	largeCrumblerFreezeFrames = 12
+	largeCrumblerMinSpeed     = 1.6
+	largeCrumblerMaxSpeed     = 3.2
+	largeCrumblerStartWidth   = 100.0
+	largeCrumblerHiddenStart  = 68.0
+	largeCrumblerFunnelSpread = 320.0
+	largeCrumblerJitter       = 4.8
+	largeCrumblerWobble       = 3.2
 )
 
 type damageCause uint8
@@ -351,10 +364,26 @@ type moleStarLine struct {
 type smallCrumblerImpact struct {
 	start     engine.Vec
 	crumbs    []smallCrumb
+	cfg       crumblerConfig
 	age       int
 	frozen    bool
 	freezeAge int
 	editArea  image.Rectangle
+}
+
+type crumblerConfig struct {
+	count        int
+	width        int
+	height       int
+	maxDepth     float64
+	freezeFrames int
+	minSpeed     float64
+	maxSpeed     float64
+	startWidth   float64
+	hiddenStart  float64
+	funnelSpread float64
+	jitter       float64
+	wobble       float64
 }
 
 type smallCrumb struct {
@@ -512,6 +541,7 @@ type GameScene struct {
 	palmCameraFocus      *battlePalm
 	waterCameraFocus     *waterBlubberEffect
 	waterBlotchFocus     *waterSurfaceImpact
+	crumblerCameraFocus  *engine.Vec
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -1525,6 +1555,8 @@ func (s *GameScene) Update() error {
 				s.updateProjectile()
 			} else if s.turnAdvanceDelay > 0 {
 				s.updateTurnAdvanceDelay()
+			} else if s.turnAdvanceBlocked() {
+				s.updateBattleCamera()
 			} else {
 				s.clampActiveShotStrength()
 				s.handleBattleInput()
@@ -1992,7 +2024,7 @@ func (s *GameScene) scrollBarAvailable() bool {
 }
 
 func (s *GameScene) handleBattleInput() {
-	if s.projectilesActive() || s.activePlayerIndex < 0 || s.activePlayerIndex >= len(s.tanks) {
+	if !s.activePlayerCanAdjustShot() {
 		return
 	}
 	tank := s.activeTank()
@@ -2506,7 +2538,7 @@ func (s *GameScene) updateProjectile() {
 		}
 	}
 	s.setProjectiles(active)
-	if !s.projectilesActive() && s.turnAdvanceDelay <= 0 {
+	if !s.projectilesActive() && s.turnAdvanceDelay <= 0 && !s.turnAdvanceBlocked() {
 		s.finishProjectiles()
 	}
 }
@@ -2715,6 +2747,23 @@ func (s *GameScene) projectilesActive() bool {
 	return len(s.projectiles) > 0
 }
 
+func (s *GameScene) turnAdvanceBlocked() bool {
+	return len(s.smallCrumblerImpacts) > 0
+}
+
+func (s *GameScene) activePlayerCanAdjustShot() bool {
+	return s.phase == phaseBattle &&
+		s.allTanksLanded() &&
+		!s.projectilesActive() &&
+		!s.turnAdvanceBlocked() &&
+		s.turnAdvanceDelay <= 0 &&
+		s.roundTransitionDelay <= 0 &&
+		!s.roundSeriesComplete &&
+		s.palmRevenge == nil &&
+		s.activePlayerIndex >= 0 &&
+		s.activePlayerIndex < len(s.tanks)
+}
+
 func (s *GameScene) setProjectiles(projectiles []*projectile) {
 	s.projectiles = projectiles
 	s.projectile = nil
@@ -2743,6 +2792,7 @@ func (s *GameScene) advanceActivePlayer() {
 	s.palmCameraFocus = nil
 	s.waterCameraFocus = nil
 	s.waterBlotchFocus = nil
+	s.crumblerCameraFocus = nil
 	s.cloudSearchEffects = nil
 	next := s.nextActivePlayerIndex()
 	if next < 0 {
@@ -2786,14 +2836,20 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
-	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
+	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
 	}
 
 	if weapon.SmallCrumblers {
 		s.reportComputerShot(p.pos, -1, false)
-		s.startSmallCrumblerImpact(p.pos)
+		s.startSmallCrumblerImpact(p.pos, smallCrumblerConfig())
+		return true
+	}
+
+	if weapon.LargeCrumblers {
+		s.reportComputerShot(p.pos, -1, false)
+		s.startSmallCrumblerImpact(p.pos, largeCrumblerConfig())
 		return true
 	}
 
@@ -3009,19 +3065,19 @@ func (s *GameScene) startMoleImpact(pos engine.Vec) {
 	s.delayTurnAdvance(moleTunnelFrames + moleStarFrames + s.impactPauseFrames())
 }
 
-func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec) {
-	crumbs := make([]smallCrumb, smallCrumblerCount)
+func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig) {
+	crumbs := make([]smallCrumb, cfg.count)
 	for i := range crumbs {
 		fan := 0.0
 		if len(crumbs) > 1 {
 			fan = float64(i)/float64(len(crumbs)-1)*2 - 1
 		}
-		startX := pos.X + (s.rng.Float64()-0.5)*smallCrumblerStartWidth
+		startX := pos.X + (s.rng.Float64()-0.5)*cfg.startWidth
 		startX = math.Max(0, math.Min(s.worldWidth-1, startX))
 		crumbs[i] = smallCrumb{
-			pos:    engine.V(startX, pos.Y),
+			pos:    engine.V(startX, pos.Y-cfg.hiddenStart),
 			fan:    fan,
-			speed:  smallCrumblerMinSpeed + s.rng.Float64()*(smallCrumblerMaxSpeed-smallCrumblerMinSpeed),
+			speed:  cfg.minSpeed + s.rng.Float64()*(cfg.maxSpeed-cfg.minSpeed),
 			drift:  fan*0.34 + (s.rng.Float64()-0.5)*0.7,
 			wobble: s.rng.Float64() * math.Pi * 2,
 		}
@@ -3030,10 +3086,11 @@ func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec) {
 	impact := &smallCrumblerImpact{
 		start:  pos,
 		crumbs: crumbs,
+		cfg:    cfg,
 	}
 	impact.editArea = s.ground.ClearRects(s.smallCrumblerAreas(impact))
 	s.smallCrumblerImpacts = append(s.smallCrumblerImpacts, impact)
-	s.delayTurnAdvance(int(math.Ceil(smallCrumblerMaxDepth/smallCrumblerMinSpeed)) + smallCrumblerFreezeFrames + sandFallFrames + s.impactPauseFrames())
+	s.crumblerCameraFocus = &impact.start
 }
 
 func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
@@ -3117,14 +3174,17 @@ func (s *GameScene) updateSmallCrumblerImpacts() {
 		}
 		if impact.frozen {
 			impact.freezeAge++
-			if impact.freezeAge >= smallCrumblerFreezeFrames {
+			if impact.freezeAge >= impact.cfg.freezeFrames {
+				delay := s.impactPauseFrames()
 				if falls := s.ground.SettleArea(impact.editArea); len(falls) > 0 {
 					s.sandFalls = append(s.sandFalls, sandFallAnimation{
 						pixels:   falls,
 						duration: sandFallFrames,
 					})
+					delay += sandFallFrames
 				}
 				s.dropUnsupportedTanks()
+				s.delayTurnAdvance(delay)
 				continue
 			}
 			active = append(active, impact)
@@ -3139,17 +3199,24 @@ func (s *GameScene) updateSmallCrumblerImpacts() {
 				continue
 			}
 			depth := math.Max(0, crumb.pos.Y-impact.start.Y)
-			spread := math.Max(2, smallCrumblerFunnelSpread*math.Min(1, depth/smallCrumblerMaxDepth))
+			startHalfWidth := impact.cfg.startWidth / 2
+			spread := math.Max(2, startHalfWidth+(impact.cfg.funnelSpread-startHalfWidth)*math.Min(1, depth/impact.cfg.maxDepth))
 			crumb.pos.Y += crumb.speed
 			targetX := impact.start.X + crumb.fan*spread
-			randomStep := (s.rng.Float64()*2 - 1) * smallCrumblerJitter
-			wobble := math.Sin(float64(impact.age)*1.35+crumb.wobble) * smallCrumblerWobble
-			crumb.pos.X += (targetX-crumb.pos.X)*0.07 + crumb.drift + wobble + randomStep
-			crumb.pos.X = math.Max(impact.start.X-spread, math.Min(impact.start.X+spread, crumb.pos.X))
+			randomStep := (s.rng.Float64()*2 - 1) * impact.cfg.jitter
+			wobble := math.Sin(float64(impact.age)*1.35+crumb.wobble) * impact.cfg.wobble
+			steer := 0.0
+			if crumb.pos.Y >= impact.start.Y {
+				steer = (targetX - crumb.pos.X) * 0.07
+			}
+			crumb.pos.X += steer + crumb.drift + wobble + randomStep
+			if crumb.pos.Y >= impact.start.Y {
+				crumb.pos.X = math.Max(impact.start.X-spread, math.Min(impact.start.X+spread, crumb.pos.X))
+			}
 			crumb.pos.X = math.Max(0, math.Min(s.worldWidth-1, crumb.pos.X))
-			crumb.lastArea = smallCrumblerArea(crumb.pos)
+			crumb.lastArea = smallCrumblerArea(crumb.pos, impact.cfg)
 
-			if crumb.pos.Y-impact.start.Y >= smallCrumblerMaxDepth || crumb.pos.Y >= s.battlefieldHeight()-2 {
+			if crumb.pos.Y-impact.start.Y >= impact.cfg.maxDepth || crumb.pos.Y >= s.battlefieldHeight()-2 {
 				crumb.stopped = true
 				reachedEnd = true
 			}
@@ -3180,19 +3247,56 @@ func (s *GameScene) smallCrumblerAreas(impact *smallCrumblerImpact) []image.Rect
 		if crumb.stopped && !impact.frozen {
 			continue
 		}
+		if crumb.pos.Y < impact.start.Y {
+			continue
+		}
 		area := crumb.lastArea
 		if area.Empty() {
-			area = smallCrumblerArea(crumb.pos)
+			area = smallCrumblerArea(crumb.pos, impact.cfg)
 		}
 		areas = append(areas, area)
 	}
 	return areas
 }
 
-func smallCrumblerArea(pos engine.Vec) image.Rectangle {
+func smallCrumblerArea(pos engine.Vec, cfg crumblerConfig) image.Rectangle {
 	x := int(math.Round(pos.X))
 	y := int(math.Round(pos.Y))
-	return image.Rect(x, y, x+smallCrumblerWidth, y+smallCrumblerHeight)
+	return image.Rect(x, y, x+cfg.width, y+cfg.height)
+}
+
+func smallCrumblerConfig() crumblerConfig {
+	return crumblerConfig{
+		count:        smallCrumblerCount,
+		width:        smallCrumblerWidth,
+		height:       smallCrumblerHeight,
+		maxDepth:     smallCrumblerMaxDepth,
+		freezeFrames: smallCrumblerFreezeFrames,
+		minSpeed:     smallCrumblerMinSpeed,
+		maxSpeed:     smallCrumblerMaxSpeed,
+		startWidth:   smallCrumblerStartWidth,
+		hiddenStart:  smallCrumblerHiddenStart,
+		funnelSpread: smallCrumblerFunnelSpread,
+		jitter:       smallCrumblerJitter,
+		wobble:       smallCrumblerWobble,
+	}
+}
+
+func largeCrumblerConfig() crumblerConfig {
+	return crumblerConfig{
+		count:        largeCrumblerCount,
+		width:        largeCrumblerWidth,
+		height:       largeCrumblerHeight,
+		maxDepth:     largeCrumblerMaxDepth,
+		freezeFrames: largeCrumblerFreezeFrames,
+		minSpeed:     largeCrumblerMinSpeed,
+		maxSpeed:     largeCrumblerMaxSpeed,
+		startWidth:   largeCrumblerStartWidth,
+		hiddenStart:  largeCrumblerHiddenStart,
+		funnelSpread: largeCrumblerFunnelSpread,
+		jitter:       largeCrumblerJitter,
+		wobble:       largeCrumblerWobble,
+	}
 }
 
 func unionRect(a, b image.Rectangle) image.Rectangle {
@@ -3783,6 +3887,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 		if s.updatePalmCamera() {
 			return
 		}
+		if s.updateCrumblerCamera() {
+			return
+		}
 		s.updateZeroPowerCamera()
 		return
 	}
@@ -3815,6 +3922,9 @@ func (s *GameScene) updateBattleCamera() {
 		return
 	}
 	if s.updatePalmCamera() {
+		return
+	}
+	if s.updateCrumblerCamera() {
 		return
 	}
 	if s.updateZeroPowerCamera() {
@@ -3910,6 +4020,22 @@ func (s *GameScene) updateWaterCamera() bool {
 	screenWidth := core.Config().Screen.Width
 	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, pos.X-screenWidth/2))
 	s.cameraGoalY = 0
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
+	return true
+}
+
+func (s *GameScene) updateCrumblerCamera() bool {
+	if s.crumblerCameraFocus == nil {
+		return false
+	}
+	if len(s.smallCrumblerImpacts) == 0 && len(s.sandFalls) == 0 && s.turnAdvanceDelay <= 0 {
+		s.crumblerCameraFocus = nil
+		return false
+	}
+	screenWidth := core.Config().Screen.Width
+	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, s.crumblerCameraFocus.X-screenWidth/2))
+	s.cameraGoalY = s.cameraTargetForWorldY(s.crumblerCameraFocus.Y)
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
 	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
 	return true
@@ -4568,10 +4694,13 @@ func (s *GameScene) drawSmallCrumblerImpacts(screen *ebiten.Image, camera *ebite
 		}
 		for i := range impact.crumbs {
 			crumb := &impact.crumbs[i]
+			if crumb.pos.Y < impact.start.Y {
+				continue
+			}
 			projected := crumb.pos.Project(camera)
 			drawFilledRect(
 				screen,
-				image.Rect(int(projected.X), int(projected.Y), int(projected.X)+smallCrumblerWidth, int(projected.Y)+smallCrumblerHeight),
+				image.Rect(int(projected.X), int(projected.Y), int(projected.X)+impact.cfg.width, int(projected.Y)+impact.cfg.height),
 				crumbColor,
 			)
 		}
@@ -5651,7 +5780,7 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 		s.clampCannonRotationToTank(source, tank.body)
 		return
 	}
-	if s.projectilesActive() || s.roundTransitionDelay > 0 || s.roundSeriesComplete {
+	if !s.activePlayerCanAdjustShot() {
 		return
 	}
 	if s.scrollOMatActive() {
