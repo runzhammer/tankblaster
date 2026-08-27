@@ -158,6 +158,15 @@ type battleCloud struct {
 	kind          cloudKind
 	image         *ebiten.Image
 	revengeActive bool
+	aggression    float64
+}
+
+type cloudSearchEffect struct {
+	cloud     *battleCloud
+	age       int
+	delay     int
+	duration  int
+	animation spriteAnimation
 }
 
 type palmRevengePhase uint8
@@ -180,6 +189,7 @@ type palmRevengeEvent struct {
 	cloudAttack   engine.Vec
 	cloudOriginal engine.Vec
 	targetCameraX float64
+	tankBlackened bool
 	damageDone    bool
 	smokeDone     bool
 	smokeAge      int
@@ -227,13 +237,15 @@ type computerShotRecord struct {
 }
 
 type projectile struct {
-	pos         engine.Vec
-	prev        engine.Vec
-	velocity    engine.Vec
-	weaponIndex int
-	trail       []engine.Vec
-	shooter     *battleTank
-	launchRot   float64
+	pos            engine.Vec
+	prev           engine.Vec
+	velocity       engine.Vec
+	weaponIndex    int
+	trail          []engine.Vec
+	shooter        *battleTank
+	launchRot      float64
+	angeredClouds  map[*battleCloud]bool
+	searchingCloud *battleCloud
 }
 
 type projectileReentryAnimation struct {
@@ -375,38 +387,41 @@ type GameScene struct {
 
 	// shot engine.Drawable
 
-	layers                engine.Layers
-	ground                models.Ground
-	worldWidth            float64
-	cameraX               float64
-	cameraGoal            float64
-	rng                   *rand.Rand
-	palmImage             *ebiten.Image
-	palmPixels            *image.RGBA
-	palmSkeletonImage     *ebiten.Image
-	palmSkeletonPixels    *image.RGBA
-	palmFireAnimation     spriteAnimation
-	palmSmokeAnimation    spriteAnimation
-	palmCrumbleAnimation  spriteAnimation
-	palmEyesAnimation     spriteAnimation
-	palmScreamImage       *ebiten.Image
-	palmGrinImage         *ebiten.Image
-	palmLeafImages        []*ebiten.Image
-	cloudAngryImage       *ebiten.Image
-	cloudGrinImage        *ebiten.Image
-	cloudGrinAnimation    spriteAnimation
-	lightningImage        *ebiten.Image
-	reentrySymbol         *ebiten.Image
-	reentryEarth          *ebiten.Image
-	humanPortrait         *ebiten.Image
-	computerPortraits     map[computerplayers.ID]*ebiten.Image
-	zeroPowerSmoke        spriteAnimation
-	fireballAnimation     spriteAnimation
-	waterAnimation        spriteAnimation
-	waterBlubberAnimation spriteAnimation
-	waterBlotchAnimation  spriteAnimation
-	clouds                []*battleCloud
-	cloudAssets           []cloudAsset
+	layers                  engine.Layers
+	ground                  models.Ground
+	worldWidth              float64
+	cameraX                 float64
+	cameraY                 float64
+	cameraGoal              float64
+	cameraGoalY             float64
+	rng                     *rand.Rand
+	palmImage               *ebiten.Image
+	palmPixels              *image.RGBA
+	palmSkeletonImage       *ebiten.Image
+	palmSkeletonPixels      *image.RGBA
+	palmFireAnimation       spriteAnimation
+	palmSmokeAnimation      spriteAnimation
+	palmCrumbleAnimation    spriteAnimation
+	palmEyesAnimation       spriteAnimation
+	palmScreamImage         *ebiten.Image
+	palmGrinImage           *ebiten.Image
+	palmLeafImages          []*ebiten.Image
+	cloudAngryImage         *ebiten.Image
+	cloudSearchingAnimation spriteAnimation
+	cloudGrinImage          *ebiten.Image
+	cloudGrinAnimation      spriteAnimation
+	lightningImage          *ebiten.Image
+	reentrySymbol           *ebiten.Image
+	reentryEarth            *ebiten.Image
+	humanPortrait           *ebiten.Image
+	computerPortraits       map[computerplayers.ID]*ebiten.Image
+	zeroPowerSmoke          spriteAnimation
+	fireballAnimation       spriteAnimation
+	waterAnimation          spriteAnimation
+	waterBlubberAnimation   spriteAnimation
+	waterBlotchAnimation    spriteAnimation
+	clouds                  []*battleCloud
+	cloudAssets             []cloudAsset
 
 	tanks                []*battleTank
 	palms                []*battlePalm
@@ -435,6 +450,7 @@ type GameScene struct {
 	moleImpacts          []*moleImpact
 	sandFalls            []sandFallAnimation
 	palmLeafFalls        []palmLeafFall
+	cloudSearchEffects   []*cloudSearchEffect
 	palmRevenge          *palmRevengeEvent
 	palmRevengeRemoval   *battleTank
 	zeroPowerEffects     []zeroPowerAnimation
@@ -551,6 +567,11 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	s.palmScreamImage = mustImageFromPNG(r.PalmScreamPNG)
 	s.palmGrinImage = mustImageFromPNG(r.PalmGrinPNG)
 	s.cloudAngryImage = mustImageFromPNG(r.CloudAngryPNG)
+	cloudSearchingAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.CloudSearchingPNG, frameWidth: 54, delay: 120})
+	if err != nil {
+		return nil, err
+	}
+	s.cloudSearchingAnimation = cloudSearchingAnimation
 	s.cloudGrinImage = mustImageFromPNG(r.CloudGrinPNG)
 	s.lightningImage = mustImageFromPNG(r.LightningPNG)
 	cloudGrinAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.CloudAngryToGrinPNG, frameWidth: 54, delay: 6})
@@ -620,6 +641,7 @@ func (s *GameScene) startRound() {
 	s.impacts = nil
 	s.sandFalls = nil
 	s.palmLeafFalls = nil
+	s.cloudSearchEffects = nil
 	s.palmRevenge = nil
 	s.palmRevengeRemoval = nil
 	s.zeroPowerEffects = nil
@@ -642,11 +664,17 @@ func (s *GameScene) startRound() {
 		s.windDirection = 1
 	}
 	s.projectileReentry = s.projectileReentryEnabledForRound()
+	s.cameraY = 0
+	s.cameraGoalY = 0
 
 	s.worldWidth = worldWidthForPlayers(len(s.players))
 
 	battlefieldHeight := s.battlefieldHeight()
-	b := models.NewBackgroundWithSize(s.worldWidth, battlefieldHeight)
+	skyExtra := s.skyExtraHeight()
+	b := models.NewBackgroundWithSize(s.worldWidth, battlefieldHeight+skyExtra)
+	if b.Position != nil {
+		b.Position.Y = -skyExtra
+	}
 	gr := models.NewRandomGroundWithSize(s.worldWidth, battlefieldHeight, s.rng.Int63())
 	s.ground = gr
 	s.tanks = nil
@@ -696,6 +724,7 @@ func (s *GameScene) startRound() {
 		s.placeTanksOnGroundForQuickStart()
 	}
 	s.cameraGoal = s.cameraTargetForTank(0)
+	s.cameraGoalY = 0
 	s.layers[layerGround] = engine.AddSprites(s.layers[layerGround], gr.Sprites)
 	s.layers[layerPalms] = engine.AddSprites(s.layers[layerPalms], s.palmSprites())
 	s.layers[layerClouds] = engine.AddSprites(s.layers[layerClouds], s.cloudSprites())
@@ -746,12 +775,18 @@ func (s *GameScene) createClouds(battlefieldHeight float64) {
 	cfg := core.Config().Gameplay.Clouds
 	speedRange := cfg.MaxSpeed - cfg.MinSpeed
 	windBoost := 0.45 + float64(s.wind)/100*0.7
-	minY := 20.0
-	maxY := math.Max(minY, battlefieldHeight*0.28)
+	minY := -s.skyExtraHeight() + 20.0
+	maxY := math.Max(minY+1, battlefieldHeight*0.28)
 	laneWidth := s.worldWidth / float64(count)
+	lightningLane := s.rng.Intn(count)
 
 	for i := 0; i < count; i++ {
-		asset := s.cloudAssets[s.rng.Intn(len(s.cloudAssets))]
+		asset := s.randomNormalCloudAsset()
+		if i == lightningLane {
+			if lightning := s.cloudAssetByKind(cloudKindLightning); lightning.image != nil {
+				asset = lightning
+			}
+		}
 		scale := 1.0
 		size := engine.V(asset.size.X*scale, asset.size.Y*scale)
 		laneCenter := laneWidth*float64(i) + laneWidth/2
@@ -773,6 +808,28 @@ func (s *GameScene) createClouds(battlefieldHeight float64) {
 		cloud.sprite.Steps = engine.MakeBehaviors(s.behaviorDriftCloud(cloud))
 		s.clouds = append(s.clouds, cloud)
 	}
+}
+
+func (s *GameScene) cloudAssetByKind(kind cloudKind) cloudAsset {
+	for _, asset := range s.cloudAssets {
+		if asset.kind == kind {
+			return asset
+		}
+	}
+	return cloudAsset{}
+}
+
+func (s *GameScene) randomNormalCloudAsset() cloudAsset {
+	normal := make([]cloudAsset, 0, len(s.cloudAssets))
+	for _, asset := range s.cloudAssets {
+		if asset.kind == cloudKindNormal {
+			normal = append(normal, asset)
+		}
+	}
+	if len(normal) == 0 {
+		return s.cloudAssetByKind(cloudKindLightning)
+	}
+	return normal[s.rng.Intn(len(normal))]
 }
 
 func cloudSpriteTag(kind cloudKind) string {
@@ -828,7 +885,12 @@ func (s *GameScene) behaviorDriftCloud(cloud *battleCloud) engine.Behavior {
 func (s *GameScene) cloudSprites() *engine.Sprites {
 	sprites := engine.NewSprites()
 	for _, cloud := range s.clouds {
-		if cloud != nil && cloud.sprite != nil {
+		if cloud != nil && cloud.kind != cloudKindLightning && cloud.sprite != nil {
+			sprites.Add(cloud.sprite)
+		}
+	}
+	for _, cloud := range s.clouds {
+		if cloud != nil && cloud.kind == cloudKindLightning && cloud.sprite != nil {
 			sprites.Add(cloud.sprite)
 		}
 	}
@@ -1012,12 +1074,107 @@ func (s *GameScene) addPalmAggression(palm *battlePalm, attacker *battleTank) bo
 
 func (s *GameScene) startPalmRevenge(palm *battlePalm, target *battleTank) {
 	cloud := s.lightningCloudForRevenge()
-	if palm == nil || cloud == nil || cloud.sprite == nil || cloud.sprite.Pos == nil || cloud.sprite.Size == nil || target == nil || target.body == nil {
+	if palm == nil {
 		return
 	}
-	palm.eyesOn = false
-	palm.screaming = true
-	palm.screamAge = 0
+	s.startLightningCloudRevenge(cloud, palm, target)
+}
+
+func (s *GameScene) addLightningCloudAggressionForProjectile(p *projectile) bool {
+	if p == nil || p.shooter == nil || s.palmRevenge != nil {
+		return false
+	}
+	increase := float64(maxInt(0, s.g.options.cloudAggression))
+	if increase <= 0 {
+		return false
+	}
+	if p.angeredClouds == nil {
+		p.angeredClouds = make(map[*battleCloud]bool)
+	}
+	radius := projectileRadiusForWeapon(s.weaponForProjectile(p))
+	for _, cloud := range s.clouds {
+		if cloud == nil || cloud.kind != cloudKindLightning || cloud.sprite == nil || cloud.revengeActive {
+			continue
+		}
+		if p.angeredClouds[cloud] || !projectilePassesLightningCloud(p.pos, radius, cloud) {
+			continue
+		}
+		p.angeredClouds[cloud] = true
+		cloud.aggression += increase
+		if cloud.aggression < palmRevengeTrigger {
+			if p.searchingCloud == nil && cloud.aggression+increase >= palmRevengeTrigger {
+				p.searchingCloud = cloud
+			}
+			continue
+		}
+		cloud.aggression = palmRevengeTrigger
+		if !s.tankCanAct(p.shooter) {
+			p.searchingCloud = cloud
+			return true
+		}
+		s.startLightningCloudRevenge(cloud, nil, p.shooter)
+		return true
+	}
+	return false
+}
+
+func (s *GameScene) scheduleCloudSearchForProjectile(p *projectile) {
+	if p == nil || p.searchingCloud == nil || p.searchingCloud.sprite == nil || s.palmRevenge != nil || len(s.cloudSearchingAnimation.frames) == 0 {
+		return
+	}
+	if s.cloudSearchAlreadyScheduled(p.searchingCloud) {
+		return
+	}
+	delay := maxInt(0, s.turnAdvanceDelay)
+	effect := &cloudSearchEffect{
+		cloud:     p.searchingCloud,
+		delay:     delay,
+		duration:  s.cloudSearchingAnimation.totalTicks,
+		animation: s.cloudSearchingAnimation,
+	}
+	s.cloudSearchEffects = append(s.cloudSearchEffects, effect)
+	s.delayTurnAdvance(delay + effect.duration + secondsToFrames(0.25))
+}
+
+func (s *GameScene) cloudSearchAlreadyScheduled(cloud *battleCloud) bool {
+	for _, effect := range s.cloudSearchEffects {
+		if effect != nil && effect.cloud == cloud && effect.age < effect.duration {
+			return true
+		}
+	}
+	return false
+}
+
+func projectilePassesLightningCloud(pos engine.Vec, projectileRadius float64, cloud *battleCloud) bool {
+	if cloud == nil || cloud.sprite == nil {
+		return false
+	}
+	bounds := cloud.sprite.Bounds()
+	margin := math.Max(24, projectileRadius+18)
+	zone := engine.R(
+		bounds.Min.X-margin,
+		bounds.Min.Y-margin,
+		bounds.Max.X+margin,
+		bounds.Max.Y+margin,
+	)
+	projectileBounds := engine.R(
+		pos.X-projectileRadius,
+		pos.Y-projectileRadius,
+		pos.X+projectileRadius,
+		pos.Y+projectileRadius,
+	)
+	return engine.Collision(zone, projectileBounds)
+}
+
+func (s *GameScene) startLightningCloudRevenge(cloud *battleCloud, palm *battlePalm, target *battleTank) {
+	if cloud == nil || cloud.sprite == nil || cloud.sprite.Pos == nil || cloud.sprite.Size == nil || target == nil || target.body == nil {
+		return
+	}
+	if palm != nil {
+		palm.eyesOn = false
+		palm.screaming = true
+		palm.screamAge = 0
+	}
 	cloud.revengeActive = true
 	if s.layers[layerClouds] != nil {
 		s.layers[layerClouds].Remove(cloud.sprite)
@@ -1052,7 +1209,7 @@ func (s *GameScene) lightningCloudForRevenge() *battleCloud {
 		if asset.kind != cloudKindLightning {
 			continue
 		}
-		size := engine.V(asset.size.X*0.8, asset.size.Y*0.8)
+		size := engine.V(asset.size.X, asset.size.Y)
 		cloud := &battleCloud{
 			kind:  asset.kind,
 			speed: 0.35,
@@ -1367,7 +1524,9 @@ func (s *GameScene) updateSpawnSequence() {
 	}
 
 	s.cameraGoal = s.cameraTargetForTank(s.spawnIndex)
+	s.cameraGoalY = 0
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.08, 0.35)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.08, 0.35)
 
 	tank := s.tanks[s.spawnIndex]
 	if tank == nil || tank.body == nil || tank.falling || tank.landed {
@@ -1400,6 +1559,7 @@ func (s *GameScene) advanceSpawnSequence() {
 	s.spawnIndex++
 	if s.spawnIndex < len(s.tanks) {
 		s.cameraGoal = s.cameraTargetForTank(s.spawnIndex)
+		s.cameraGoalY = 0
 	}
 }
 
@@ -1416,6 +1576,11 @@ func (s *GameScene) cameraTargetForTank(index int) float64 {
 func (s *GameScene) cameraTargetForWorldX(centerX float64) float64 {
 	screenWidth := core.Config().Screen.Width
 	return math.Max(0, math.Min(s.worldWidth-screenWidth, centerX-screenWidth/2))
+}
+
+func (s *GameScene) cameraTargetForWorldY(centerY float64) float64 {
+	target := centerY - s.battlefieldHeight()*0.35
+	return math.Max(-s.skyExtraHeight(), math.Min(0, target))
 }
 
 func approach(current, target, smoothing, minStep float64) float64 {
@@ -1605,7 +1770,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	}
 
 	camera := ebiten.GeoM{}
-	camera.Translate(-s.cameraX, 0)
+	camera.Translate(-s.cameraX, -s.cameraY)
 
 	for layerIndex, layer := range s.layers {
 		if layerIndex == layerWater {
@@ -1615,6 +1780,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	}
 	s.drawImpacts(screen, &camera)
 	s.drawAnimatedImpacts(screen, &camera)
+	s.drawCloudSearchEffects(screen, &camera)
 	s.drawWaterBlubbers(screen, &camera)
 	s.drawWaterBlotches(screen, &camera)
 	s.drawMoleImpacts(screen, &camera)
@@ -1877,7 +2043,8 @@ func (s *GameScene) updateComputerTurnPlan(tank *battleTank) {
 	switch plan.phase {
 	case computerTurnWaitCamera:
 		s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
-		if math.Abs(s.cameraX-s.cameraGoal) > 2 {
+		s.cameraGoalY = 0
+		if math.Abs(s.cameraX-s.cameraGoal) > 2 || math.Abs(s.cameraY-s.cameraGoalY) > 2 {
 			return
 		}
 		plan.phase = computerTurnAdjustStrength
@@ -2166,6 +2333,7 @@ func (s *GameScene) toggleScrollOMat(tank *battleTank) {
 	if tank.selectedWeapon == scrollSlot {
 		tank.selectedWeapon = 0
 		s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+		s.cameraGoalY = 0
 		return
 	}
 	tank.selectedWeapon = scrollSlot
@@ -2326,8 +2494,15 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 
 	if p.pos.X >= 0 && p.pos.X <= s.worldWidth {
-		s.cameraGoal = math.Max(0, math.Min(s.worldWidth-core.Config().Screen.Width, p.pos.X-core.Config().Screen.Width/2))
+		s.cameraGoal = s.cameraTargetForWorldX(p.pos.X)
+		s.cameraGoalY = s.cameraTargetForWorldY(p.pos.Y)
 		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.12, 0.4)
+		s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.12, 0.4)
+	}
+	if s.addLightningCloudAggressionForProjectile(p) {
+		s.reportComputerShot(p.pos, -1, false)
+		s.scheduleCloudSearchForProjectile(p)
+		return false
 	}
 
 	battlefieldHeight := s.battlefieldHeight()
@@ -2340,6 +2515,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	if hit, ok := s.projectileHitsWaterSurface(p, projectileRadiusForWeapon(weapon)); ok {
 		s.reportComputerShot(hit, -1, false)
 		s.startWaterSurfaceImpact(hit)
+		s.scheduleCloudSearchForProjectile(p)
 		return false
 	}
 	if palm := s.projectileHitsPalm(p, projectileRadiusForWeapon(weapon)); palm != nil {
@@ -2358,6 +2534,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 			s.focusPalmCamera(palm)
 		}
 		s.delayTurnAdvance(s.palmEffectDelayFrames(palm))
+		s.scheduleCloudSearchForProjectile(p)
 		return false
 	}
 
@@ -2368,6 +2545,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 
 	if p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
 		if s.onGroundImpact(p) {
+			s.scheduleCloudSearchForProjectile(p)
 			return false
 		}
 		s.reportComputerShot(p.pos, -1, false)
@@ -2388,6 +2566,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 			}
 			s.reportComputerShot(p.pos, tank.playerIndex, true)
 			s.delayTurnAdvance(s.tankHitPauseFrames())
+			s.scheduleCloudSearchForProjectile(p)
 			return false
 		}
 	}
@@ -2530,6 +2709,7 @@ func (s *GameScene) advanceActivePlayer() {
 	s.palmCameraFocus = nil
 	s.waterCameraFocus = nil
 	s.waterBlotchFocus = nil
+	s.cloudSearchEffects = nil
 	next := s.nextActivePlayerIndex()
 	if next < 0 {
 		return
@@ -2538,6 +2718,7 @@ func (s *GameScene) advanceActivePlayer() {
 	s.resetComputerTurnPlans()
 	s.clampActiveShotStrength()
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+	s.cameraGoalY = 0
 }
 
 func (s *GameScene) nextActivePlayerIndex() int {
@@ -3228,8 +3409,10 @@ func (s *GameScene) updatePalmRevenge() {
 	case palmRevengeCloudFocus:
 		if event.cloud != nil && event.cloud.sprite != nil {
 			s.cameraGoal = s.cameraTargetForWorldX(event.cloud.sprite.Bounds().Center().X)
-			shake := math.Sin(float64(event.age)*math.Pi*6/float64(palmRevengeFocusFrames)) * 9
+			s.cameraGoalY = s.cameraTargetForWorldY(event.cloud.sprite.Bounds().Center().Y)
+			shake := math.Sin(float64(event.age)*math.Pi*26/float64(palmRevengeFocusFrames)) * 9
 			s.cameraX = approach(s.cameraX, s.cameraGoal+shake, 0.18, 0.8)
+			s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.18, 0.8)
 		}
 		if event.age >= palmRevengeFocusFrames {
 			event.age = 0
@@ -3246,7 +3429,9 @@ func (s *GameScene) updatePalmRevenge() {
 		s.moveRevengeCloud(event, progress)
 		if event.cloud != nil && event.cloud.sprite != nil {
 			s.cameraGoal = s.cameraTargetForWorldX(event.cloud.sprite.Bounds().Center().X)
+			s.cameraGoalY = s.cameraTargetForWorldY(event.cloud.sprite.Bounds().Center().Y)
 			s.cameraX = approach(s.cameraX, s.cameraGoal, 0.2, 0.8)
+			s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.2, 0.8)
 		}
 		if event.age >= palmRevengeAttackFrames {
 			event.age = 0
@@ -3254,12 +3439,17 @@ func (s *GameScene) updatePalmRevenge() {
 		}
 	case palmRevengeLightning:
 		s.cameraGoal = event.targetCameraX
+		s.cameraGoalY = 0
 		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.22, 0.8)
-		if s.palmRevengeLightningVisible(event) && !event.damageDone {
+		s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.22, 0.8)
+		if s.palmRevengeLightningVisible(event) && !event.tankBlackened {
 			s.blackenPalmRevengeTank(event)
 		}
 		if event.age >= 48 && event.age < 66 && !event.smokeDone {
 			s.startPalmRevengeSmoke(event)
+		}
+		if event.age >= 66 && !event.damageDone {
+			s.damagePalmRevengeTank(event)
 		}
 		if event.smokeDone {
 			event.smokeAge++
@@ -3278,7 +3468,9 @@ func (s *GameScene) updatePalmRevenge() {
 			event.cloud.sprite.Pos.Y = event.cloudAttack.Y + (event.cloudOriginal.Y-event.cloudAttack.Y)*progress
 		}
 		s.cameraGoal = event.targetCameraX
+		s.cameraGoalY = 0
 		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.22, 0.8)
+		s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.22, 0.8)
 		if event.age >= palmRevengeRecoverFrames {
 			s.finishPalmRevenge(event)
 		}
@@ -3294,6 +3486,21 @@ func (s *GameScene) moveRevengeCloud(event *palmRevengeEvent, progress float64) 
 }
 
 func (s *GameScene) blackenPalmRevengeTank(event *palmRevengeEvent) {
+	if event == nil || event.tankBlackened || event.target == nil {
+		return
+	}
+	event.tankBlackened = true
+	tank := event.target
+	tank.tint = color.RGBA{A: 255}
+	models.RecolorTankBody(tank.body, tank.tint)
+	models.RecolorCannon(tank.cannon, tank.tint)
+	if event.palm != nil && event.palm.grinning {
+		event.palm.grinAge = 0
+		event.palm.grinHideAt = secondsToFrames(2)
+	}
+}
+
+func (s *GameScene) damagePalmRevengeTank(event *palmRevengeEvent) {
 	if event == nil || event.damageDone || event.target == nil {
 		return
 	}
@@ -3302,13 +3509,6 @@ func (s *GameScene) blackenPalmRevengeTank(event *palmRevengeEvent) {
 	previousPower := tank.power
 	tank.power = maxInt(0, tank.power-100)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
-	tank.tint = color.RGBA{A: 255}
-	models.RecolorTankBody(tank.body, tank.tint)
-	models.RecolorCannon(tank.cannon, tank.tint)
-	if event.palm != nil && event.palm.grinning {
-		event.palm.grinAge = 0
-		event.palm.grinHideAt = secondsToFrames(2)
-	}
 	if previousPower > 0 && tank.power == 0 {
 		s.awardZeroPowerScore(tank, nil, damageCauseDirect)
 		tank.zeroPowerShown = true
@@ -3386,13 +3586,42 @@ func (s *GameScene) updateZeroPowerEffects() {
 	s.zeroPowerEffects = active
 }
 
+func (s *GameScene) updateCloudSearchEffects() {
+	if len(s.cloudSearchEffects) == 0 {
+		return
+	}
+	pause := secondsToFrames(0.25)
+	active := s.cloudSearchEffects[:0]
+	for _, effect := range s.cloudSearchEffects {
+		if effect == nil || effect.cloud == nil || effect.cloud.sprite == nil {
+			continue
+		}
+		if effect.delay > 0 {
+			effect.delay--
+			active = append(active, effect)
+			continue
+		}
+		effect.age++
+		if effect.age < effect.duration+pause {
+			active = append(active, effect)
+		}
+	}
+	s.cloudSearchEffects = active
+}
+
 func (s *GameScene) updateTurnAdvanceDelay() {
+	if s.turnAdvanceDelay > 0 {
+		s.updateCloudSearchEffects()
+	}
 	s.turnAdvanceDelay--
 	if s.turnAdvanceDelay > 0 {
 		if s.updateWaterBlotchCamera() {
 			return
 		}
 		if s.updateWaterCamera() {
+			return
+		}
+		if s.updateCloudSearchCamera() {
 			return
 		}
 		if s.updatePalmCamera() {
@@ -3426,6 +3655,9 @@ func (s *GameScene) updateBattleCamera() {
 	if s.updateWaterCamera() {
 		return
 	}
+	if s.updateCloudSearchCamera() {
+		return
+	}
 	if s.updatePalmCamera() {
 		return
 	}
@@ -3439,7 +3671,9 @@ func (s *GameScene) updateBattleCamera() {
 		return
 	}
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+	s.cameraGoalY = 0
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.08, 0.35)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.08, 0.35)
 }
 
 func (s *GameScene) focusPalmCamera(palm *battlePalm) {
@@ -3452,8 +3686,31 @@ func (s *GameScene) updatePalmCamera() bool {
 		return false
 	}
 	s.cameraGoal = s.cameraTargetForPalm(s.palmCameraFocus)
+	s.cameraGoalY = 0
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
 	return true
+}
+
+func (s *GameScene) updateCloudSearchCamera() bool {
+	effect := s.activeCloudSearchEffect()
+	if effect == nil || effect.cloud == nil || effect.cloud.sprite == nil {
+		return false
+	}
+	s.cameraGoal = s.cameraTargetForCloud(effect.cloud)
+	s.cameraGoalY = s.cameraTargetForWorldY(effect.cloud.sprite.Bounds().Center().Y)
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
+	return true
+}
+
+func (s *GameScene) activeCloudSearchEffect() *cloudSearchEffect {
+	for _, effect := range s.cloudSearchEffects {
+		if effect != nil && effect.delay <= 0 && effect.cloud != nil && effect.cloud.sprite != nil {
+			return effect
+		}
+	}
+	return nil
 }
 
 func (s *GameScene) updateWaterBlotchCamera() bool {
@@ -3462,7 +3719,9 @@ func (s *GameScene) updateWaterBlotchCamera() bool {
 	}
 	screenWidth := core.Config().Screen.Width
 	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, s.waterBlotchFocus.pos.X-screenWidth/2))
+	s.cameraGoalY = 0
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
 	return true
 }
 
@@ -3472,6 +3731,15 @@ func (s *GameScene) cameraTargetForPalm(palm *battlePalm) float64 {
 	}
 	screenWidth := core.Config().Screen.Width
 	centerX := palm.sprite.Bounds().Center().X
+	return math.Max(0, math.Min(s.worldWidth-screenWidth, centerX-screenWidth/2))
+}
+
+func (s *GameScene) cameraTargetForCloud(cloud *battleCloud) float64 {
+	if cloud == nil || cloud.sprite == nil {
+		return s.cameraX
+	}
+	screenWidth := core.Config().Screen.Width
+	centerX := cloud.sprite.Bounds().Center().X
 	return math.Max(0, math.Min(s.worldWidth-screenWidth, centerX-screenWidth/2))
 }
 
@@ -3485,7 +3753,9 @@ func (s *GameScene) updateWaterCamera() bool {
 	pos := s.waterCameraFocus.position()
 	screenWidth := core.Config().Screen.Width
 	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, pos.X-screenWidth/2))
+	s.cameraGoalY = 0
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
 	return true
 }
 
@@ -3497,7 +3767,9 @@ func (s *GameScene) updateZeroPowerCamera() bool {
 	for index, tank := range s.tanks {
 		if tank == effect.tank {
 			s.cameraGoal = s.cameraTargetForTank(index)
+			s.cameraGoalY = 0
 			s.cameraX = approach(s.cameraX, s.cameraGoal, 0.12, 0.4)
+			s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.12, 0.4)
 			return true
 		}
 	}
@@ -4084,6 +4356,25 @@ func (s *GameScene) drawWaterBlotches(screen *ebiten.Image, camera *ebiten.GeoM)
 			continue
 		}
 		drawAnimationBottomCentered(screen, camera, effect.animation, effect.pos, effect.age)
+	}
+}
+
+func (s *GameScene) drawCloudSearchEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, effect := range s.cloudSearchEffects {
+		if effect == nil || effect.delay > 0 || effect.age >= effect.duration || effect.cloud == nil || effect.cloud.sprite == nil {
+			continue
+		}
+		frame := effect.animation.frameAt(effect.age)
+		if frame == nil {
+			continue
+		}
+		center := effect.cloud.sprite.Bounds().Center().Project(camera)
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(
+			center.X-float64(frame.Bounds().Dx())/2,
+			center.Y-float64(frame.Bounds().Dy())/2,
+		)
+		screen.DrawImage(frame, op)
 	}
 }
 
@@ -4971,6 +5262,10 @@ func debugScrollBarRect() image.Rectangle {
 
 func (s *GameScene) battlefieldHeight() float64 {
 	return math.Max(120, core.Config().Screen.Height-gameHUDHeight)
+}
+
+func (s *GameScene) skyExtraHeight() float64 {
+	return s.battlefieldHeight() * 0.30
 }
 
 func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {

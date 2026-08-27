@@ -146,6 +146,9 @@ var CloudLightning []byte
 //go:embed cloud_aerger.png
 var CloudAngryPNG []byte
 
+//go:embed cloud_searching.png
+var CloudSearchingPNG []byte
+
 //go:embed cloud_aerger2grinse.png
 var CloudAngryToGrinPNG []byte
 
