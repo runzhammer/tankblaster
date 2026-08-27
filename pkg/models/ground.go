@@ -258,6 +258,45 @@ func (g Ground) ClearRect(area image.Rectangle) image.Rectangle {
 	return image.Rect(minX, minY, maxX+1, maxY+1)
 }
 
+func (g Ground) ClearRects(areas []image.Rectangle) image.Rectangle {
+	if g.pixels == nil || g.Image == nil || len(areas) == 0 {
+		return image.Rectangle{}
+	}
+
+	bounds := g.pixels.Bounds()
+	cleared := image.Rectangle{}
+	for _, area := range areas {
+		if area.Empty() {
+			continue
+		}
+		minX := maxInt(0, area.Min.X)
+		maxX := minInt(bounds.Dx()-1, area.Max.X-1)
+		minY := maxInt(0, area.Min.Y)
+		maxY := minInt(bounds.Dy()-1, area.Max.Y-1)
+		if minX > maxX || minY > maxY {
+			continue
+		}
+		for y := minY; y <= maxY; y++ {
+			for x := minX; x <= maxX; x++ {
+				g.pixels.SetRGBA(x, y, color.RGBA{})
+			}
+		}
+		rect := image.Rect(minX, minY, maxX+1, maxY+1)
+		if cleared.Empty() {
+			cleared = rect
+		} else {
+			cleared = cleared.Union(rect)
+		}
+	}
+	if cleared.Empty() {
+		return image.Rectangle{}
+	}
+
+	g.refreshSurfaceRange(cleared.Min.X, cleared.Max.X-1)
+	g.Image.WritePixels(g.pixels.Pix)
+	return cleared
+}
+
 func (g Ground) SettleArea(area image.Rectangle) []SandFallPixel {
 	if g.pixels == nil || area.Empty() {
 		return nil

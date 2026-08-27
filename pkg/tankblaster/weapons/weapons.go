@@ -23,6 +23,7 @@ type Weapon struct {
 	FillsWater                  bool
 	Moles                       bool
 	TripleShot                  bool
+	SmallCrumblers              bool
 }
 
 type ImpactAnimationStyle uint8
@@ -47,6 +48,7 @@ func List() []Weapon {
 		Water(),
 		Moles(),
 		MFSTriple(),
+		SmallCrumblers(),
 	}
 }
 

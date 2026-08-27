@@ -97,6 +97,17 @@ const (
 	moleStarLineCount         = 36
 	moleStarRadius            = 110.25
 	moleStarLineThickness     = 2.0
+	smallCrumblerCount        = 50
+	smallCrumblerWidth        = 2
+	smallCrumblerHeight       = 3
+	smallCrumblerMaxDepth     = 200.0
+	smallCrumblerFreezeFrames = 12
+	smallCrumblerMinSpeed     = 1.6
+	smallCrumblerMaxSpeed     = 3.2
+	smallCrumblerStartWidth   = 50.0
+	smallCrumblerFunnelSpread = 210.0
+	smallCrumblerJitter       = 3.8
+	smallCrumblerWobble       = 2.2
 )
 
 type damageCause uint8
@@ -337,6 +348,25 @@ type moleStarLine struct {
 	length float64
 }
 
+type smallCrumblerImpact struct {
+	start     engine.Vec
+	crumbs    []smallCrumb
+	age       int
+	frozen    bool
+	freezeAge int
+	editArea  image.Rectangle
+}
+
+type smallCrumb struct {
+	pos      engine.Vec
+	fan      float64
+	speed    float64
+	drift    float64
+	wobble   float64
+	stopped  bool
+	lastArea image.Rectangle
+}
+
 type sandFallAnimation struct {
 	pixels   []models.SandFallPixel
 	age      int
@@ -448,6 +478,7 @@ type GameScene struct {
 	waterBlubbers        []*waterBlubberEffect
 	waterBlotches        []*waterSurfaceImpact
 	moleImpacts          []*moleImpact
+	smallCrumblerImpacts []*smallCrumblerImpact
 	sandFalls            []sandFallAnimation
 	palmLeafFalls        []palmLeafFall
 	cloudSearchEffects   []*cloudSearchEffect
@@ -685,6 +716,7 @@ func (s *GameScene) startRound() {
 	s.waterBlubbers = nil
 	s.waterBlotches = nil
 	s.moleImpacts = nil
+	s.smallCrumblerImpacts = nil
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
@@ -1478,6 +1510,7 @@ func (s *GameScene) Update() error {
 		s.updateWaterBlubbers()
 		s.updateWaterBlotches()
 		s.updateMoleImpacts()
+		s.updateSmallCrumblerImpacts()
 		s.updateSandFalls()
 		s.updatePalms()
 		s.updatePalmLeafFalls()
@@ -1784,6 +1817,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawWaterBlubbers(screen, &camera)
 	s.drawWaterBlotches(screen, &camera)
 	s.drawMoleImpacts(screen, &camera)
+	s.drawSmallCrumblerImpacts(screen, &camera)
 	s.drawPalmEffects(screen, &camera)
 	s.drawPalmLeafFalls(screen, &camera)
 	s.drawPalmRevenge(screen, &camera)
@@ -2752,9 +2786,15 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
-	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
+	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
+	}
+
+	if weapon.SmallCrumblers {
+		s.reportComputerShot(p.pos, -1, false)
+		s.startSmallCrumblerImpact(p.pos)
+		return true
 	}
 
 	if weapon.Moles {
@@ -2969,6 +3009,33 @@ func (s *GameScene) startMoleImpact(pos engine.Vec) {
 	s.delayTurnAdvance(moleTunnelFrames + moleStarFrames + s.impactPauseFrames())
 }
 
+func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec) {
+	crumbs := make([]smallCrumb, smallCrumblerCount)
+	for i := range crumbs {
+		fan := 0.0
+		if len(crumbs) > 1 {
+			fan = float64(i)/float64(len(crumbs)-1)*2 - 1
+		}
+		startX := pos.X + (s.rng.Float64()-0.5)*smallCrumblerStartWidth
+		startX = math.Max(0, math.Min(s.worldWidth-1, startX))
+		crumbs[i] = smallCrumb{
+			pos:    engine.V(startX, pos.Y),
+			fan:    fan,
+			speed:  smallCrumblerMinSpeed + s.rng.Float64()*(smallCrumblerMaxSpeed-smallCrumblerMinSpeed),
+			drift:  fan*0.34 + (s.rng.Float64()-0.5)*0.7,
+			wobble: s.rng.Float64() * math.Pi * 2,
+		}
+	}
+
+	impact := &smallCrumblerImpact{
+		start:  pos,
+		crumbs: crumbs,
+	}
+	impact.editArea = s.ground.ClearRects(s.smallCrumblerAreas(impact))
+	s.smallCrumblerImpacts = append(s.smallCrumblerImpacts, impact)
+	s.delayTurnAdvance(int(math.Ceil(smallCrumblerMaxDepth/smallCrumblerMinSpeed)) + smallCrumblerFreezeFrames + sandFallFrames + s.impactPauseFrames())
+}
+
 func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 	if len(s.waterBlotchAnimation.frames) == 0 {
 		s.delayTurnAdvance(s.impactPauseFrames())
@@ -3037,6 +3104,95 @@ func (s *GameScene) updateMoleStar(impact *moleImpact) {
 		area := s.ground.ClearLine(impact.pos.X, impact.pos.Y, end.X, end.Y, moleStarLineThickness)
 		impact.editArea = unionRect(impact.editArea, area)
 	}
+}
+
+func (s *GameScene) updateSmallCrumblerImpacts() {
+	if len(s.smallCrumblerImpacts) == 0 {
+		return
+	}
+	active := s.smallCrumblerImpacts[:0]
+	for _, impact := range s.smallCrumblerImpacts {
+		if impact == nil {
+			continue
+		}
+		if impact.frozen {
+			impact.freezeAge++
+			if impact.freezeAge >= smallCrumblerFreezeFrames {
+				if falls := s.ground.SettleArea(impact.editArea); len(falls) > 0 {
+					s.sandFalls = append(s.sandFalls, sandFallAnimation{
+						pixels:   falls,
+						duration: sandFallFrames,
+					})
+				}
+				s.dropUnsupportedTanks()
+				continue
+			}
+			active = append(active, impact)
+			continue
+		}
+
+		impact.age++
+		reachedEnd := false
+		for i := range impact.crumbs {
+			crumb := &impact.crumbs[i]
+			if crumb.stopped {
+				continue
+			}
+			depth := math.Max(0, crumb.pos.Y-impact.start.Y)
+			spread := math.Max(2, smallCrumblerFunnelSpread*math.Min(1, depth/smallCrumblerMaxDepth))
+			crumb.pos.Y += crumb.speed
+			targetX := impact.start.X + crumb.fan*spread
+			randomStep := (s.rng.Float64()*2 - 1) * smallCrumblerJitter
+			wobble := math.Sin(float64(impact.age)*1.35+crumb.wobble) * smallCrumblerWobble
+			crumb.pos.X += (targetX-crumb.pos.X)*0.07 + crumb.drift + wobble + randomStep
+			crumb.pos.X = math.Max(impact.start.X-spread, math.Min(impact.start.X+spread, crumb.pos.X))
+			crumb.pos.X = math.Max(0, math.Min(s.worldWidth-1, crumb.pos.X))
+			crumb.lastArea = smallCrumblerArea(crumb.pos)
+
+			if crumb.pos.Y-impact.start.Y >= smallCrumblerMaxDepth || crumb.pos.Y >= s.battlefieldHeight()-2 {
+				crumb.stopped = true
+				reachedEnd = true
+			}
+		}
+
+		if area := s.ground.ClearRects(s.smallCrumblerAreas(impact)); !area.Empty() {
+			impact.editArea = unionRect(impact.editArea, area)
+		}
+		if reachedEnd {
+			impact.frozen = true
+			impact.freezeAge = 0
+			for i := range impact.crumbs {
+				impact.crumbs[i].stopped = true
+			}
+		}
+		active = append(active, impact)
+	}
+	s.smallCrumblerImpacts = active
+}
+
+func (s *GameScene) smallCrumblerAreas(impact *smallCrumblerImpact) []image.Rectangle {
+	if impact == nil {
+		return nil
+	}
+	areas := make([]image.Rectangle, 0, len(impact.crumbs))
+	for i := range impact.crumbs {
+		crumb := &impact.crumbs[i]
+		if crumb.stopped && !impact.frozen {
+			continue
+		}
+		area := crumb.lastArea
+		if area.Empty() {
+			area = smallCrumblerArea(crumb.pos)
+		}
+		areas = append(areas, area)
+	}
+	return areas
+}
+
+func smallCrumblerArea(pos engine.Vec) image.Rectangle {
+	x := int(math.Round(pos.X))
+	y := int(math.Round(pos.Y))
+	return image.Rect(x, y, x+smallCrumblerWidth, y+smallCrumblerHeight)
 }
 
 func unionRect(a, b image.Rectangle) image.Rectangle {
@@ -4402,6 +4558,24 @@ func drawMoleArrow(screen *ebiten.Image, camera *ebiten.GeoM, pos engine.Vec) {
 		{DstX: x + width/2, DstY: y - height*0.45, SrcX: 0, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 	}
 	screen.DrawTriangles(vertices, []uint16{0, 1, 2}, solidWhiteImage, nil)
+}
+
+func (s *GameScene) drawSmallCrumblerImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
+	crumbColor := color.RGBA{R: 226, G: 185, B: 103, A: 255}
+	for _, impact := range s.smallCrumblerImpacts {
+		if impact == nil {
+			continue
+		}
+		for i := range impact.crumbs {
+			crumb := &impact.crumbs[i]
+			projected := crumb.pos.Project(camera)
+			drawFilledRect(
+				screen,
+				image.Rect(int(projected.X), int(projected.Y), int(projected.X)+smallCrumblerWidth, int(projected.Y)+smallCrumblerHeight),
+				crumbColor,
+			)
+		}
+	}
 }
 
 func (s *GameScene) drawWaterFills(screen *ebiten.Image, camera *ebiten.GeoM) {
