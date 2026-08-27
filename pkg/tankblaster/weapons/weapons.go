@@ -25,6 +25,8 @@ type Weapon struct {
 	TripleShot                  bool
 	SmallCrumblers              bool
 	LargeCrumblers              bool
+	SurpriseEgg                 bool
+	Utility                     bool
 }
 
 type ImpactAnimationStyle uint8
@@ -51,6 +53,37 @@ func List() []Weapon {
 		MFSTriple(),
 		SmallCrumblers(),
 		LargeCrumblers(),
+		SurpriseEgg(),
+		FutureWeapon("Moskitos"),
+		FutureWeapon("Schockwelle"),
+		FutureWeapon("Luftschlag"),
+		FutureWeapon("Splitterbombe"),
+		FutureWeapon("Laser"),
+		UtilityItem("Scroll-o-Mat"),
+		UtilityItem("Energieschild"),
+		UtilityItem("MFS Verstärker"),
+		UtilityItem("XM-V12 Panzer"),
+		UtilityItem("Diesel (F54)"),
+	}
+}
+
+func FutureWeapon(name string) Weapon {
+	return Weapon{
+		Name:            name,
+		Color:           whiteProjectileColor(),
+		Damage:          DirectHitDamage,
+		Unlocked:        true,
+		RoundProjectile: true,
+		DamagesTerrain:  true,
+		ProjectileScale: grenadeScale,
+	}
+}
+
+func UtilityItem(name string) Weapon {
+	return Weapon{
+		Name:     name,
+		Unlocked: true,
+		Utility:  true,
 	}
 }
 

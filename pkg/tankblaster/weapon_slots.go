@@ -7,6 +7,9 @@ func gameWeapons() []weaponspkg.Weapon {
 }
 
 func (s *GameScene) weaponForProjectile(p *projectile) weaponspkg.Weapon {
+	if p != nil && p.hasEffectiveWeapon {
+		return p.effectiveWeapon
+	}
 	weapons := gameWeapons()
 	if p != nil && p.weaponIndex == 0 {
 		return weapons[0]
@@ -18,6 +21,21 @@ func (s *GameScene) weaponForProjectile(p *projectile) weaponspkg.Weapon {
 		}
 	}
 	return weapons[1]
+}
+
+func (s *GameScene) randomSurpriseEggWeapon() weaponspkg.Weapon {
+	weapons := gameWeapons()
+	candidates := make([]weaponspkg.Weapon, 0, len(weapons))
+	for index, weapon := range weapons {
+		if index == 0 || weapon.SurpriseEgg || weapon.Utility {
+			continue
+		}
+		candidates = append(candidates, weapon)
+	}
+	if len(candidates) == 0 {
+		return weapons[1]
+	}
+	return candidates[s.rng.Intn(len(candidates))]
 }
 
 func projectileRadiusForWeapon(weapon weaponspkg.Weapon) float64 {

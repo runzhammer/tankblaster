@@ -261,15 +261,17 @@ type computerShotRecord struct {
 }
 
 type projectile struct {
-	pos            engine.Vec
-	prev           engine.Vec
-	velocity       engine.Vec
-	weaponIndex    int
-	trail          []engine.Vec
-	shooter        *battleTank
-	launchRot      float64
-	angeredClouds  map[*battleCloud]bool
-	searchingCloud *battleCloud
+	pos                engine.Vec
+	prev               engine.Vec
+	velocity           engine.Vec
+	weaponIndex        int
+	effectiveWeapon    weaponspkg.Weapon
+	hasEffectiveWeapon bool
+	trail              []engine.Vec
+	shooter            *battleTank
+	launchRot          float64
+	angeredClouds      map[*battleCloud]bool
+	searchingCloud     *battleCloud
 }
 
 type projectileReentryAnimation struct {
@@ -2461,6 +2463,11 @@ func (s *GameScene) fireActiveWeapon() {
 	muzzle := s.cannonMuzzle(tank.cannon)
 	speed := 1.4 + float64(tank.shotStrength)*0.32
 	weapon := s.weaponForSlot(tank.selectedWeapon)
+	hasEffectiveWeapon := false
+	if weapon.SurpriseEgg {
+		weapon = s.randomSurpriseEggWeapon()
+		hasEffectiveWeapon = true
+	}
 	angles := []float64{tank.cannon.Rot}
 	if weapon.TripleShot {
 		offset := 5 * math.Pi / 180
@@ -2469,13 +2476,15 @@ func (s *GameScene) fireActiveWeapon() {
 	projectiles := make([]*projectile, 0, len(angles))
 	for _, angle := range angles {
 		projectiles = append(projectiles, &projectile{
-			pos:         *muzzle,
-			prev:        *muzzle,
-			velocity:    engine.V(speed, 0).Rotated(angle),
-			weaponIndex: tank.selectedWeapon,
-			shooter:     tank,
-			launchRot:   angle,
-			trail:       []engine.Vec{*muzzle},
+			pos:                *muzzle,
+			prev:               *muzzle,
+			velocity:           engine.V(speed, 0).Rotated(angle),
+			weaponIndex:        tank.selectedWeapon,
+			effectiveWeapon:    weapon,
+			hasEffectiveWeapon: hasEffectiveWeapon,
+			shooter:            tank,
+			launchRot:          angle,
+			trail:              []engine.Vec{*muzzle},
 		})
 	}
 	s.setProjectiles(projectiles)
