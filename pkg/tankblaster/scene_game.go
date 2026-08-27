@@ -3510,7 +3510,7 @@ func (s *GameScene) damagePalmRevengeTank(event *palmRevengeEvent) {
 	tank.power = maxInt(0, tank.power-100)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
-		s.awardZeroPowerScore(tank, nil, damageCauseDirect)
+		s.addScore(tank.playerIndex, -3)
 		tank.zeroPowerShown = true
 	}
 }
