@@ -58,6 +58,8 @@ const gameHUDHeight = 132
 
 const weaponbarSlotCount = 20
 
+const reentryAnimationFrames = 170
+
 const (
 	projectileRadius           = 4
 	impactRadiusMultiplier     = 4
@@ -230,6 +232,17 @@ type projectile struct {
 	velocity    engine.Vec
 	weaponIndex int
 	trail       []engine.Vec
+	shooter     *battleTank
+	launchRot   float64
+}
+
+type projectileReentryAnimation struct {
+	projectile *projectile
+	shooter    *battleTank
+	age        int
+	duration   int
+	direction  int
+	cannonRot  float64
 }
 
 type impactAnimation struct {
@@ -384,6 +397,7 @@ type GameScene struct {
 	cloudGrinAnimation    spriteAnimation
 	lightningImage        *ebiten.Image
 	reentrySymbol         *ebiten.Image
+	reentryEarth          *ebiten.Image
 	humanPortrait         *ebiten.Image
 	computerPortraits     map[computerplayers.ID]*ebiten.Image
 	zeroPowerSmoke        spriteAnimation
@@ -410,6 +424,7 @@ type GameScene struct {
 	wind                 int
 	windDirection        int
 	projectileReentry    bool
+	reentryAnimation     *projectileReentryAnimation
 	projectile           *projectile
 	projectiles          []*projectile
 	impacts              []impactAnimation
@@ -464,6 +479,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		showPlayerNames:   false,
 		playerInfoIndex:   -1,
 		reentrySymbol:     mustImageFromPNG(r.SymbolReentry),
+		reentryEarth:      mustImageFromPNG(r.EarthReentry),
 		humanPortrait:     mustImageFromPNG(r.PlayerHuman),
 		computerPortraits: map[computerplayers.ID]*ebiten.Image{
 			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
@@ -600,6 +616,7 @@ func (s *GameScene) startRound() {
 	s.activePlayerIndex = -1
 	s.projectile = nil
 	s.projectiles = nil
+	s.reentryAnimation = nil
 	s.impacts = nil
 	s.sandFalls = nil
 	s.palmLeafFalls = nil
@@ -1613,6 +1630,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawPlayerNames(screen, &camera)
 	s.drawScoreTable(screen)
 	s.drawRoundTransitionBanner(screen)
+	s.drawProjectileReentryAnimation(screen)
 	s.drawGameDialogs(screen)
 
 	switch s.phase {
@@ -2221,6 +2239,8 @@ func (s *GameScene) fireActiveWeapon() {
 			prev:        *muzzle,
 			velocity:    engine.V(speed, 0).Rotated(angle),
 			weaponIndex: tank.selectedWeapon,
+			shooter:     tank,
+			launchRot:   angle,
 			trail:       []engine.Vec{*muzzle},
 		})
 	}
@@ -2267,6 +2287,9 @@ func (s *GameScene) updateProjectile() {
 	if !s.projectilesActive() {
 		return
 	}
+	if s.updateProjectileReentryAnimation() {
+		return
+	}
 
 	const gravity = 0.16
 	windAcceleration := float64(s.windDirection*s.wind) * 0.00065
@@ -2295,9 +2318,11 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	if len(p.trail) > 260 {
 		p.trail = p.trail[len(p.trail)-260:]
 	}
-	if !s.handleProjectileWorldEdge(p) {
+	if alive, paused := s.handleProjectileWorldEdge(p); !alive {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
+	} else if paused {
+		return true
 	}
 
 	if p.pos.X >= 0 && p.pos.X <= s.worldWidth {
@@ -2369,14 +2394,18 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	return true
 }
 
-func (s *GameScene) handleProjectileWorldEdge(p *projectile) bool {
+func (s *GameScene) handleProjectileWorldEdge(p *projectile) (bool, bool) {
 	if p == nil || s.worldWidth <= 0 || (p.pos.X >= 0 && p.pos.X <= s.worldWidth) {
-		return true
+		return true, false
 	}
 	if !s.projectileReentry {
-		return false
+		return false, false
 	}
 
+	direction := 1
+	if p.pos.X > s.worldWidth {
+		direction = -1
+	}
 	for p.pos.X < 0 {
 		p.pos.X += s.worldWidth
 	}
@@ -2385,6 +2414,24 @@ func (s *GameScene) handleProjectileWorldEdge(p *projectile) bool {
 	}
 	p.prev = p.pos
 	p.trail = []engine.Vec{p.pos}
+	s.reentryAnimation = &projectileReentryAnimation{
+		projectile: p,
+		shooter:    p.shooter,
+		duration:   reentryAnimationFrames,
+		direction:  direction,
+		cannonRot:  p.launchRot,
+	}
+	return true, true
+}
+
+func (s *GameScene) updateProjectileReentryAnimation() bool {
+	if s.reentryAnimation == nil {
+		return false
+	}
+	s.reentryAnimation.age++
+	if s.reentryAnimation.age >= s.reentryAnimation.duration {
+		s.reentryAnimation = nil
+	}
 	return true
 }
 
@@ -3763,6 +3810,120 @@ func (s *GameScene) drawSingleProjectile(screen *ebiten.Image, camera *ebiten.Ge
 		return
 	}
 	drawFilledRect(screen, image.Rect(int(projected.X-radius), int(projected.Y-radius), int(projected.X+radius), int(projected.Y+radius)), c)
+}
+
+func (s *GameScene) drawProjectileReentryAnimation(screen *ebiten.Image) {
+	anim := s.reentryAnimation
+	if anim == nil || anim.duration <= 0 || s.reentryEarth == nil {
+		return
+	}
+
+	screen.Fill(colornames.Black)
+	screenBounds := screen.Bounds()
+	screenW := float64(screenBounds.Dx())
+	screenH := float64(screenBounds.Dy())
+	center := engine.V(screenW/2, screenH/2)
+	earthSize := math.Min(screenW, screenH) * 0.42
+	earthRect := image.Rect(
+		int(center.X-earthSize/2),
+		int(center.Y-earthSize/2),
+		int(center.X+earthSize/2),
+		int(center.Y+earthSize/2),
+	)
+
+	progress := float64(anim.age) / math.Max(1, float64(anim.duration-1))
+	progress = math.Max(0, math.Min(1, progress))
+	x, y, projectileBehindEarth := reentryProjectilePosition(center, earthSize, anim.direction, progress)
+	if progress >= 0.95 {
+		drawScaledImage(screen, s.reentryEarth, earthRect)
+		s.drawReentryTank(screen, anim, center, earthSize)
+		return
+	}
+	if projectileBehindEarth {
+		s.drawReentryProjectile(screen, anim, x, y, progress, earthSize)
+	}
+	drawScaledImage(screen, s.reentryEarth, earthRect)
+	s.drawReentryTank(screen, anim, center, earthSize)
+	if !projectileBehindEarth {
+		s.drawReentryProjectile(screen, anim, x, y, progress, earthSize)
+	}
+}
+
+func reentryProjectilePosition(center engine.Vec, earthSize float64, direction int, progress float64) (float64, float64, bool) {
+	if direction == 0 {
+		direction = 1
+	}
+	radiusX := earthSize * 0.58
+	startSide := -1.0
+	if direction < 0 {
+		startSide = 1
+	}
+	endSide := -startSide
+
+	if progress < 0.08 {
+		t := progress / 0.08
+		t = t * t * (3 - 2*t)
+		return center.X + startSide*radiusX*t, center.Y, false
+	}
+
+	if progress < 0.58 {
+		t := (progress - 0.08) / 0.50
+		return center.X + (startSide+(endSide-startSide)*t)*radiusX, center.Y, true
+	}
+
+	t := (progress - 0.58) / 0.37
+	t = math.Max(0, math.Min(1, t))
+	t = t * t * (3 - 2*t)
+	stopOffset := endSide * radiusX * 0.16
+	return center.X + endSide*radiusX + (stopOffset-endSide*radiusX)*t, center.Y, false
+}
+
+func (s *GameScene) drawReentryProjectile(screen *ebiten.Image, anim *projectileReentryAnimation, x, y, progress, earthSize float64) {
+	if anim == nil || anim.projectile == nil {
+		return
+	}
+	weapon := s.weaponForProjectile(anim.projectile)
+	radius := projectileRadiusForWeapon(weapon) * math.Max(1.1, earthSize/230)
+	alpha := uint8(255)
+	if progress > 0.18 && progress < 0.82 {
+		alpha = 185
+	}
+	c := color.RGBA{R: weapon.Color.R, G: weapon.Color.G, B: weapon.Color.B, A: alpha}
+	if weapon.RoundProjectile {
+		vector.DrawFilledCircle(screen, float32(x), float32(y), float32(radius), c, true)
+		return
+	}
+	drawFilledRect(screen, image.Rect(int(x-radius), int(y-radius), int(x+radius), int(y+radius)), c)
+}
+
+func (s *GameScene) drawReentryTank(screen *ebiten.Image, anim *projectileReentryAnimation, center engine.Vec, earthSize float64) {
+	if anim == nil || anim.shooter == nil || anim.shooter.body == nil {
+		return
+	}
+	body := anim.shooter.body
+	scale := math.Max(2.2, earthSize/110)
+	bodyW := body.Size.X * scale
+	bodyH := body.Size.Y * scale
+	bodyPos := engine.V(center.X-bodyW/2, center.Y-bodyH/2)
+	drawScaledImage(screen, body.Image, image.Rect(int(bodyPos.X), int(bodyPos.Y), int(bodyPos.X+bodyW), int(bodyPos.Y+bodyH)))
+
+	if anim.shooter.cannon == nil || anim.shooter.cannon.Drawable == nil {
+		return
+	}
+	cannon := *anim.shooter.cannon
+	mount := engine.V(body.Size.X/2, body.Size.Y*0.28)
+	anchor := engine.V(cannon.Size.X/2, cannon.Size.Y/2)
+	if cannon.RotAnchor != nil {
+		mount = models.SmallTankCannonMount
+		anchor = *cannon.RotAnchor
+	}
+	cannon.Pos = &engine.Vec{
+		X: bodyPos.X + mount.X*scale - anchor.X*scale,
+		Y: bodyPos.Y + mount.Y*scale - anchor.Y*scale,
+	}
+	cannon.Size = &engine.Vec{X: anim.shooter.cannon.Size.X * scale, Y: anim.shooter.cannon.Size.Y * scale}
+	cannon.Rot = anim.cannonRot
+	cannon.Draw(nil, screen)
 }
 
 func (s *GameScene) drawImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {

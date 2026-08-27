@@ -98,6 +98,9 @@ var WeaponbarOutOfStock []byte
 //go:embed symbol_reentry.png
 var SymbolReentry []byte
 
+//go:embed earth_reentry.png
+var EarthReentry []byte
+
 //go:embed palm.png
 var Palm []byte
 

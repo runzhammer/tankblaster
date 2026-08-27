@@ -22,7 +22,7 @@ gameplay:
     min_speed: 0.05
     max_speed: 0.13
 debug:
-  enabled: false
+  enabled: true
   mode: two_humans
   start_scene: game
   start_shop: false
