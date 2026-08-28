@@ -129,6 +129,13 @@ const (
 	mosquitoDiveSpeed         = 6.0
 	mosquitoAttachedFrames    = 60
 	mosquitoColorDelayFrames  = 30
+	shockwavePulseFrames      = 30
+	shockwavePulseCount       = 4
+	shockwaveLineWidth        = 6.0
+	shockwaveInnerLineWidth   = 2.0
+	shockwaveDamageOuterExtra = 200.0
+	shockwaveCameraOrbit      = 34.0
+	shockwaveCameraAngular    = 0.82
 )
 
 type damageCause uint8
@@ -431,6 +438,13 @@ type moskitoEffect struct {
 	finished bool
 }
 
+type shockwaveImpact struct {
+	pos      engine.Vec
+	radius   float64
+	age      int
+	duration int
+}
+
 type sandFallAnimation struct {
 	pixels   []models.SandFallPixel
 	age      int
@@ -546,6 +560,7 @@ type GameScene struct {
 	moleImpacts          []*moleImpact
 	smallCrumblerImpacts []*smallCrumblerImpact
 	moskitoEffects       []*moskitoEffect
+	shockwaveImpacts     []*shockwaveImpact
 	sandFalls            []sandFallAnimation
 	palmLeafFalls        []palmLeafFall
 	cloudSearchEffects   []*cloudSearchEffect
@@ -798,6 +813,7 @@ func (s *GameScene) startRound() {
 	s.moleImpacts = nil
 	s.smallCrumblerImpacts = nil
 	s.moskitoEffects = nil
+	s.shockwaveImpacts = nil
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
@@ -1591,6 +1607,7 @@ func (s *GameScene) Update() error {
 		s.updateWaterBlubbers()
 		s.updateWaterBlotches()
 		s.updateMoskitoEffects()
+		s.updateShockwaveImpacts()
 		s.updateMoleImpacts()
 		s.updateSmallCrumblerImpacts()
 		s.updateSandFalls()
@@ -1901,6 +1918,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawWaterBlubbers(screen, &camera)
 	s.drawWaterBlotches(screen, &camera)
 	s.drawMoskitoEffects(screen, &camera)
+	s.drawShockwaveImpacts(screen, &camera)
 	s.drawMoleImpacts(screen, &camera)
 	s.drawSmallCrumblerImpacts(screen, &camera)
 	s.drawPalmEffects(screen, &camera)
@@ -2831,7 +2849,7 @@ func (s *GameScene) projectilesActive() bool {
 }
 
 func (s *GameScene) turnAdvanceBlocked() bool {
-	return len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0
+	return len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0 || len(s.shockwaveImpacts) > 0
 }
 
 func (s *GameScene) activePlayerCanAdjustShot() bool {
@@ -2920,9 +2938,15 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
-	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && !weapon.Mosquitos && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
+	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && !weapon.Mosquitos && !weapon.Shockwave && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
+	}
+
+	if weapon.Shockwave {
+		s.reportComputerShot(p.pos, -1, false)
+		s.startShockwaveImpact(p.pos, weapon)
+		return true
 	}
 
 	if weapon.Mosquitos {
@@ -3197,6 +3221,61 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 	s.waterBlotchFocus = effect
 	s.updateWaterBlotchCamera()
 	s.delayTurnAdvance(effect.duration + secondsToFrames(0.5))
+}
+
+func (s *GameScene) startShockwaveImpact(pos engine.Vec, weapon weaponspkg.Weapon) {
+	radius := impactRadiusForWeapon(weapon)
+	duration := shockwavePulseFrames * shockwavePulseCount
+	effect := &shockwaveImpact{
+		pos:      pos,
+		radius:   radius,
+		duration: duration,
+	}
+	s.shockwaveImpacts = append(s.shockwaveImpacts, effect)
+	s.damageTanksInShockwave(pos, radius)
+	s.delayTurnAdvance(duration + s.impactPauseFrames())
+}
+
+func (s *GameScene) updateShockwaveImpacts() {
+	if len(s.shockwaveImpacts) == 0 {
+		return
+	}
+	active := s.shockwaveImpacts[:0]
+	for _, impact := range s.shockwaveImpacts {
+		if impact == nil {
+			continue
+		}
+		impact.age++
+		if impact.age < impact.duration {
+			active = append(active, impact)
+		}
+	}
+	s.shockwaveImpacts = active
+}
+
+func (s *GameScene) damageTanksInShockwave(center engine.Vec, visibleRadius float64) {
+	if visibleRadius <= 0 {
+		return
+	}
+	fullDamageRadius := visibleRadius * 0.5
+	outerRadius := visibleRadius + shockwaveDamageOuterExtra
+	falloffRange := math.Max(1, outerRadius-fullDamageRadius)
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 {
+			continue
+		}
+		distance := distancePointToRect(center, tank.body.Bounds().ScaledAtCenter(0.78))
+		if distance > outerRadius {
+			continue
+		}
+		damage := 100
+		if distance > fullDamageRadius {
+			t := (distance - fullDamageRadius) / falloffRange
+			damage = int(math.Round(100 - 80*t))
+			damage = maxInt(20, minInt(100, damage))
+		}
+		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
+	}
 }
 
 func (s *GameScene) startMoskitoImpact(pos engine.Vec, shooter *battleTank) {
@@ -4161,6 +4240,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 	}
 	s.turnAdvanceDelay--
 	if s.turnAdvanceDelay > 0 {
+		if s.updateShockwaveCamera() {
+			return
+		}
 		if s.updateMoskitoCamera() {
 			return
 		}
@@ -4201,6 +4283,9 @@ func (s *GameScene) removePendingPalmRevengeTank() {
 }
 
 func (s *GameScene) updateBattleCamera() {
+	if s.updateShockwaveCamera() {
+		return
+	}
 	if s.updateMoskitoCamera() {
 		return
 	}
@@ -4314,6 +4399,22 @@ func (s *GameScene) updateWaterCamera() bool {
 	s.cameraGoalY = 0
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
 	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
+	return true
+}
+
+func (s *GameScene) updateShockwaveCamera() bool {
+	if len(s.shockwaveImpacts) == 0 || s.shockwaveImpacts[0] == nil {
+		return false
+	}
+	impact := s.shockwaveImpacts[0]
+	angle := float64(impact.age) * shockwaveCameraAngular
+	screenWidth := core.Config().Screen.Width
+	baseX := s.cameraTargetForWorldX(impact.pos.X)
+	baseY := s.cameraTargetForWorldY(impact.pos.Y) - shockwaveCameraOrbit
+	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, baseX+math.Cos(angle)*shockwaveCameraOrbit))
+	s.cameraGoalY = math.Max(-s.skyExtraHeight(), math.Min(0, baseY+math.Sin(angle)*shockwaveCameraOrbit))
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.82, 8.0)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.82, 8.0)
 	return true
 }
 
@@ -4982,6 +5083,26 @@ func (s *GameScene) drawMoskitoEffects(screen *ebiten.Image, camera *ebiten.GeoM
 		if effect.phase == moskitoPhaseQuestion && len(s.questionAnimation.frames) > 0 {
 			drawAnimationCentered(screen, camera, s.questionAnimation, *effect.pos.Add(engine.V(4, -28)), effect.age)
 		}
+	}
+}
+
+func (s *GameScene) drawShockwaveImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
+	yellow := color.RGBA{R: 255, G: 235, B: 0, A: 245}
+	black := color.RGBA{R: 0, G: 0, B: 0, A: 245}
+	for _, impact := range s.shockwaveImpacts {
+		if impact == nil || impact.radius <= 0 || shockwavePulseFrames <= 0 {
+			continue
+		}
+		pulseAge := impact.age % shockwavePulseFrames
+		progress := easeOut(float64(pulseAge) / float64(shockwavePulseFrames-1))
+		radius := impact.radius * progress
+		if radius <= 0 {
+			continue
+		}
+		projected := impact.pos.Project(camera)
+		vector.StrokeCircle(screen, float32(projected.X), float32(projected.Y), float32(radius), float32(shockwaveLineWidth), yellow, true)
+		innerRadius := math.Max(0, radius-shockwaveLineWidth/2)
+		vector.StrokeCircle(screen, float32(projected.X), float32(projected.Y), float32(innerRadius), float32(shockwaveInnerLineWidth), black, true)
 	}
 }
 
