@@ -30,6 +30,7 @@ type Weapon struct {
 	Shockwave                   bool
 	AirStrike                   bool
 	SplitterBomb                bool
+	Laser                       bool
 	Utility                     bool
 }
 
@@ -62,7 +63,7 @@ func List() []Weapon {
 		Shockwave(),
 		AirStrike(),
 		SplitterBomb(),
-		FutureWeapon("Laser"),
+		Laser(),
 		UtilityItem("Scroll-o-Mat"),
 		UtilityItem("Energieschild"),
 		UtilityItem("MFS Verstärker"),

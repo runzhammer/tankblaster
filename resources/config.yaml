@@ -23,7 +23,7 @@ gameplay:
     max_speed: 0.13
 debug:
   enabled: true
-  mode: two_humans
+  # mode: two_humans
   start_scene: game
   start_shop: false
   game:
@@ -43,3 +43,35 @@ debug:
           g: 70
           b: 20
           a: 255
+      # - kind: computer
+      #   name: "F. Merz"
+      #   id: 0
+      #   color:
+      #     r: 230
+      #     g: 20
+      #     b: 70
+      #     a: 255
+      # - kind: computer
+      #   name: "B. Bartislartfast"
+      #   id: 0
+      #   color:
+      #     r: 200
+      #     g: 90
+      #     b: 45
+      #     a: 255
+      # - kind: computer
+      #   name: "C. Koch"
+      #   id: 0
+      #   color:
+      #     r: 230
+      #     g: 34
+      #     b: 45
+      #     a: 255
+      # - kind: computer
+      #   name: "D. Dödel"
+      #   id: 0
+      #   color:
+      #     r: 10
+      #     g: 84
+      #     b: 45
+      #     a: 255

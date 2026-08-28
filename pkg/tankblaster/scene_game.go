@@ -146,6 +146,11 @@ const (
 	airStrikeImpactScale      = 1.5
 	splitterBombFragmentCount = 9
 	splitterBombSpreadWidth   = 300.0
+	laserHoldFrames           = 60
+	laserDrillSpeed           = 4.0
+	laserLineThickness        = 2.0
+	laserSmokeSpacing         = 12.0
+	laserMaxSmokeCount        = 3
 )
 
 type damageCause uint8
@@ -472,6 +477,28 @@ type airStrikeBomb struct {
 	impacted bool
 }
 
+type laserEffect struct {
+	start       engine.Vec
+	end         engine.Vec
+	tip         engine.Vec
+	dir         engine.Vec
+	maxDistance float64
+	age         int
+	duration    int
+	traveling   bool
+	drilling    bool
+	finished    bool
+	settled     bool
+	editArea    image.Rectangle
+	smokes      []laserSmoke
+	smokeFrom   engine.Vec
+}
+
+type laserSmoke struct {
+	pos engine.Vec
+	age int
+}
+
 type sandFallAnimation struct {
 	pixels   []models.SandFallPixel
 	age      int
@@ -559,6 +586,7 @@ type GameScene struct {
 	questionAnimation       spriteAnimation
 	blinkBojeAnimation      spriteAnimation
 	bulletBombImage         *ebiten.Image
+	laserSmokeAnimation     spriteAnimation
 	clouds                  []*battleCloud
 	cloudAssets             []cloudAsset
 
@@ -591,6 +619,7 @@ type GameScene struct {
 	moskitoEffects       []*moskitoEffect
 	shockwaveImpacts     []*shockwaveImpact
 	airStrikeImpacts     []*airStrikeImpact
+	laserEffects         []*laserEffect
 	sandFalls            []sandFallAnimation
 	palmLeafFalls        []palmLeafFall
 	cloudSearchEffects   []*cloudSearchEffect
@@ -760,6 +789,11 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 	s.blinkBojeAnimation = fitAnimationDuration(blinkBojeAnimation, secondsToFrames(0.8))
 	s.bulletBombImage = mustImageFromPNG(r.BulletBombPNG)
+	laserSmokeAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.LaserSmokePNG, frameWidth: 10, delay: 12})
+	if err != nil {
+		return nil, err
+	}
+	s.laserSmokeAnimation = laserSmokeAnimation
 	s.cloudAssets = loadCloudAssets()
 	s.players = s.playersForRound()
 	s.scores = make([]int, len(s.players))
@@ -798,6 +832,7 @@ func (s *GameScene) startRound() {
 	s.activePlayerIndex = -1
 	s.projectile = nil
 	s.projectiles = nil
+	s.laserEffects = nil
 	s.reentryAnimation = nil
 	s.impacts = nil
 	s.sandFalls = nil
@@ -1646,6 +1681,7 @@ func (s *GameScene) Update() error {
 		s.updateMoskitoEffects()
 		s.updateShockwaveImpacts()
 		s.updateAirStrikeImpacts()
+		s.updateLaserEffects()
 		s.updateMoleImpacts()
 		s.updateSmallCrumblerImpacts()
 		s.updateSandFalls()
@@ -1966,6 +2002,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawSandFalls(screen, &camera)
 	s.drawZeroPowerEffects(screen, &camera)
 	s.drawProjectile(screen, &camera)
+	s.drawLaserEffects(screen, &camera)
 	s.drawGameHUD(screen)
 	s.drawPalmRevengeScreenFlash(screen)
 	s.drawDebugScrollBar(screen)
@@ -2576,6 +2613,15 @@ func (s *GameScene) fireActiveWeapon() {
 		weapon = s.randomSurpriseEggWeapon()
 		hasEffectiveWeapon = true
 	}
+	s.lastDamageSource = tank
+	if tank.player.Kind == PlayerComputer {
+		s.lastComputerShot = s.computerShotRecordFor(tank)
+	}
+	tank.computerPlan = nil
+	if weapon.Laser {
+		s.fireLaserWeapon(tank, *muzzle, tank.cannon.Rot, weapon)
+		return
+	}
 	angles := []float64{tank.cannon.Rot}
 	if weapon.TripleShot {
 		offset := 5 * math.Pi / 180
@@ -2598,11 +2644,6 @@ func (s *GameScene) fireActiveWeapon() {
 		})
 	}
 	s.setProjectiles(projectiles)
-	s.lastDamageSource = tank
-	if tank.player.Kind == PlayerComputer {
-		s.lastComputerShot = s.computerShotRecordFor(tank)
-	}
-	tank.computerPlan = nil
 }
 
 func (s *GameScene) cannonMuzzle(cannon *engine.Sprite) *engine.Vec {
@@ -2823,6 +2864,315 @@ func (s *GameScene) estimateSplitterFragmentFallFrames(pos engine.Vec, initialYV
 	return max(30, minInt(120, int(math.Round(frames))))
 }
 
+type laserHitType uint8
+
+const (
+	laserHitNone laserHitType = iota
+	laserHitTerrain
+	laserHitPalm
+	laserHitTank
+)
+
+type laserHit struct {
+	kind laserHitType
+	pos  engine.Vec
+	dist float64
+	palm *battlePalm
+	tank *battleTank
+}
+
+func (s *GameScene) fireLaserWeapon(shooter *battleTank, muzzle engine.Vec, angle float64, weapon weaponspkg.Weapon) {
+	dir := engine.V(1, 0).Rotated(angle)
+	dir = normalizedVec(dir)
+	maxDistance := s.laserMaxDistanceToWorld(muzzle, dir)
+	if maxDistance <= 0 {
+		s.delayTurnAdvance(laserHoldFrames)
+		return
+	}
+
+	hit := s.traceLaser(muzzle, dir, maxDistance)
+	end := muzzle.Add(dir.Scaled(maxDistance))
+	effect := &laserEffect{
+		start:       muzzle,
+		end:         *end,
+		tip:         *end,
+		dir:         dir,
+		maxDistance: maxDistance,
+		duration:    laserHoldFrames,
+		finished:    true,
+	}
+
+	delay := laserHoldFrames
+	switch hit.kind {
+	case laserHitTank:
+		effect.end = hit.pos
+		effect.tip = hit.pos
+		if hit.tank != nil {
+			s.damageTank(hit.tank, weapon.Damage, shooter, damageCauseDirect)
+			s.awardDirectHitCredits(hit.tank, shooter)
+			s.darkenTank(hit.tank, 0.10)
+			s.reportComputerShot(hit.pos, hit.tank.playerIndex, true)
+			delay = maxInt(delay, s.tankHitPauseFrames())
+		} else {
+			s.reportComputerShot(hit.pos, -1, false)
+		}
+	case laserHitPalm:
+		effect.end = hit.pos
+		effect.tip = hit.pos
+		s.handleLaserPalmHit(hit.palm)
+		s.reportComputerShot(hit.pos, -1, false)
+		delay = maxInt(delay, s.palmEffectDelayFrames(hit.palm))
+	case laserHitTerrain:
+		effect.end = hit.pos
+		effect.tip = hit.pos
+		effect.drilling = true
+		effect.finished = false
+		effect.smokeFrom = hit.pos
+		effect.duration = int(math.Ceil(math.Max(0, maxDistance-hit.dist)/laserDrillSpeed)) + laserHoldFrames
+		effect.smokes = append(effect.smokes, laserSmoke{pos: hit.pos})
+		s.reportComputerShot(hit.pos, -1, false)
+		delay = maxInt(delay, effect.duration)
+	default:
+		effect.end = muzzle
+		effect.tip = muzzle
+		effect.traveling = true
+		effect.finished = false
+		effect.duration = int(math.Ceil(maxDistance/laserDrillSpeed)) + laserHoldFrames
+		s.reportComputerShot(*end, -1, false)
+		delay = maxInt(delay, effect.duration)
+	}
+
+	s.laserEffects = append(s.laserEffects, effect)
+	s.delayTurnAdvance(delay)
+}
+
+func (s *GameScene) handleLaserPalmHit(palm *battlePalm) {
+	if palm == nil {
+		return
+	}
+	s.spawnPalmLeafFall(palm)
+	if palm.state == palmStateAlive {
+		s.ignitePalm(palm)
+	} else if palm.state == palmStateSkeleton || palm.state == palmStateSkeletonSmoking {
+		s.crumblePalm(palm)
+	}
+	if s.palmRevenge == nil {
+		s.focusPalmCamera(palm)
+	}
+}
+
+func (s *GameScene) updateLaserEffects() {
+	if len(s.laserEffects) == 0 {
+		return
+	}
+	active := s.laserEffects[:0]
+	for _, effect := range s.laserEffects {
+		if effect == nil {
+			continue
+		}
+		s.updateLaserEffect(effect)
+		effect.age++
+		if effect.age < effect.duration {
+			active = append(active, effect)
+		}
+	}
+	s.laserEffects = active
+}
+
+func (s *GameScene) updateLaserEffect(effect *laserEffect) {
+	if effect == nil {
+		return
+	}
+	activeSmokes := effect.smokes[:0]
+	for _, smoke := range effect.smokes {
+		smoke.age++
+		if smoke.age < s.laserSmokeAnimation.totalTicks {
+			activeSmokes = append(activeSmokes, smoke)
+		}
+	}
+	effect.smokes = activeSmokes
+	if (!effect.drilling && !effect.traveling) || effect.finished {
+		return
+	}
+	previous := effect.tip
+	next := effect.tip.Add(effect.dir.Scaled(laserDrillSpeed))
+	effect.tip = *next
+	if effect.maxDistance > 0 && effect.tip.Sub(effect.start).Len() >= effect.maxDistance {
+		effect.tip = *effect.start.Add(effect.dir.Scaled(effect.maxDistance))
+		effect.finished = true
+		effect.duration = minInt(effect.duration, effect.age+laserHoldFrames)
+	}
+	if hit := s.laserSegmentHitsPalm(previous, effect.tip); hit.palm != nil {
+		effect.tip = hit.pos
+		effect.end = hit.pos
+		effect.finished = true
+		effect.drilling = false
+		effect.traveling = false
+		effect.duration = minInt(effect.duration, effect.age+maxInt(laserHoldFrames, s.palmEffectDelayFrames(hit.palm)))
+		s.handleLaserPalmHit(hit.palm)
+		s.reportComputerShot(hit.pos, -1, false)
+		if s.turnAdvanceDelay > 0 {
+			s.turnAdvanceDelay = minInt(s.turnAdvanceDelay, maxInt(laserHoldFrames, s.palmEffectDelayFrames(hit.palm)))
+		}
+		s.finishLaserDrillingIfNeeded(effect)
+		return
+	}
+	effect.end = effect.tip
+	tipInTerrain := false
+	if effect.drilling {
+		tipInTerrain = s.ground.ColorAt(effect.tip.X, effect.tip.Y).A > 0
+		if s.laserSegmentTouchesTerrain(previous, effect.tip) {
+			area := s.ground.ClearLine(previous.X, previous.Y, effect.tip.X, effect.tip.Y, laserLineThickness)
+			s.accumulateLaserEditArea(effect, area)
+		}
+	}
+	if tipInTerrain && len(effect.smokes) < laserMaxSmokeCount && effect.tip.Sub(effect.smokeFrom).Len() >= laserSmokeSpacing {
+		effect.smokes = append(effect.smokes, laserSmoke{pos: effect.tip})
+		effect.smokeFrom = effect.tip
+	}
+	s.finishLaserDrillingIfNeeded(effect)
+}
+
+func (s *GameScene) laserSegmentHitsPalm(start, end engine.Vec) laserHit {
+	delta := end.Sub(start)
+	steps := maxInt(1, int(math.Ceil(delta.Len())))
+	for i := 0; i <= steps; i++ {
+		t := float64(i) / float64(steps)
+		pos := engine.V(start.X+delta.X*t, start.Y+delta.Y*t)
+		if palm := s.laserPointHitsPalm(pos); palm != nil {
+			return laserHit{kind: laserHitPalm, pos: pos, palm: palm}
+		}
+	}
+	return laserHit{}
+}
+
+func (s *GameScene) laserSegmentTouchesTerrain(start, end engine.Vec) bool {
+	delta := end.Sub(start)
+	steps := maxInt(1, int(math.Ceil(delta.Len())))
+	for i := 0; i <= steps; i++ {
+		t := float64(i) / float64(steps)
+		pos := engine.V(start.X+delta.X*t, start.Y+delta.Y*t)
+		if s.ground.ColorAt(pos.X, pos.Y).A > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *GameScene) accumulateLaserEditArea(effect *laserEffect, area image.Rectangle) {
+	if effect == nil || area.Empty() {
+		return
+	}
+	area.Max.Y = maxInt(area.Max.Y, int(math.Ceil(s.battlefieldHeight())))
+	if effect.editArea.Empty() {
+		effect.editArea = area
+		return
+	}
+	effect.editArea = effect.editArea.Union(area)
+}
+
+func (s *GameScene) finishLaserDrillingIfNeeded(effect *laserEffect) {
+	if effect == nil || !effect.finished || effect.settled || effect.editArea.Empty() {
+		return
+	}
+	effect.settled = true
+	if falls := s.ground.SettleArea(effect.editArea); len(falls) > 0 {
+		s.sandFalls = append(s.sandFalls, sandFallAnimation{
+			pixels:   falls,
+			duration: sandFallFrames,
+		})
+	}
+	s.dropUnsupportedTanks()
+}
+
+func (s *GameScene) traceLaser(start, dir engine.Vec, maxDistance float64) laserHit {
+	step := 1.0
+	for dist := 0.0; dist <= maxDistance; dist += step {
+		pos := *start.Add(dir.Scaled(dist))
+		if dist > 3 {
+			if tank := s.laserPointHitsTank(pos); tank != nil {
+				return laserHit{kind: laserHitTank, pos: pos, dist: dist, tank: tank}
+			}
+			if palm := s.laserPointHitsPalm(pos); palm != nil {
+				return laserHit{kind: laserHitPalm, pos: pos, dist: dist, palm: palm}
+			}
+		}
+		if s.ground.ColorAt(pos.X, pos.Y).A > 0 {
+			return laserHit{kind: laserHitTerrain, pos: pos, dist: dist}
+		}
+	}
+	end := start.Add(dir.Scaled(maxDistance))
+	return laserHit{kind: laserHitNone, pos: *end, dist: maxDistance}
+}
+
+func (s *GameScene) laserPointHitsTank(pos engine.Vec) *battleTank {
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 || tank.zeroPowerGone {
+			continue
+		}
+		if rectContainsPoint(tank.body.Bounds().ScaledAtCenter(0.78), pos) {
+			return tank
+		}
+	}
+	return nil
+}
+
+func (s *GameScene) laserPointHitsPalm(pos engine.Vec) *battlePalm {
+	for _, palm := range s.palms {
+		if palm == nil || palm.sprite == nil || palm.pixels == nil || palm.state == palmStateCrumbling {
+			continue
+		}
+		bounds := palm.sprite.Bounds()
+		if !rectContainsPoint(bounds, pos) {
+			continue
+		}
+		sourceX := int(math.Floor(pos.X - bounds.Min.X))
+		sourceY := int(math.Floor(pos.Y - bounds.Min.Y))
+		if sourceX < 0 || sourceY < 0 || sourceX >= palm.pixels.Bounds().Dx() || sourceY >= palm.pixels.Bounds().Dy() {
+			continue
+		}
+		if palm.pixels.RGBAAt(sourceX, sourceY).A > 0 {
+			return palm
+		}
+	}
+	return nil
+}
+
+func (s *GameScene) laserMaxDistanceToWorld(start, dir engine.Vec) float64 {
+	const epsilon = 0.0001
+	left := 0.0
+	right := s.worldWidth
+	top := -s.skyExtraHeight()
+	bottom := s.battlefieldHeight()
+	maxDistance := math.Inf(1)
+	if dir.X > epsilon {
+		maxDistance = math.Min(maxDistance, (right-start.X)/dir.X)
+	} else if dir.X < -epsilon {
+		maxDistance = math.Min(maxDistance, (left-start.X)/dir.X)
+	}
+	if dir.Y > epsilon {
+		maxDistance = math.Min(maxDistance, (bottom-start.Y)/dir.Y)
+	} else if dir.Y < -epsilon {
+		maxDistance = math.Min(maxDistance, (top-start.Y)/dir.Y)
+	}
+	if math.IsInf(maxDistance, 1) || maxDistance < 0 {
+		return 0
+	}
+	return maxDistance
+}
+
+func normalizedVec(v engine.Vec) engine.Vec {
+	length := v.Len()
+	if length <= 0 {
+		return engine.V(1, 0)
+	}
+	return v.Scaled(1 / length)
+}
+
+func rectContainsPoint(rect engine.Rect, point engine.Vec) bool {
+	return point.X >= rect.Min.X && point.X <= rect.Max.X && point.Y >= rect.Min.Y && point.Y <= rect.Max.Y
+}
+
 func (s *GameScene) projectileGroundImpactWithinFrames(p *projectile, gravity, windAcceleration float64, frames int) bool {
 	if p == nil || frames <= 0 {
 		return false
@@ -2952,7 +3302,7 @@ func (s *GameScene) projectilesActive() bool {
 }
 
 func (s *GameScene) turnAdvanceBlocked() bool {
-	return len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0 || len(s.shockwaveImpacts) > 0 || len(s.airStrikeImpacts) > 0
+	return len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0 || len(s.shockwaveImpacts) > 0 || len(s.airStrikeImpacts) > 0 || len(s.laserEffects) > 0
 }
 
 func (s *GameScene) activePlayerCanAdjustShot() bool {
@@ -4467,6 +4817,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 		if s.updateAirStrikeCamera() {
 			return
 		}
+		if s.updateLaserCamera() {
+			return
+		}
 		if s.updateShockwaveCamera() {
 			return
 		}
@@ -4511,6 +4864,9 @@ func (s *GameScene) removePendingPalmRevengeTank() {
 
 func (s *GameScene) updateBattleCamera() {
 	if s.updateAirStrikeCamera() {
+		return
+	}
+	if s.updateLaserCamera() {
 		return
 	}
 	if s.updateShockwaveCamera() {
@@ -4650,6 +5006,19 @@ func (s *GameScene) airStrikeFocus(impact *airStrikeImpact) engine.Vec {
 		return engine.Vec{}
 	}
 	return impact.pos
+}
+
+func (s *GameScene) updateLaserCamera() bool {
+	if len(s.laserEffects) == 0 || s.laserEffects[0] == nil {
+		return false
+	}
+	pos := s.laserEffects[0].tip
+	screenWidth := core.Config().Screen.Width
+	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, pos.X-screenWidth/2))
+	s.cameraGoalY = s.cameraTargetForWorldY(pos.Y)
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.12, 0.55)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.12, 0.55)
+	return true
 }
 
 func (s *GameScene) updateShockwaveCamera() bool {
@@ -5384,6 +5753,24 @@ func (s *GameScene) drawAirStrikeBomb(screen *ebiten.Image, camera *ebiten.GeoM,
 	op.GeoM.Rotate(airStrikeBombAngle)
 	op.GeoM.Translate(projected.X, projected.Y)
 	screen.DrawImage(s.bulletBombImage, op)
+}
+
+func (s *GameScene) drawLaserEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
+	laserColor := color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	for _, effect := range s.laserEffects {
+		if effect == nil {
+			continue
+		}
+		start := effect.start.Project(camera)
+		end := effect.end.Project(camera)
+		vector.StrokeLine(screen, float32(start.X), float32(start.Y), float32(end.X), float32(end.Y), float32(laserLineThickness), laserColor, true)
+		for _, smoke := range effect.smokes {
+			if smoke.age >= s.laserSmokeAnimation.totalTicks {
+				continue
+			}
+			drawAnimationCentered(screen, camera, s.laserSmokeAnimation, smoke.pos, smoke.age)
+		}
+	}
 }
 
 func (s *GameScene) drawCloudSearchEffects(screen *ebiten.Image, camera *ebiten.GeoM) {

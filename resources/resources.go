@@ -128,6 +128,9 @@ var BlinkBojePNG []byte
 //go:embed bullet_bomb.png
 var BulletBombPNG []byte
 
+//go:embed lasersmoke.png
+var LaserSmokePNG []byte
+
 //go:embed fireball_impact.png
 var FireballImpactPNG []byte
 

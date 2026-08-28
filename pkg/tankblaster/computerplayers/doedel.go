@@ -150,26 +150,55 @@ func doedelWeaponSlot(slots []int, rng *rand.Rand) int {
 	if len(slots) == 0 {
 		return 0
 	}
-	has := func(slot int) bool {
-		for _, available := range slots {
-			if available == slot {
-				return true
-			}
-		}
-		return false
+
+	weights := [19]float64{
+		16, // Slot 0
+		56, // Slot 1
+		14, // Slot 2
+		8,  // Slot 3
+		4,  // Slot 4
+		4,  // Slot 5
+		4,  // Slot 6
+		4,  // Slot 7
+		4,  // Slot 8
+		4,  // Slot 9
+		4,  // Slot 10
+		4,  // Slot 11
+		4,  // Slot 12
+		4,  // Slot 13
+		4,  // Slot 14
+		4,  // Slot 15
+		4,  // Slot 16
+		4,  // Slot 17
+		4,  // Slot 18
 	}
-	switch roll := rng.Float64(); {
-	case roll < 0.16 && has(0):
-		return 0
-	case roll < 0.72 && has(1):
-		return 1
-	case roll < 0.86 && has(2):
-		return 2
-	case roll < 0.94 && has(3):
-		return 3
-	default:
+
+	total := 0.0
+
+	for _, slot := range slots {
+		if slot >= 0 && slot < len(weights) {
+			total += weights[slot]
+		}
+	}
+
+	if total == 0 {
 		return slots[rng.Intn(len(slots))]
 	}
+
+	roll := rng.Float64() * total
+
+	for _, slot := range slots {
+		if slot < 0 || slot >= len(weights) {
+			continue
+		}
+
+		roll -= weights[slot]
+		if roll < 0 {
+			return slot
+		}
+	}
+
+	return slots[len(slots)-1]
 }
 
 func maxIntForDoedel(a, b int) int {
