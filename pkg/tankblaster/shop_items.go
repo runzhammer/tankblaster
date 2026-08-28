@@ -28,7 +28,7 @@ func shopItems() []shopItem {
 		{name: "Splitterbombe", price: 1300, stock: 2, screenIndex: 17},
 		{name: "Laser", price: 500, stock: 1, screenIndex: 18},
 		{name: scrollOMatItemName, price: 1000, stock: 1, screenIndex: 19},
-		{name: "Energieschild", price: 15000, stock: 1, screenIndex: 20},
+		{name: energyShieldItemName, price: 15000, stock: 1, screenIndex: 20},
 		{name: "MFS Verstärker", price: 12000, stock: 1, screenIndex: 21},
 		{name: "XM-V12 Panzer", price: 9890, stock: 1, screenIndex: 22},
 		{name: "Diesel (F54)", price: 400, stock: 100, screenIndex: 23},

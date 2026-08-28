@@ -346,6 +346,7 @@ type waterFill struct {
 	image      *ebiten.Image
 	cacheAge   int
 	cacheFrame int
+	hitPlayers map[int]bool
 }
 
 type waterBlubberEffect struct {
@@ -799,6 +800,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	s.scores = make([]int, len(s.players))
 	s.roundScores = make([]int, len(s.players))
 	s.credits = make([]int, len(s.players))
+	s.ensureDebugHumanCredits()
 	s.inventories = makeShopInventories(len(s.players))
 	s.computerMemories = make([]computerplayers.Memory, len(s.players))
 	s.startRound()
@@ -815,13 +817,23 @@ func NewDebugShopScene(game *GameLoop) (core.Scene, error) {
 	if !ok {
 		return scene, nil
 	}
-	for i := range s.credits {
+	s.ensureDebugHumanCredits()
+	s.beginShop()
+	return s, nil
+}
+
+func (s *GameScene) ensureDebugHumanCredits() {
+	if !core.Config().Debug.Enabled {
+		return
+	}
+	for i, player := range s.players {
+		if player.Kind != PlayerHuman || i < 0 || i >= len(s.credits) {
+			continue
+		}
 		if s.credits[i] < debugShopStartingCredits {
 			s.credits[i] = debugShopStartingCredits
 		}
 	}
-	s.beginShop()
-	return s, nil
 }
 
 func (s *GameScene) startRound() {
@@ -2624,6 +2636,15 @@ func (s *GameScene) fireActiveWeapon() {
 	}
 	angles := []float64{tank.cannon.Rot}
 	if weapon.TripleShot {
+		if !hasEffectiveWeapon && s.consumeMFSBoosterCharge(tank.playerIndex) {
+			atomImpact := weaponspkg.AtomBomb()
+			weapon.ImpactScale = atomImpact.ImpactScale
+			weapon.ImpactAnimationExtraSeconds = atomImpact.ImpactAnimationExtraSeconds
+			weapon.ImpactCycles = atomImpact.ImpactCycles
+			weapon.ImpactGradientOutward = atomImpact.ImpactGradientOutward
+			weapon.ImpactAnimationStyle = atomImpact.ImpactAnimationStyle
+			hasEffectiveWeapon = true
+		}
 		offset := 5 * math.Pi / 180
 		angles = []float64{tank.cannon.Rot, tank.cannon.Rot - offset, tank.cannon.Rot + offset}
 	}
@@ -3590,11 +3611,12 @@ func (s *GameScene) waterFillAt(pos engine.Vec) (waterFill, bool) {
 	}
 
 	return waterFill{
-		leftX:    leftX,
-		rightX:   rightX,
-		topY:     topY,
-		surfaceY: surface,
-		duration: secondsToFrames(1),
+		leftX:      leftX,
+		rightX:     rightX,
+		topY:       topY,
+		surfaceY:   surface,
+		duration:   secondsToFrames(1),
+		hitPlayers: make(map[int]bool),
 	}, true
 }
 
@@ -4259,6 +4281,9 @@ func (s *GameScene) damageTanksTouchingWater(fill *waterFill) {
 		if !s.tankTouchesWater(tank, fill) {
 			continue
 		}
+		if fill.hitPlayers != nil && fill.hitPlayers[tank.playerIndex] {
+			continue
+		}
 		s.drownTank(tank, fill)
 	}
 }
@@ -4329,8 +4354,19 @@ func (s *GameScene) drownTank(tank *battleTank, fill *waterFill) {
 	if tank == nil || tank.body == nil || tank.power <= 0 {
 		return
 	}
+	if fill != nil {
+		if fill.hitPlayers == nil {
+			fill.hitPlayers = make(map[int]bool)
+		}
+		fill.hitPlayers[tank.playerIndex] = true
+	}
 	previousPower := tank.power
-	tank.power = 0
+	damage := s.applyEnergyShieldDamage(tank, 100)
+	tank.power = maxInt(0, tank.power-damage)
+	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
+	if tank.power > 0 {
+		return
+	}
 	tank.shotStrength = 0
 	tank.zeroPowerShown = true
 	tank.zeroPowerGone = true
@@ -4706,7 +4742,8 @@ func (s *GameScene) damagePalmRevengeTank(event *palmRevengeEvent) {
 	event.damageDone = true
 	tank := event.target
 	previousPower := tank.power
-	tank.power = maxInt(0, tank.power-100)
+	damage := s.applyEnergyShieldDamage(tank, 100)
+	tank.power = maxInt(0, tank.power-damage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
 		s.addScore(tank.playerIndex, -3)
@@ -5134,6 +5171,7 @@ func (s *GameScene) damageTank(tank *battleTank, damage int, attacker *battleTan
 		return
 	}
 	previousPower := tank.power
+	damage = s.applyEnergyShieldDamage(tank, damage)
 	tank.power = maxInt(0, tank.power-damage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
@@ -5147,6 +5185,7 @@ func (s *GameScene) damageTankAsTerrain(tank *battleTank, damage int, attacker *
 		return
 	}
 	previousPower := tank.power
+	damage = s.applyEnergyShieldDamage(tank, damage)
 	tank.power = maxInt(0, tank.power-damage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
@@ -6344,7 +6383,10 @@ func (s *GameScene) drawGameDialogs(screen *ebiten.Image) {
 }
 
 func gameHelpRect() image.Rectangle {
-	return centerDialogRect(500, 395)
+	screen := core.Config().Screen
+	w := minInt(860, maxInt(620, int(screen.Width)-40))
+	h := minInt(460, maxInt(440, int(screen.Height)-40))
+	return centerDialogRect(w, h)
 }
 
 func gameHelpOKRect() image.Rectangle {
@@ -6370,7 +6412,8 @@ func (s *GameScene) drawGameHelpDialog(screen *ebiten.Image) {
 	r := gameHelpRect()
 	drawDialogWindow(screen, r, "Tank Blaster Hilfe")
 
-	keysBox := image.Rect(r.Min.X+12, r.Min.Y+63, r.Min.X+400, r.Max.Y-14)
+	logo := image.Rect(r.Max.X-88, r.Min.Y+67, r.Max.X-17, r.Max.Y-90)
+	keysBox := image.Rect(r.Min.X+12, r.Min.Y+63, logo.Min.X-10, r.Max.Y-14)
 	drawGroupBox(screen, keysBox, "Tasten")
 
 	lines := []struct {
@@ -6405,7 +6448,6 @@ func (s *GameScene) drawGameHelpDialog(screen *ebiten.Image) {
 		y += 18
 	}
 
-	logo := image.Rect(r.Max.X-88, r.Min.Y+67, r.Max.X-17, r.Max.Y-90)
 	drawFilledRect(screen, logo, color.RGBA{R: 0, G: 105, B: 100, A: 255})
 	drawVerticalLogo(screen, logo)
 	drawDialogButton(screen, gameHelpOKRect(), "OK")
@@ -6463,7 +6505,7 @@ func (s *GameScene) drawPlayerInfoDialog(screen *ebiten.Image) {
 		{"Status:", status},
 		{"Energie:", strconv.Itoa(tank.power)},
 		{"Geld:", "$" + strconv.Itoa(s.creditForPlayer(tank.playerIndex))},
-		{"Energieschild", "0%"},
+		{"Energieschild", strconv.Itoa(s.energyShieldPercentForPlayer(tank.playerIndex)) + "%"},
 	}
 	for _, row := range infoRows {
 		drawTextFace(screen, row.label, dialogTextFace, left.Min.X+10, infoY, colornames.Black)
@@ -6501,20 +6543,45 @@ func (s *GameScene) drawPlayerArsenal(screen *ebiten.Image, tank *battleTank, r 
 		return
 	}
 	y := r.Min.Y + 12
-	drawTextFace(screen, "Spurgeschoß", dialogTextFace, r.Min.X, y, colornames.Black)
-	drawTextFace(screen, "10000", dialogTextFace, r.Max.X-82, y, colornames.Black)
-	y += 16
+	drawArsenalRow := func(name string, count int) bool {
+		if y > r.Max.Y-8 {
+			return false
+		}
+		drawTextFace(screen, name, dialogTextFace, r.Min.X, y, colornames.Black)
+		drawTextFace(screen, strconv.Itoa(count), dialogTextFace, r.Max.X-82, y, colornames.Black)
+		y += 16
+		return true
+	}
+	drawArsenalRow("Spurgeschoß", 10000)
+	drawPriorityWeaponSlot := func(slot int) {
+		weaponList := weaponspkg.List()
+		if slot <= 0 || slot >= s.weaponSlotCount() || slot >= len(weaponList) {
+			return
+		}
+		count := s.ammoForWeaponSlot(tank.playerIndex, slot)
+		if count <= 0 {
+			return
+		}
+		drawArsenalRow(weaponList[slot].Name, count)
+	}
+	drawPriorityWeaponSlot(10)
+	if count := s.mfsBoosterCountForPlayer(tank.playerIndex); count > 0 {
+		drawArsenalRow(mfsBoosterItemName, count)
+	}
+	if shield := s.energyShieldPercentForPlayer(tank.playerIndex); shield > 0 {
+		drawArsenalRow(energyShieldItemName, shield)
+	}
 
 	weaponList := weaponspkg.List()
 	for slot := 1; slot < s.weaponSlotCount() && slot < len(weaponList); slot++ {
+		if slot == 10 {
+			continue
+		}
 		count := s.ammoForWeaponSlot(tank.playerIndex, slot)
 		if count <= 0 {
 			continue
 		}
-		drawTextFace(screen, weaponList[slot].Name, dialogTextFace, r.Min.X, y, colornames.Black)
-		drawTextFace(screen, strconv.Itoa(count), dialogTextFace, r.Max.X-82, y, colornames.Black)
-		y += 16
-		if y > r.Max.Y-8 {
+		if !drawArsenalRow(weaponList[slot].Name, count) {
 			break
 		}
 	}

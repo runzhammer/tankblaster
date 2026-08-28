@@ -59,8 +59,10 @@ var (
 )
 
 type shopInventory struct {
-	classA []int
-	classB []int
+	classA            []int
+	classB            []int
+	mfsBoosterCharges int
+	energyShield      float64
 }
 
 type shopAssets struct {
@@ -144,6 +146,10 @@ func makeShopInventories(playerCount int) []shopInventory {
 					inventories[i].classA[itemIndex] = 1
 					break
 				}
+			}
+			if itemIndex := shopItemIndexByName(mfsBoosterItemName); itemIndex >= 0 {
+				inventories[i].classA[itemIndex] = maxInt(inventories[i].classA[itemIndex], 1)
+				inventories[i].mfsBoosterCharges = mfsBoosterUsesPerPurchase
 			}
 		}
 	}
@@ -384,6 +390,9 @@ func (s *GameScene) affordableComputerShopChoices(playerIndex int, mode shopMode
 		if s.isScrollOMatItem(itemIndex) && s.shopItemCountForPlayer(playerIndex, itemIndex) > 0 {
 			continue
 		}
+		if s.isEnergyShieldItem(itemIndex) && s.energyShieldPercentForPlayer(playerIndex) >= int(energyShieldMaxPercent) {
+			continue
+		}
 		choices = append(choices, computerShopChoice{mode: mode, targetIndex: listIndex})
 	}
 	return choices
@@ -553,19 +562,26 @@ func (s *GameScene) buySelectedShopItem() {
 	if s.isScrollOMatItem(itemIndex) && s.shopItemCountForPlayer(playerIndex, itemIndex) > 0 {
 		return
 	}
+	if s.isEnergyShieldItem(itemIndex) && s.energyShieldPercentForPlayer(playerIndex) >= int(energyShieldMaxPercent) {
+		return
+	}
 	s.credits[playerIndex] -= price
+	defer s.ensureDebugHumanCredits()
 	quantity := shopItems()[itemIndex].stock
 	if quantity <= 0 {
 		quantity = 1
 	}
+	s.ensureInventory(playerIndex)
+	if s.isMFSBoosterItem(itemIndex) {
+		s.inventories[playerIndex].mfsBoosterCharges += quantity * mfsBoosterUsesPerPurchase
+	}
+	if s.isEnergyShieldItem(itemIndex) {
+		s.addEnergyShield(playerIndex, quantity)
+	}
 	if s.shopMode == shopModeClassB {
-		s.shopClassBStock[s.shopSelectedIndex]--
-		s.ensureInventory(playerIndex)
 		s.inventories[playerIndex].classB[itemIndex] += quantity
 		return
 	}
-	s.shopClassAStock[itemIndex]--
-	s.ensureInventory(playerIndex)
 	s.inventories[playerIndex].classA[itemIndex] += quantity
 }
 
@@ -610,14 +626,9 @@ func (s *GameScene) visibleShopItemIndexes() []int {
 }
 
 func (s *GameScene) shopStockForSelected(itemIndex int) int {
-	if s.shopMode == shopModeClassB {
-		if s.shopSelectedIndex >= 0 && s.shopSelectedIndex < len(s.shopClassBStock) {
-			return s.shopClassBStock[s.shopSelectedIndex]
-		}
-		return 0
-	}
-	if itemIndex >= 0 && itemIndex < len(s.shopClassAStock) {
-		return s.shopClassAStock[itemIndex]
+	items := shopItems()
+	if itemIndex >= 0 && itemIndex < len(items) {
+		return 1
 	}
 	return 0
 }
@@ -738,6 +749,26 @@ func (s *GameScene) drawShopPlayerPanel(screen *ebiten.Image, playerIndex int, p
 		money = s.credits[playerIndex]
 	}
 	drawCenteredText(screen, "Geld: $"+strconv.Itoa(money), moneyRect, colornames.Black)
+	if stock, ok := s.selectedShopItemInventoryText(playerIndex); ok {
+		drawCenteredText(screen, "Vorrat: "+stock, statusRect, colornames.Black)
+	}
+}
+
+func (s *GameScene) selectedShopItemInventoryText(playerIndex int) (string, bool) {
+	if s.shopMode == shopModeEntry || playerIndex < 0 {
+		return "", false
+	}
+	itemIndex := s.selectedShopItemIndex()
+	if itemIndex < 0 {
+		return "", false
+	}
+	if s.isEnergyShieldItem(itemIndex) {
+		return strconv.Itoa(s.energyShieldPercentForPlayer(playerIndex)) + "%", true
+	}
+	if s.isMFSBoosterItem(itemIndex) {
+		return strconv.Itoa(s.mfsBoosterCountForPlayer(playerIndex)), true
+	}
+	return strconv.Itoa(s.shopItemCountForPlayer(playerIndex, itemIndex)), true
 }
 
 func (s *GameScene) currentShopPlayerIndex() int {
