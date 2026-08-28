@@ -140,6 +140,7 @@ const (
 	airStrikeBombCount        = 8
 	airStrikeBombSpacing      = 80.0
 	airStrikeBombDelayFrames  = 20
+	airStrikeBombDelayWindow  = airStrikeBombDelayFrames * (airStrikeBombCount - 1)
 	airStrikeBombFallFrames   = 46
 	airStrikeBombAngle        = 25 * math.Pi / 180
 	airStrikeImpactScale      = 1.5
@@ -3267,6 +3268,7 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
 	bombs := make([]airStrikeBomb, airStrikeBombCount)
 	startY := -s.skyExtraHeight() - 80
+	lastDelay := airStrikeWaitFrames
 	for i := range bombs {
 		offset := (float64(i) - float64(airStrikeBombCount-1)/2) * airStrikeBombSpacing
 		offset += (s.rng.Float64()*2 - 1) * 6
@@ -3274,14 +3276,19 @@ func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
 		targetY := s.ground.SurfaceY(targetX)
 		fallDistance := targetY - startY
 		startX := targetX - math.Tan(airStrikeBombAngle)*fallDistance
+		delay := airStrikeWaitFrames
+		if airStrikeBombDelayWindow > 0 {
+			delay += s.rng.Intn(airStrikeBombDelayWindow + 1)
+		}
+		lastDelay = max(lastDelay, delay)
 		bombs[i] = airStrikeBomb{
 			start:  engine.V(startX, startY),
 			target: engine.V(targetX, targetY),
 			pos:    engine.V(startX, startY),
-			delay:  airStrikeWaitFrames + i*airStrikeBombDelayFrames,
+			delay:  delay,
 		}
 	}
-	duration := airStrikeWaitFrames + (airStrikeBombCount-1)*airStrikeBombDelayFrames + airStrikeBombFallFrames + s.impactAnimationFramesForWeapon(weaponspkg.LargeGrenade()) + s.impactPauseFrames()
+	duration := lastDelay + airStrikeBombFallFrames + s.impactAnimationFramesForWeapon(weaponspkg.LargeGrenade()) + s.impactPauseFrames()
 	s.airStrikeImpacts = append(s.airStrikeImpacts, &airStrikeImpact{
 		pos:      pos,
 		duration: duration,
@@ -4574,13 +4581,6 @@ func (s *GameScene) updateAirStrikeCamera() bool {
 func (s *GameScene) airStrikeFocus(impact *airStrikeImpact) engine.Vec {
 	if impact == nil {
 		return engine.Vec{}
-	}
-	for i := range impact.bombs {
-		bomb := &impact.bombs[i]
-		if bomb.impacted || impact.age < bomb.delay {
-			continue
-		}
-		return bomb.pos
 	}
 	return impact.pos
 }
