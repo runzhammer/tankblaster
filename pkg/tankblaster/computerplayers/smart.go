@@ -11,22 +11,46 @@ type DrNuke struct{}
 type Harald struct{}
 
 type smartProfile struct {
-	angleStep           float64
-	strengthStep        int
-	angleNoise          float64
-	strengthNoise       float64
-	selfTargetChance    float64
-	randomTargetChance  float64
-	trainingAmmoChance  float64
-	delayMin            int
-	delayJitter         int
-	obstaclePenalty     float64
-	learningRate        float64
-	targetBiasLimit     float64
-	hitReward           float64
-	preferHighDamage    bool
-	preferFragileTarget bool
+	angleStep            float64
+	strengthStep         int
+	angleNoise           float64
+	strengthNoise        float64
+	selfTargetChance     float64
+	randomTargetChance   float64
+	trainingAmmoChance   float64
+	laserAimNoise        float64
+	delayMin             int
+	delayJitter          int
+	obstaclePenalty      float64
+	learningRate         float64
+	targetBiasLimit      float64
+	hitReward            float64
+	preferHighDamage     bool
+	preferFragileTarget  bool
+	preferredWeaponSlots []int
 }
+
+const (
+	weaponSlotTraining = iota
+	weaponSlotGrenade
+	weaponSlotLargeGrenade
+	weaponSlotAtomBomb
+	weaponSlotHBomb
+	weaponSlotPlasmaMelter
+	weaponSlotWonderPalm
+	weaponSlotFireball
+	weaponSlotWater
+	weaponSlotMoles
+	weaponSlotMFSTriple
+	weaponSlotSmallCrumblers
+	weaponSlotLargeCrumblers
+	weaponSlotSurpriseEgg
+	weaponSlotMosquitos
+	weaponSlotShockwave
+	weaponSlotAirStrike
+	weaponSlotSplitterBomb
+	weaponSlotLaser
+)
 
 var (
 	frederikProfile = smartProfile{
@@ -37,12 +61,34 @@ var (
 		selfTargetChance:   0.03,
 		randomTargetChance: 0.10,
 		trainingAmmoChance: 0.06,
+		laserAimNoise:      2.4,
 		delayMin:           35,
 		delayJitter:        60,
 		obstaclePenalty:    140,
 		learningRate:       0.32,
 		targetBiasLimit:    220,
 		hitReward:          600,
+		preferredWeaponSlots: []int{
+			weaponSlotGrenade,
+			weaponSlotLargeGrenade,
+			weaponSlotMoles,
+			weaponSlotFireball,
+			weaponSlotSmallCrumblers,
+			weaponSlotWater,
+			weaponSlotSplitterBomb,
+			weaponSlotMFSTriple,
+			weaponSlotAtomBomb,
+			weaponSlotWonderPalm,
+			weaponSlotLargeCrumblers,
+			weaponSlotMosquitos,
+			weaponSlotShockwave,
+			weaponSlotAirStrike,
+			weaponSlotHBomb,
+			weaponSlotPlasmaMelter,
+			weaponSlotLaser,
+			weaponSlotSurpriseEgg,
+			weaponSlotTraining,
+		},
 	}
 	drNukeProfile = smartProfile{
 		angleStep:           1.5,
@@ -52,6 +98,7 @@ var (
 		selfTargetChance:    0.004,
 		randomTargetChance:  0.03,
 		trainingAmmoChance:  0.01,
+		laserAimNoise:       0.8,
 		delayMin:            26,
 		delayJitter:         38,
 		obstaclePenalty:     360,
@@ -60,6 +107,27 @@ var (
 		hitReward:           900,
 		preferHighDamage:    true,
 		preferFragileTarget: true,
+		preferredWeaponSlots: []int{
+			weaponSlotLaser,
+			weaponSlotPlasmaMelter,
+			weaponSlotHBomb,
+			weaponSlotAirStrike,
+			weaponSlotShockwave,
+			weaponSlotAtomBomb,
+			weaponSlotMFSTriple,
+			weaponSlotSplitterBomb,
+			weaponSlotLargeGrenade,
+			weaponSlotLargeCrumblers,
+			weaponSlotMosquitos,
+			weaponSlotFireball,
+			weaponSlotMoles,
+			weaponSlotWater,
+			weaponSlotSmallCrumblers,
+			weaponSlotWonderPalm,
+			weaponSlotGrenade,
+			weaponSlotSurpriseEgg,
+			weaponSlotTraining,
+		},
 	}
 	haraldProfile = smartProfile{
 		angleStep:           0.75,
@@ -69,6 +137,7 @@ var (
 		selfTargetChance:    0,
 		randomTargetChance:  0,
 		trainingAmmoChance:  0,
+		laserAimNoise:       0.15,
 		delayMin:            18,
 		delayJitter:         24,
 		obstaclePenalty:     900,
@@ -77,6 +146,27 @@ var (
 		hitReward:           1400,
 		preferHighDamage:    true,
 		preferFragileTarget: true,
+		preferredWeaponSlots: []int{
+			weaponSlotLaser,
+			weaponSlotPlasmaMelter,
+			weaponSlotAirStrike,
+			weaponSlotShockwave,
+			weaponSlotHBomb,
+			weaponSlotAtomBomb,
+			weaponSlotMFSTriple,
+			weaponSlotSplitterBomb,
+			weaponSlotMosquitos,
+			weaponSlotLargeGrenade,
+			weaponSlotLargeCrumblers,
+			weaponSlotFireball,
+			weaponSlotWater,
+			weaponSlotMoles,
+			weaponSlotSmallCrumblers,
+			weaponSlotGrenade,
+			weaponSlotWonderPalm,
+			weaponSlotSurpriseEgg,
+			weaponSlotTraining,
+		},
 	}
 )
 
@@ -108,10 +198,16 @@ func smartDecision(state State, rng *rand.Rand, profile smartProfile) Decision {
 	shot := bestShot(state, aimTarget, minStrength, maxStrength, profile)
 	angle := clampFloat(shot.angle+state.Memory.AngleBias+rng.NormFloat64()*profile.angleNoise, 0, 180)
 	strength := clampInt(int(math.Round(float64(shot.strength)+state.Memory.StrengthBias+rng.NormFloat64()*profile.strengthNoise)), minStrength, maxStrength)
+	laserAngle, laserUseful := directLaserAngle(state, target)
+	weaponSlot := smartWeaponSlot(state.AvailableWeaponSlots, rng, profile, laserUseful)
+	if weaponSlot == weaponSlotLaser {
+		angle = clampFloat(laserAngle+rng.NormFloat64()*profile.laserAimNoise, 0, 180)
+		strength = maxStrength
+	}
 
 	return Decision{
 		TargetIndex:  target.Index,
-		WeaponSlot:   smartWeaponSlot(state.AvailableWeaponSlots, rng, profile),
+		WeaponSlot:   weaponSlot,
 		Strength:     strength,
 		AngleDegrees: angle,
 		DelayFrames:  profile.delayMin + rng.Intn(maxIntForDoedel(1, profile.delayJitter)),
@@ -263,7 +359,7 @@ func pointHitsObstacle(x, y float64, obstacles []ObstacleState) bool {
 	return false
 }
 
-func smartWeaponSlot(slots []int, rng *rand.Rand, profile smartProfile) int {
+func smartWeaponSlot(slots []int, rng *rand.Rand, profile smartProfile, laserUseful bool) int {
 	if len(slots) == 0 {
 		return 0
 	}
@@ -274,14 +370,29 @@ func smartWeaponSlot(slots []int, rng *rand.Rand, profile smartProfile) int {
 			}
 		}
 	}
+	for _, preferred := range profile.preferredWeaponSlots {
+		if preferred == weaponSlotLaser && !laserUseful {
+			continue
+		}
+		for _, slot := range slots {
+			if slot == preferred {
+				return slot
+			}
+		}
+	}
 	if profile.preferHighDamage {
-		best := slots[0]
-		for _, slot := range slots[1:] {
+		best := -1
+		for _, slot := range slots {
+			if slot == weaponSlotLaser && !laserUseful {
+				continue
+			}
 			if slot > best {
 				best = slot
 			}
 		}
-		return best
+		if best >= 0 {
+			return best
+		}
 	}
 	for _, preferred := range []int{1, 2, 3, 0} {
 		for _, slot := range slots {
@@ -291,6 +402,55 @@ func smartWeaponSlot(slots []int, rng *rand.Rand, profile smartProfile) int {
 		}
 	}
 	return slots[rng.Intn(len(slots))]
+}
+
+func directLaserAngle(state State, target TankState) (float64, bool) {
+	active := activeTank(state)
+	dx := target.X - active.X
+	dy := target.Y - active.Y
+	distance := math.Hypot(dx, dy)
+	if distance < 1 {
+		return 90, false
+	}
+	angle := math.Atan2(dy, dx)*180/math.Pi + 180
+	for angle < 0 {
+		angle += 360
+	}
+	for angle >= 360 {
+		angle -= 360
+	}
+	if angle > 180 {
+		return 0, false
+	}
+	return angle, laserHasLineOfSight(state, active, target, dx/distance, dy/distance, distance)
+}
+
+func laserHasLineOfSight(state State, active, target TankState, dirX, dirY, distance float64) bool {
+	step := 4.0
+	startSkip := math.Max(active.Width, active.Height) * 0.65
+	targetReach := math.Max(target.Width, target.Height) * 0.5
+	for traveled := startSkip; traveled <= distance+targetReach; traveled += step {
+		x := active.X + dirX*traveled
+		y := active.Y + dirY*traveled
+		if pointHitsTarget(x, y, target) {
+			return true
+		}
+		for _, tank := range state.Tanks {
+			if !tank.Alive || tank.Index == active.Index || tank.Index == target.Index {
+				continue
+			}
+			if pointHitsTarget(x, y, tank) {
+				return false
+			}
+		}
+		if pointHitsObstacle(x, y, state.Obstacles) {
+			return false
+		}
+		if groundY, ok := groundSurfaceY(x, state.Ground); ok && y >= groundY {
+			return false
+		}
+	}
+	return false
 }
 
 func learnSmart(memory *Memory, lesson Lesson, id ID) {

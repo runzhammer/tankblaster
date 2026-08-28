@@ -2378,7 +2378,7 @@ func (s *GameScene) effectiveComputerID(tank *battleTank) computerplayers.ID {
 }
 
 func (s *GameScene) availableComputerWeaponSlots(tank *battleTank) []int {
-	const maxComputerProjectileSlot = 3
+	const maxComputerProjectileSlot = 18
 	slots := make([]int, 0, maxComputerProjectileSlot+1)
 	for slot := 0; slot <= maxComputerProjectileSlot && slot < s.weaponSlotCount(); slot++ {
 		if s.canSelectWeaponSlot(tank, slot) {
