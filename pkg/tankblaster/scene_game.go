@@ -144,6 +144,8 @@ const (
 	airStrikeBombFallFrames   = 46
 	airStrikeBombAngle        = 25 * math.Pi / 180
 	airStrikeImpactScale      = 1.5
+	splitterBombFragmentCount = 9
+	splitterBombSpreadWidth   = 300.0
 )
 
 type damageCause uint8
@@ -297,6 +299,7 @@ type projectile struct {
 	angeredClouds      map[*battleCloud]bool
 	searchingCloud     *battleCloud
 	mosquitoPreview    bool
+	splitterArmed      bool
 }
 
 type projectileReentryAnimation struct {
@@ -2580,16 +2583,18 @@ func (s *GameScene) fireActiveWeapon() {
 	}
 	projectiles := make([]*projectile, 0, len(angles))
 	for _, angle := range angles {
+		velocity := engine.V(speed, 0).Rotated(angle)
 		projectiles = append(projectiles, &projectile{
 			pos:                *muzzle,
 			prev:               *muzzle,
-			velocity:           engine.V(speed, 0).Rotated(angle),
+			velocity:           velocity,
 			weaponIndex:        tank.selectedWeapon,
 			effectiveWeapon:    weapon,
 			hasEffectiveWeapon: hasEffectiveWeapon,
 			shooter:            tank,
 			launchRot:          angle,
 			trail:              []engine.Vec{*muzzle},
+			splitterArmed:      weapon.SplitterBomb && velocity.Y < -0.05,
 		})
 	}
 	s.setProjectiles(projectiles)
@@ -2643,24 +2648,34 @@ func (s *GameScene) updateProjectile() {
 	windAcceleration := float64(s.windDirection*s.wind) * 0.00065
 
 	active := s.projectiles[:0]
+	spawned := make([]*projectile, 0)
 	for _, p := range s.projectiles {
 		if p == nil {
 			continue
 		}
-		if s.updateSingleProjectile(p, gravity, windAcceleration) {
+		alive, children := s.updateSingleProjectile(p, gravity, windAcceleration)
+		if len(children) > 0 {
+			spawned = append(spawned, children...)
+		}
+		if alive {
 			active = append(active, p)
 		}
 	}
+	active = append(active, spawned...)
 	s.setProjectiles(active)
 	if !s.projectilesActive() && s.turnAdvanceDelay <= 0 && !s.turnAdvanceBlocked() {
 		s.finishProjectiles()
 	}
 }
 
-func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAcceleration float64) bool {
+func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAcceleration float64) (bool, []*projectile) {
 	p.prev = p.pos
+	previousVelocityY := p.velocity.Y
 	p.velocity.X += windAcceleration
 	p.velocity.Y += gravity
+	if s.shouldSplitProjectile(p, previousVelocityY) {
+		return false, s.splitProjectile(p, gravity, windAcceleration)
+	}
 	p.pos = *p.pos.Add(p.velocity)
 	p.trail = append(p.trail, p.pos)
 	if len(p.trail) > 260 {
@@ -2668,9 +2683,9 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 	if alive, paused := s.handleProjectileWorldEdge(p); !alive {
 		s.reportComputerShot(p.pos, -1, false)
-		return false
+		return false, nil
 	} else if paused {
-		return true
+		return true, nil
 	}
 
 	if p.pos.X >= 0 && p.pos.X <= s.worldWidth {
@@ -2682,13 +2697,13 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	if s.addLightningCloudAggressionForProjectile(p) {
 		s.reportComputerShot(p.pos, -1, false)
 		s.scheduleCloudSearchForProjectile(p)
-		return false
+		return false, nil
 	}
 
 	battlefieldHeight := s.battlefieldHeight()
 	if p.pos.Y > battlefieldHeight+80 {
 		s.reportComputerShot(p.pos, -1, false)
-		return false
+		return false, nil
 	}
 
 	weapon := s.weaponForProjectile(p)
@@ -2699,7 +2714,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 		s.reportComputerShot(hit, -1, false)
 		s.startWaterSurfaceImpact(hit)
 		s.scheduleCloudSearchForProjectile(p)
-		return false
+		return false, nil
 	}
 	if palm := s.projectileHitsPalm(p, projectileRadiusForWeapon(weapon)); palm != nil {
 		s.reportComputerShot(p.pos, -1, false)
@@ -2718,21 +2733,21 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 		}
 		s.delayTurnAdvance(s.palmEffectDelayFrames(palm))
 		s.scheduleCloudSearchForProjectile(p)
-		return false
+		return false, nil
 	}
 
 	if (p.pos.X < 0 || p.pos.X > s.worldWidth) && p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
 		s.reportComputerShot(p.pos, -1, false)
-		return false
+		return false, nil
 	}
 
 	if p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
 		if s.onGroundImpact(p) {
 			s.scheduleCloudSearchForProjectile(p)
-			return false
+			return false, nil
 		}
 		s.reportComputerShot(p.pos, -1, false)
-		return false
+		return false, nil
 	}
 
 	hitRadius := projectileRadiusForWeapon(weapon)
@@ -2750,10 +2765,62 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 			s.reportComputerShot(p.pos, tank.playerIndex, true)
 			s.delayTurnAdvance(s.tankHitPauseFrames())
 			s.scheduleCloudSearchForProjectile(p)
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
+}
+
+func (s *GameScene) shouldSplitProjectile(p *projectile, previousVelocityY float64) bool {
+	if p == nil || !p.splitterArmed {
+		return false
+	}
+	weapon := s.weaponForProjectile(p)
+	return weapon.SplitterBomb && previousVelocityY < 0 && p.velocity.Y >= 0
+}
+
+func (s *GameScene) splitProjectile(p *projectile, gravity, windAcceleration float64) []*projectile {
+	if p == nil || splitterBombFragmentCount <= 0 {
+		return nil
+	}
+	fragmentWeapon := weaponspkg.SplitterBombFragment()
+	fragments := make([]*projectile, 0, splitterBombFragmentCount)
+	fallFrames := s.estimateSplitterFragmentFallFrames(p.pos, 0.45, gravity)
+	center := float64(splitterBombFragmentCount-1) / 2
+	for i := 0; i < splitterBombFragmentCount; i++ {
+		offset := 0.0
+		if splitterBombFragmentCount > 1 {
+			offset = (float64(i) - center) / center * (splitterBombSpreadWidth / 2)
+		}
+		offset += (s.rng.Float64()*2 - 1) * 8
+		frames := math.Max(1, float64(fallFrames))
+		windDrift := windAcceleration * frames * (frames + 1) / 2
+		vx := (offset - windDrift) / frames
+		vy := 0.35 + s.rng.Float64()*0.25
+		fragments = append(fragments, &projectile{
+			pos:                p.pos,
+			prev:               p.pos,
+			velocity:           engine.V(vx, vy),
+			weaponIndex:        p.weaponIndex,
+			effectiveWeapon:    fragmentWeapon,
+			hasEffectiveWeapon: true,
+			shooter:            p.shooter,
+			launchRot:          math.Atan2(vy, vx),
+			trail:              []engine.Vec{p.pos},
+		})
+	}
+	return fragments
+}
+
+func (s *GameScene) estimateSplitterFragmentFallFrames(pos engine.Vec, initialYVelocity, gravity float64) int {
+	groundY := s.ground.SurfaceY(pos.X)
+	distance := math.Max(40, groundY-pos.Y)
+	if gravity <= 0 {
+		return 60
+	}
+	discriminant := initialYVelocity*initialYVelocity + 2*gravity*distance
+	frames := (-initialYVelocity + math.Sqrt(math.Max(0, discriminant))) / gravity
+	return max(30, minInt(120, int(math.Round(frames))))
 }
 
 func (s *GameScene) projectileGroundImpactWithinFrames(p *projectile, gravity, windAcceleration float64, frames int) bool {

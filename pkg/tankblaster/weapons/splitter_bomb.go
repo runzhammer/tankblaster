@@ -1,0 +1,24 @@
+package weapons
+
+const (
+	splitterBombFragmentScale = grenadeScale * 0.65
+)
+
+func SplitterBomb() Weapon {
+	return Weapon{
+		Name:            "Splitterbombe",
+		Color:           whiteProjectileColor(),
+		Damage:          DirectHitDamage,
+		Unlocked:        true,
+		RoundProjectile: true,
+		DamagesTerrain:  true,
+		ProjectileScale: grenadeScale,
+		SplitterBomb:    true,
+	}
+}
+
+func SplitterBombFragment() Weapon {
+	fragment := Grenade()
+	fragment.ProjectileScale = splitterBombFragmentScale
+	return fragment
+}
