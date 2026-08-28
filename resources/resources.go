@@ -122,6 +122,12 @@ var MoskitosPNG []byte
 //go:embed fragezeichen.png
 var FragezeichenPNG []byte
 
+//go:embed blinkboje.png
+var BlinkBojePNG []byte
+
+//go:embed bullet_bomb.png
+var BulletBombPNG []byte
+
 //go:embed fireball_impact.png
 var FireballImpactPNG []byte
 

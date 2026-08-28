@@ -136,6 +136,13 @@ const (
 	shockwaveDamageOuterExtra = 200.0
 	shockwaveCameraOrbit      = 34.0
 	shockwaveCameraAngular    = 0.82
+	airStrikeWaitFrames       = 540
+	airStrikeBombCount        = 8
+	airStrikeBombSpacing      = 80.0
+	airStrikeBombDelayFrames  = 20
+	airStrikeBombFallFrames   = 46
+	airStrikeBombAngle        = 25 * math.Pi / 180
+	airStrikeImpactScale      = 1.5
 )
 
 type damageCause uint8
@@ -445,6 +452,22 @@ type shockwaveImpact struct {
 	duration int
 }
 
+type airStrikeImpact struct {
+	pos        engine.Vec
+	age        int
+	duration   int
+	bojeHidden bool
+	bombs      []airStrikeBomb
+}
+
+type airStrikeBomb struct {
+	start    engine.Vec
+	target   engine.Vec
+	pos      engine.Vec
+	delay    int
+	impacted bool
+}
+
 type sandFallAnimation struct {
 	pixels   []models.SandFallPixel
 	age      int
@@ -530,6 +553,8 @@ type GameScene struct {
 	waterBlotchAnimation    spriteAnimation
 	moskitosAnimation       spriteAnimation
 	questionAnimation       spriteAnimation
+	blinkBojeAnimation      spriteAnimation
+	bulletBombImage         *ebiten.Image
 	clouds                  []*battleCloud
 	cloudAssets             []cloudAsset
 
@@ -561,6 +586,7 @@ type GameScene struct {
 	smallCrumblerImpacts []*smallCrumblerImpact
 	moskitoEffects       []*moskitoEffect
 	shockwaveImpacts     []*shockwaveImpact
+	airStrikeImpacts     []*airStrikeImpact
 	sandFalls            []sandFallAnimation
 	palmLeafFalls        []palmLeafFall
 	cloudSearchEffects   []*cloudSearchEffect
@@ -724,6 +750,12 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		return nil, err
 	}
 	s.questionAnimation = fitAnimationDuration(questionAnimation, secondsToFrames(2))
+	blinkBojeAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.BlinkBojePNG, frameWidth: 6, delay: 8})
+	if err != nil {
+		return nil, err
+	}
+	s.blinkBojeAnimation = fitAnimationDuration(blinkBojeAnimation, secondsToFrames(0.8))
+	s.bulletBombImage = mustImageFromPNG(r.BulletBombPNG)
 	s.cloudAssets = loadCloudAssets()
 	s.players = s.playersForRound()
 	s.scores = make([]int, len(s.players))
@@ -814,6 +846,7 @@ func (s *GameScene) startRound() {
 	s.smallCrumblerImpacts = nil
 	s.moskitoEffects = nil
 	s.shockwaveImpacts = nil
+	s.airStrikeImpacts = nil
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
@@ -1608,6 +1641,7 @@ func (s *GameScene) Update() error {
 		s.updateWaterBlotches()
 		s.updateMoskitoEffects()
 		s.updateShockwaveImpacts()
+		s.updateAirStrikeImpacts()
 		s.updateMoleImpacts()
 		s.updateSmallCrumblerImpacts()
 		s.updateSandFalls()
@@ -1919,6 +1953,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawWaterBlotches(screen, &camera)
 	s.drawMoskitoEffects(screen, &camera)
 	s.drawShockwaveImpacts(screen, &camera)
+	s.drawAirStrikeImpacts(screen, &camera)
 	s.drawMoleImpacts(screen, &camera)
 	s.drawSmallCrumblerImpacts(screen, &camera)
 	s.drawPalmEffects(screen, &camera)
@@ -2849,7 +2884,7 @@ func (s *GameScene) projectilesActive() bool {
 }
 
 func (s *GameScene) turnAdvanceBlocked() bool {
-	return len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0 || len(s.shockwaveImpacts) > 0
+	return len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0 || len(s.shockwaveImpacts) > 0 || len(s.airStrikeImpacts) > 0
 }
 
 func (s *GameScene) activePlayerCanAdjustShot() bool {
@@ -2938,9 +2973,15 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
-	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && !weapon.Mosquitos && !weapon.Shockwave && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
+	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && !weapon.Mosquitos && !weapon.Shockwave && !weapon.AirStrike && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
+	}
+
+	if weapon.AirStrike {
+		s.reportComputerShot(p.pos, -1, false)
+		s.startAirStrikeImpact(p.pos)
+		return true
 	}
 
 	if weapon.Shockwave {
@@ -3221,6 +3262,115 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 	s.waterBlotchFocus = effect
 	s.updateWaterBlotchCamera()
 	s.delayTurnAdvance(effect.duration + secondsToFrames(0.5))
+}
+
+func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
+	bombs := make([]airStrikeBomb, airStrikeBombCount)
+	startY := -s.skyExtraHeight() - 80
+	for i := range bombs {
+		offset := (float64(i) - float64(airStrikeBombCount-1)/2) * airStrikeBombSpacing
+		offset += (s.rng.Float64()*2 - 1) * 6
+		targetX := math.Max(0, math.Min(s.worldWidth, pos.X+offset))
+		targetY := s.ground.SurfaceY(targetX)
+		fallDistance := targetY - startY
+		startX := targetX - math.Tan(airStrikeBombAngle)*fallDistance
+		bombs[i] = airStrikeBomb{
+			start:  engine.V(startX, startY),
+			target: engine.V(targetX, targetY),
+			pos:    engine.V(startX, startY),
+			delay:  airStrikeWaitFrames + i*airStrikeBombDelayFrames,
+		}
+	}
+	duration := airStrikeWaitFrames + (airStrikeBombCount-1)*airStrikeBombDelayFrames + airStrikeBombFallFrames + s.impactAnimationFramesForWeapon(weaponspkg.LargeGrenade()) + s.impactPauseFrames()
+	s.airStrikeImpacts = append(s.airStrikeImpacts, &airStrikeImpact{
+		pos:      pos,
+		duration: duration,
+		bombs:    bombs,
+	})
+	s.delayTurnAdvance(duration)
+}
+
+func (s *GameScene) updateAirStrikeImpacts() {
+	if len(s.airStrikeImpacts) == 0 {
+		return
+	}
+	active := s.airStrikeImpacts[:0]
+	for _, impact := range s.airStrikeImpacts {
+		if impact == nil {
+			continue
+		}
+		s.updateAirStrikeImpact(impact)
+		impact.age++
+		if impact.age < impact.duration {
+			active = append(active, impact)
+		}
+	}
+	s.airStrikeImpacts = active
+}
+
+func (s *GameScene) updateAirStrikeImpact(impact *airStrikeImpact) {
+	for i := range impact.bombs {
+		bomb := &impact.bombs[i]
+		if bomb.impacted || impact.age < bomb.delay {
+			continue
+		}
+		progress := math.Min(1, float64(impact.age-bomb.delay)/math.Max(1, float64(airStrikeBombFallFrames)))
+		bomb.pos = engine.V(
+			bomb.start.X+(bomb.target.X-bomb.start.X)*progress,
+			bomb.start.Y+(bomb.target.Y-bomb.start.Y)*progress,
+		)
+		if tank := s.airStrikeBombHitsTank(bomb.pos); tank != nil {
+			bomb.impacted = true
+			impact.bojeHidden = true
+			s.applyAirStrikeBombImpact(bomb.pos)
+			continue
+		}
+		groundY := s.ground.SurfaceY(bomb.pos.X)
+		if progress >= 1 || bomb.pos.Y >= groundY {
+			bomb.impacted = true
+			impact.bojeHidden = true
+			s.applyAirStrikeBombImpact(engine.V(bomb.pos.X, groundY))
+		}
+	}
+}
+
+func (s *GameScene) airStrikeBombHitsTank(pos engine.Vec) *battleTank {
+	radius := 4.0
+	bounds := engine.R(pos.X-radius, pos.Y-radius, pos.X+radius, pos.Y+radius)
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 {
+			continue
+		}
+		if engine.Collision(bounds, tank.body.Bounds().ScaledAtCenter(0.78)) {
+			return tank
+		}
+	}
+	return nil
+}
+
+func (s *GameScene) applyAirStrikeBombImpact(pos engine.Vec) {
+	weapon := weaponspkg.LargeGrenade()
+	radius := impactRadiusForWeapon(weapon) * airStrikeImpactScale
+	duration := s.impactAnimationFramesForWeapon(weapon)
+	s.zeroPowerStartDelay = (duration * 2) / 3
+	s.damageTanksInImpactRadius(pos, radius)
+	s.zeroPowerStartDelay = 0
+	if falls := s.ground.ApplyCrater(pos.X, pos.Y, radius); len(falls) > 0 {
+		s.sandFalls = append(s.sandFalls, sandFallAnimation{
+			pixels:   falls,
+			duration: sandFallFrames,
+		})
+	}
+	s.dropUnsupportedTanks()
+	s.impacts = append(s.impacts, impactAnimation{
+		pos:            pos,
+		radius:         radius,
+		duration:       duration,
+		cycles:         impactCyclesForWeapon(weapon),
+		outward:        weapon.ImpactGradientOutward,
+		style:          weapon.ImpactAnimationStyle,
+		terrainApplied: true,
+	})
 }
 
 func (s *GameScene) startShockwaveImpact(pos engine.Vec, weapon weaponspkg.Weapon) {
@@ -4240,6 +4390,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 	}
 	s.turnAdvanceDelay--
 	if s.turnAdvanceDelay > 0 {
+		if s.updateAirStrikeCamera() {
+			return
+		}
 		if s.updateShockwaveCamera() {
 			return
 		}
@@ -4283,6 +4436,9 @@ func (s *GameScene) removePendingPalmRevengeTank() {
 }
 
 func (s *GameScene) updateBattleCamera() {
+	if s.updateAirStrikeCamera() {
+		return
+	}
 	if s.updateShockwaveCamera() {
 		return
 	}
@@ -4400,6 +4556,33 @@ func (s *GameScene) updateWaterCamera() bool {
 	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
 	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
 	return true
+}
+
+func (s *GameScene) updateAirStrikeCamera() bool {
+	if len(s.airStrikeImpacts) == 0 || s.airStrikeImpacts[0] == nil {
+		return false
+	}
+	pos := s.airStrikeFocus(s.airStrikeImpacts[0])
+	screenWidth := core.Config().Screen.Width
+	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, pos.X-screenWidth/2))
+	s.cameraGoalY = s.cameraTargetForWorldY(pos.Y)
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.14, 0.5)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.14, 0.5)
+	return true
+}
+
+func (s *GameScene) airStrikeFocus(impact *airStrikeImpact) engine.Vec {
+	if impact == nil {
+		return engine.Vec{}
+	}
+	for i := range impact.bombs {
+		bomb := &impact.bombs[i]
+		if bomb.impacted || impact.age < bomb.delay {
+			continue
+		}
+		return bomb.pos
+	}
+	return impact.pos
 }
 
 func (s *GameScene) updateShockwaveCamera() bool {
@@ -5106,6 +5289,36 @@ func (s *GameScene) drawShockwaveImpacts(screen *ebiten.Image, camera *ebiten.Ge
 	}
 }
 
+func (s *GameScene) drawAirStrikeImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, impact := range s.airStrikeImpacts {
+		if impact == nil {
+			continue
+		}
+		if !impact.bojeHidden && len(s.blinkBojeAnimation.frames) > 0 {
+			drawAnimationBottomCenteredLooping(screen, camera, s.blinkBojeAnimation, impact.pos, impact.age)
+		}
+		for i := range impact.bombs {
+			bomb := &impact.bombs[i]
+			if bomb.impacted || impact.age < bomb.delay || s.bulletBombImage == nil {
+				continue
+			}
+			s.drawAirStrikeBomb(screen, camera, bomb.pos)
+		}
+	}
+}
+
+func (s *GameScene) drawAirStrikeBomb(screen *ebiten.Image, camera *ebiten.GeoM, pos engine.Vec) {
+	projected := pos.Project(camera)
+	bounds := s.bulletBombImage.Bounds()
+	w := float64(bounds.Dx())
+	h := float64(bounds.Dy())
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(-w/2, -h/2)
+	op.GeoM.Rotate(airStrikeBombAngle)
+	op.GeoM.Translate(projected.X, projected.Y)
+	screen.DrawImage(s.bulletBombImage, op)
+}
+
 func (s *GameScene) drawCloudSearchEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
 	for _, effect := range s.cloudSearchEffects {
 		if effect == nil || effect.delay > 0 || effect.age >= effect.duration || effect.cloud == nil || effect.cloud.sprite == nil {
@@ -5484,6 +5697,13 @@ func drawAnimationCenteredLooping(screen *ebiten.Image, camera *ebiten.GeoM, ani
 }
 
 func drawAnimationBottomCentered(screen *ebiten.Image, camera *ebiten.GeoM, animation spriteAnimation, bottomCenter engine.Vec, tick int) {
+	drawAnimationFrame(screen, camera, animation, bottomCenter, tick, 0.5, 1)
+}
+
+func drawAnimationBottomCenteredLooping(screen *ebiten.Image, camera *ebiten.GeoM, animation spriteAnimation, bottomCenter engine.Vec, tick int) {
+	if animation.totalTicks > 0 {
+		tick %= animation.totalTicks
+	}
 	drawAnimationFrame(screen, camera, animation, bottomCenter, tick, 0.5, 1)
 }
 
