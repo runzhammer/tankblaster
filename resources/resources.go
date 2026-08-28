@@ -116,6 +116,12 @@ var PalmScreamPNG []byte
 //go:embed palm_grin.png
 var PalmGrinPNG []byte
 
+//go:embed moskitos.png
+var MoskitosPNG []byte
+
+//go:embed fragezeichen.png
+var FragezeichenPNG []byte
+
 //go:embed fireball_impact.png
 var FireballImpactPNG []byte
 

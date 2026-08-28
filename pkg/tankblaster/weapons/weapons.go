@@ -26,6 +26,7 @@ type Weapon struct {
 	SmallCrumblers              bool
 	LargeCrumblers              bool
 	SurpriseEgg                 bool
+	Mosquitos                   bool
 	Utility                     bool
 }
 
@@ -54,7 +55,7 @@ func List() []Weapon {
 		SmallCrumblers(),
 		LargeCrumblers(),
 		SurpriseEgg(),
-		FutureWeapon("Moskitos"),
+		Mosquitos(),
 		FutureWeapon("Schockwelle"),
 		FutureWeapon("Luftschlag"),
 		FutureWeapon("Splitterbombe"),

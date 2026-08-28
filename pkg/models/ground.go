@@ -116,6 +116,28 @@ func (g Ground) SurfaceY(x float64) float64 {
 	return normalizedTerrainSurfaceY(width, g.Size.Y, profile, x)
 }
 
+func (g Ground) ColorAt(x, y float64) color.RGBA {
+	if g.pixels == nil {
+		return color.RGBA{}
+	}
+	bounds := g.pixels.Bounds()
+	ix := int(math.Round(x))
+	iy := int(math.Round(y))
+	if ix < bounds.Min.X {
+		ix = bounds.Min.X
+	}
+	if ix >= bounds.Max.X {
+		ix = bounds.Max.X - 1
+	}
+	if iy < bounds.Min.Y {
+		iy = bounds.Min.Y
+	}
+	if iy >= bounds.Max.Y {
+		iy = bounds.Max.Y - 1
+	}
+	return g.pixels.RGBAAt(ix, iy)
+}
+
 func (g Ground) ApplyCrater(cx, cy, radius float64) []SandFallPixel {
 	if g.pixels == nil || g.Image == nil || radius <= 0 {
 		return nil

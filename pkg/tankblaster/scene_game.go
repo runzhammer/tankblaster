@@ -121,6 +121,14 @@ const (
 	largeCrumblerFunnelSpread = 320.0
 	largeCrumblerJitter       = 4.8
 	largeCrumblerWobble       = 3.2
+	mosquitoPreviewFrames     = 10
+	mosquitoTouchFrames       = 8
+	mosquitoRiseFrames        = 20
+	mosquitoHoverHeight       = 30.0
+	mosquitoSeekSpeed         = 1.35
+	mosquitoDiveSpeed         = 6.0
+	mosquitoAttachedFrames    = 60
+	mosquitoColorDelayFrames  = 30
 )
 
 type damageCause uint8
@@ -145,6 +153,7 @@ type battleTank struct {
 	tint           color.RGBA
 	zeroPowerShown bool
 	zeroPowerGone  bool
+	terrainLocked  bool
 	selectedWeapon int
 	shotStrength   int
 	computerPlan   *computerTurnPlan
@@ -272,6 +281,7 @@ type projectile struct {
 	launchRot          float64
 	angeredClouds      map[*battleCloud]bool
 	searchingCloud     *battleCloud
+	mosquitoPreview    bool
 }
 
 type projectileReentryAnimation struct {
@@ -398,6 +408,29 @@ type smallCrumb struct {
 	lastArea image.Rectangle
 }
 
+type moskitoPhase uint8
+
+const (
+	moskitoPhaseTouch moskitoPhase = iota
+	moskitoPhaseRise
+	moskitoPhaseQuestion
+	moskitoPhaseSeek
+	moskitoPhaseDive
+	moskitoPhaseAttached
+)
+
+type moskitoEffect struct {
+	pos      engine.Vec
+	ground   engine.Vec
+	hover    engine.Vec
+	phase    moskitoPhase
+	age      int
+	target   *battleTank
+	shooter  *battleTank
+	colored  bool
+	finished bool
+}
+
 type sandFallAnimation struct {
 	pixels   []models.SandFallPixel
 	age      int
@@ -481,6 +514,8 @@ type GameScene struct {
 	waterAnimation          spriteAnimation
 	waterBlubberAnimation   spriteAnimation
 	waterBlotchAnimation    spriteAnimation
+	moskitosAnimation       spriteAnimation
+	questionAnimation       spriteAnimation
 	clouds                  []*battleCloud
 	cloudAssets             []cloudAsset
 
@@ -510,6 +545,7 @@ type GameScene struct {
 	waterBlotches        []*waterSurfaceImpact
 	moleImpacts          []*moleImpact
 	smallCrumblerImpacts []*smallCrumblerImpact
+	moskitoEffects       []*moskitoEffect
 	sandFalls            []sandFallAnimation
 	palmLeafFalls        []palmLeafFall
 	cloudSearchEffects   []*cloudSearchEffect
@@ -544,6 +580,7 @@ type GameScene struct {
 	waterCameraFocus     *waterBlubberEffect
 	waterBlotchFocus     *waterSurfaceImpact
 	crumblerCameraFocus  *engine.Vec
+	moskitoCameraFocus   *engine.Vec
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -662,6 +699,16 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		return nil, err
 	}
 	s.waterBlotchAnimation = waterBlotchAnimation
+	moskitosAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.MoskitosPNG, frameWidth: 23, delay: 8})
+	if err != nil {
+		return nil, err
+	}
+	s.moskitosAnimation = moskitosAnimation
+	questionAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.FragezeichenPNG, frameWidth: 32, delay: 8})
+	if err != nil {
+		return nil, err
+	}
+	s.questionAnimation = fitAnimationDuration(questionAnimation, secondsToFrames(2))
 	s.cloudAssets = loadCloudAssets()
 	s.players = s.playersForRound()
 	s.scores = make([]int, len(s.players))
@@ -708,6 +755,7 @@ func (s *GameScene) startRound() {
 	s.palmRevenge = nil
 	s.palmRevengeRemoval = nil
 	s.zeroPowerEffects = nil
+	s.moskitoCameraFocus = nil
 	s.turnAdvanceDelay = 0
 	s.roundTransitionDelay = 0
 	s.roundSeriesComplete = false
@@ -749,6 +797,7 @@ func (s *GameScene) startRound() {
 	s.waterBlotches = nil
 	s.moleImpacts = nil
 	s.smallCrumblerImpacts = nil
+	s.moskitoEffects = nil
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
@@ -1541,6 +1590,7 @@ func (s *GameScene) Update() error {
 		s.updateWaterFills()
 		s.updateWaterBlubbers()
 		s.updateWaterBlotches()
+		s.updateMoskitoEffects()
 		s.updateMoleImpacts()
 		s.updateSmallCrumblerImpacts()
 		s.updateSandFalls()
@@ -1850,6 +1900,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawCloudSearchEffects(screen, &camera)
 	s.drawWaterBlubbers(screen, &camera)
 	s.drawWaterBlotches(screen, &camera)
+	s.drawMoskitoEffects(screen, &camera)
 	s.drawMoleImpacts(screen, &camera)
 	s.drawSmallCrumblerImpacts(screen, &camera)
 	s.drawPalmEffects(screen, &camera)
@@ -2587,6 +2638,9 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 
 	weapon := s.weaponForProjectile(p)
+	if weapon.Mosquitos && s.projectileGroundImpactWithinFrames(p, gravity, windAcceleration, mosquitoPreviewFrames) {
+		p.mosquitoPreview = true
+	}
 	if hit, ok := s.projectileHitsWaterSurface(p, projectileRadiusForWeapon(weapon)); ok {
 		s.reportComputerShot(hit, -1, false)
 		s.startWaterSurfaceImpact(hit)
@@ -2646,6 +2700,26 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 		}
 	}
 	return true
+}
+
+func (s *GameScene) projectileGroundImpactWithinFrames(p *projectile, gravity, windAcceleration float64, frames int) bool {
+	if p == nil || frames <= 0 {
+		return false
+	}
+	pos := p.pos
+	velocity := p.velocity
+	for i := 0; i < frames; i++ {
+		velocity.X += windAcceleration
+		velocity.Y += gravity
+		pos = *pos.Add(velocity)
+		if pos.X < 0 || pos.X > s.worldWidth {
+			continue
+		}
+		if pos.Y >= s.ground.SurfaceY(pos.X) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GameScene) handleProjectileWorldEdge(p *projectile) (bool, bool) {
@@ -2757,7 +2831,7 @@ func (s *GameScene) projectilesActive() bool {
 }
 
 func (s *GameScene) turnAdvanceBlocked() bool {
-	return len(s.smallCrumblerImpacts) > 0
+	return len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0
 }
 
 func (s *GameScene) activePlayerCanAdjustShot() bool {
@@ -2802,6 +2876,7 @@ func (s *GameScene) advanceActivePlayer() {
 	s.waterCameraFocus = nil
 	s.waterBlotchFocus = nil
 	s.crumblerCameraFocus = nil
+	s.moskitoCameraFocus = nil
 	s.cloudSearchEffects = nil
 	next := s.nextActivePlayerIndex()
 	if next < 0 {
@@ -2845,9 +2920,15 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
-	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
+	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && !weapon.Mosquitos && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
+	}
+
+	if weapon.Mosquitos {
+		s.reportComputerShot(p.pos, -1, false)
+		s.startMoskitoImpact(p.pos, p.shooter)
+		return true
 	}
 
 	if weapon.SmallCrumblers {
@@ -3116,6 +3197,202 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 	s.waterBlotchFocus = effect
 	s.updateWaterBlotchCamera()
 	s.delayTurnAdvance(effect.duration + secondsToFrames(0.5))
+}
+
+func (s *GameScene) startMoskitoImpact(pos engine.Vec, shooter *battleTank) {
+	groundY := s.ground.SurfaceY(pos.X)
+	ground := engine.V(pos.X, groundY)
+	hover := engine.V(pos.X, groundY-mosquitoHoverHeight)
+	target := s.nearestLivingTank(hover)
+	if target == nil {
+		s.delayTurnAdvance(s.impactPauseFrames())
+		return
+	}
+	s.moskitoEffects = append(s.moskitoEffects, &moskitoEffect{
+		pos:     ground,
+		ground:  ground,
+		hover:   hover,
+		target:  target,
+		shooter: shooter,
+	})
+}
+
+func (s *GameScene) updateMoskitoEffects() {
+	if len(s.moskitoEffects) == 0 {
+		return
+	}
+	active := s.moskitoEffects[:0]
+	for _, effect := range s.moskitoEffects {
+		if effect == nil {
+			continue
+		}
+		s.updateMoskitoEffect(effect)
+		if effect.finished {
+			continue
+		}
+		active = append(active, effect)
+	}
+	s.moskitoEffects = active
+}
+
+func (s *GameScene) updateMoskitoEffect(effect *moskitoEffect) {
+	s.moskitoCameraFocus = &effect.pos
+	switch effect.phase {
+	case moskitoPhaseTouch:
+		effect.pos = effect.ground
+		effect.age++
+		if effect.age >= mosquitoTouchFrames {
+			effect.phase = moskitoPhaseRise
+			effect.age = 0
+		}
+	case moskitoPhaseRise:
+		progress := easeOut(float64(effect.age) / math.Max(1, float64(mosquitoRiseFrames-1)))
+		effect.pos = engine.V(
+			effect.ground.X+(effect.hover.X-effect.ground.X)*progress,
+			effect.ground.Y+(effect.hover.Y-effect.ground.Y)*progress,
+		)
+		effect.age++
+		if effect.age >= mosquitoRiseFrames {
+			effect.pos = effect.hover
+			effect.phase = moskitoPhaseQuestion
+			effect.age = 0
+		}
+	case moskitoPhaseQuestion:
+		effect.pos = effect.hover
+		effect.age++
+		if effect.age >= s.moskitoQuestionDuration() {
+			effect.phase = moskitoPhaseSeek
+			effect.age = 0
+		}
+	case moskitoPhaseSeek:
+		if !s.moskitoHasLiveTarget(effect) {
+			effect.target = s.nearestLivingTank(effect.pos)
+		}
+		if !s.moskitoHasLiveTarget(effect) {
+			effect.finished = true
+			s.delayTurnAdvance(s.impactPauseFrames())
+			return
+		}
+		if s.moveMoskitoAlongTerrain(effect, effect.target, mosquitoSeekSpeed) {
+			effect.phase = moskitoPhaseDive
+			effect.age = 0
+			effect.pos = s.moskitoTargetHover(effect.target)
+		}
+	case moskitoPhaseDive:
+		if !s.moskitoHasLiveTarget(effect) {
+			effect.finished = true
+			s.delayTurnAdvance(s.impactPauseFrames())
+			return
+		}
+		if s.moveMoskitoToward(effect, effect.target.body.Bounds().Center(), mosquitoDiveSpeed) {
+			effect.phase = moskitoPhaseAttached
+			effect.age = 0
+		}
+	case moskitoPhaseAttached:
+		if effect.target == nil || effect.target.body == nil {
+			effect.finished = true
+			s.delayTurnAdvance(s.impactPauseFrames())
+			return
+		}
+		effect.pos = effect.target.body.Bounds().Center()
+		if !effect.colored && effect.age >= mosquitoColorDelayFrames {
+			s.recolorTankToGround(effect.target)
+			effect.colored = true
+		}
+		effect.age++
+		if effect.age >= mosquitoAttachedFrames {
+			s.damageTankAsTerrain(effect.target, 100, effect.shooter, damageCauseDirect)
+			effect.finished = true
+			s.delayTurnAdvance(s.tankHitPauseFrames())
+		}
+	}
+}
+
+func (s *GameScene) moskitoQuestionDuration() int {
+	if s.questionAnimation.totalTicks > 0 {
+		return s.questionAnimation.totalTicks
+	}
+	return secondsToFrames(2)
+}
+
+func (s *GameScene) moskitoHasLiveTarget(effect *moskitoEffect) bool {
+	return effect != nil && effect.target != nil && effect.target.body != nil && effect.target.power > 0
+}
+
+func (s *GameScene) moskitoTargetHover(tank *battleTank) engine.Vec {
+	if tank == nil || tank.body == nil {
+		return engine.Vec{}
+	}
+	bounds := tank.body.Bounds()
+	return engine.V(bounds.Center().X, bounds.Min.Y-mosquitoHoverHeight)
+}
+
+func (s *GameScene) moveMoskitoToward(effect *moskitoEffect, target engine.Vec, speed float64) bool {
+	delta := target.Sub(effect.pos)
+	distance := delta.Len()
+	if distance <= speed || distance <= 0.01 {
+		effect.pos = target
+		return true
+	}
+	effect.pos = *effect.pos.Add(delta.Scaled(speed / distance))
+	return false
+}
+
+func (s *GameScene) moveMoskitoAlongTerrain(effect *moskitoEffect, target *battleTank, speed float64) bool {
+	if effect == nil || target == nil || target.body == nil {
+		return true
+	}
+	targetX := target.body.Bounds().Center().X
+	dx := targetX - effect.pos.X
+	if math.Abs(dx) <= speed {
+		return true
+	}
+	nextX := effect.pos.X + math.Copysign(speed, dx)
+	nextX = math.Max(0, math.Min(s.worldWidth, nextX))
+	nextY := s.ground.SurfaceY(nextX) - mosquitoHoverHeight
+	effect.pos.X = nextX
+	effect.pos.Y = nextY
+	return false
+}
+
+func (s *GameScene) nearestLivingTank(pos engine.Vec) *battleTank {
+	var nearest *battleTank
+	nearestDistance := math.MaxFloat64
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 {
+			continue
+		}
+		distance := tank.body.Bounds().Center().Sub(pos).Len()
+		if distance < nearestDistance {
+			nearest = tank
+			nearestDistance = distance
+		}
+	}
+	return nearest
+}
+
+func (s *GameScene) recolorTankToGround(tank *battleTank) {
+	if tank == nil || tank.body == nil {
+		return
+	}
+	bounds := tank.body.Bounds()
+	x := bounds.Center().X
+	startY := math.Ceil(s.ground.SurfaceY(x))
+	groundHeight := 0
+	if s.ground.Size != nil {
+		groundHeight = int(s.ground.Size.Y)
+	}
+	for y := int(startY); y < groundHeight; y++ {
+		c := s.ground.ColorAt(x, float64(y))
+		if c.A == 0 {
+			continue
+		}
+		c.A = 255
+		tank.tint = c
+		models.RecolorTankBody(tank.body, tank.tint)
+		models.RecolorCannon(tank.cannon, tank.tint)
+		return
+	}
 }
 
 func (s *GameScene) updateMoleImpacts() {
@@ -3884,6 +4161,9 @@ func (s *GameScene) updateTurnAdvanceDelay() {
 	}
 	s.turnAdvanceDelay--
 	if s.turnAdvanceDelay > 0 {
+		if s.updateMoskitoCamera() {
+			return
+		}
 		if s.updateWaterBlotchCamera() {
 			return
 		}
@@ -3921,6 +4201,9 @@ func (s *GameScene) removePendingPalmRevengeTank() {
 }
 
 func (s *GameScene) updateBattleCamera() {
+	if s.updateMoskitoCamera() {
+		return
+	}
 	if s.updateWaterBlotchCamera() {
 		return
 	}
@@ -4034,6 +4317,24 @@ func (s *GameScene) updateWaterCamera() bool {
 	return true
 }
 
+func (s *GameScene) updateMoskitoCamera() bool {
+	var pos *engine.Vec
+	if len(s.moskitoEffects) > 0 && s.moskitoEffects[0] != nil {
+		pos = &s.moskitoEffects[0].pos
+	} else if s.moskitoCameraFocus != nil && s.turnAdvanceDelay > 0 {
+		pos = s.moskitoCameraFocus
+	}
+	if pos == nil {
+		return false
+	}
+	screenWidth := core.Config().Screen.Width
+	s.cameraGoal = math.Max(0, math.Min(s.worldWidth-screenWidth, pos.X-screenWidth/2))
+	s.cameraGoalY = s.cameraTargetForWorldY(pos.Y)
+	s.cameraX = approach(s.cameraX, s.cameraGoal, 0.10, 0.45)
+	s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.10, 0.45)
+	return true
+}
+
 func (s *GameScene) updateCrumblerCamera() bool {
 	if s.crumblerCameraFocus == nil {
 		return false
@@ -4118,6 +4419,22 @@ func (s *GameScene) damageTank(tank *battleTank, damage int, attacker *battleTan
 	if previousPower > 0 && tank.power == 0 {
 		s.awardZeroPowerScore(tank, attacker, cause)
 		s.startZeroPowerAnimation(tank)
+	}
+}
+
+func (s *GameScene) damageTankAsTerrain(tank *battleTank, damage int, attacker *battleTank, cause damageCause) {
+	if tank == nil || damage <= 0 {
+		return
+	}
+	previousPower := tank.power
+	tank.power = maxInt(0, tank.power-damage)
+	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
+	if previousPower > 0 && tank.power == 0 {
+		s.awardZeroPowerScore(tank, attacker, cause)
+		tank.zeroPowerShown = true
+		tank.zeroPowerGone = false
+		tank.terrainLocked = true
+		s.removeZeroPowerEffectsForTank(tank)
 	}
 }
 
@@ -4227,7 +4544,7 @@ func (s *GameScene) updateZeroPowerTankDissolve(effect zeroPowerAnimation) {
 
 func (s *GameScene) dropUnsupportedTanks() {
 	for _, tank := range s.tanks {
-		if tank == nil || tank.body == nil || !tank.landed || tank.falling {
+		if tank == nil || tank.body == nil || !tank.landed || tank.falling || tank.terrainLocked {
 			continue
 		}
 		targetY, stable := s.tankSupportState(tank.body)
@@ -4355,6 +4672,10 @@ func (s *GameScene) drawProjectile(screen *ebiten.Image, camera *ebiten.GeoM) {
 
 func (s *GameScene) drawSingleProjectile(screen *ebiten.Image, camera *ebiten.GeoM, p *projectile) {
 	weapon := s.weaponForProjectile(p)
+	if weapon.Mosquitos && p.mosquitoPreview && len(s.moskitosAnimation.frames) > 0 {
+		drawAnimationCenteredLooping(screen, camera, s.moskitosAnimation, p.pos, int(s.time))
+		return
+	}
 	c := weapon.Color
 	if weapon.ShowTrail {
 		for i, point := range p.trail {
@@ -4647,6 +4968,20 @@ func (s *GameScene) drawWaterBlotches(screen *ebiten.Image, camera *ebiten.GeoM)
 			continue
 		}
 		drawAnimationBottomCentered(screen, camera, effect.animation, effect.pos, effect.age)
+	}
+}
+
+func (s *GameScene) drawMoskitoEffects(screen *ebiten.Image, camera *ebiten.GeoM) {
+	for _, effect := range s.moskitoEffects {
+		if effect == nil {
+			continue
+		}
+		if len(s.moskitosAnimation.frames) > 0 {
+			drawAnimationCenteredLooping(screen, camera, s.moskitosAnimation, effect.pos, int(s.time))
+		}
+		if effect.phase == moskitoPhaseQuestion && len(s.questionAnimation.frames) > 0 {
+			drawAnimationCentered(screen, camera, s.questionAnimation, *effect.pos.Add(engine.V(4, -28)), effect.age)
+		}
 	}
 }
 
