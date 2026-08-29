@@ -6,14 +6,15 @@ const (
 
 func SplitterBomb() Weapon {
 	return Weapon{
-		Name:            "Splitterbombe",
-		Color:           whiteProjectileColor(),
-		Damage:          DirectHitDamage,
-		Unlocked:        true,
-		RoundProjectile: true,
-		DamagesTerrain:  true,
-		ProjectileScale: grenadeScale,
-		SplitterBomb:    true,
+		Name:                   "Splitterbombe",
+		Color:                  whiteProjectileColor(),
+		Damage:                 DirectHitDamage,
+		Unlocked:               true,
+		RoundProjectile:        true,
+		DamagesTerrain:         true,
+		ProjectileScale:        grenadeScale,
+		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
+		SplitterBomb:           true,
 	}
 }
 

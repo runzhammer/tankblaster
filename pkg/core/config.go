@@ -20,7 +20,6 @@ type FileSettings struct {
 	} `yaml:"tanks"`
 	Gameplay struct {
 		SpawnLandingPauseSeconds float64 `yaml:"spawn_landing_pause_seconds"`
-		ImpactAnimationSeconds   float64 `yaml:"impact_animation_seconds"`
 		ImpactPauseSeconds       float64 `yaml:"impact_pause_seconds"`
 		TankHitPauseSeconds      float64 `yaml:"tank_hit_pause_seconds"`
 		PalmHitPauseSeconds      float64 `yaml:"palm_hit_pause_seconds"`
@@ -77,7 +76,6 @@ type Settings struct {
 	}
 	Gameplay struct {
 		SpawnLandingPauseSeconds float64
-		ImpactAnimationSeconds   float64
 		ImpactPauseSeconds       float64
 		TankHitPauseSeconds      float64
 		PalmHitPauseSeconds      float64
@@ -133,10 +131,6 @@ func init() {
 	s.Gameplay.SpawnLandingPauseSeconds = fs.Gameplay.SpawnLandingPauseSeconds
 	if s.Gameplay.SpawnLandingPauseSeconds < 0 {
 		s.Gameplay.SpawnLandingPauseSeconds = 0
-	}
-	s.Gameplay.ImpactAnimationSeconds = fs.Gameplay.ImpactAnimationSeconds
-	if s.Gameplay.ImpactAnimationSeconds < 0 {
-		s.Gameplay.ImpactAnimationSeconds = 0
 	}
 	s.Gameplay.ImpactPauseSeconds = fs.Gameplay.ImpactPauseSeconds
 	if s.Gameplay.ImpactPauseSeconds < 0 {

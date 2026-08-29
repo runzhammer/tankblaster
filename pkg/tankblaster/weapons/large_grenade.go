@@ -7,13 +7,14 @@ const (
 
 func LargeGrenade() Weapon {
 	return Weapon{
-		Name:            "Große Granate",
-		Color:           whiteProjectileColor(),
-		Damage:          DirectHitDamage,
-		Unlocked:        true,
-		RoundProjectile: true,
-		DamagesTerrain:  true,
-		ProjectileScale: largeGrenadeScale,
-		ImpactScale:     largeGrenadeImpactScale,
+		Name:                   "Große Granate",
+		Color:                  whiteProjectileColor(),
+		Damage:                 DirectHitDamage,
+		Unlocked:               true,
+		RoundProjectile:        true,
+		DamagesTerrain:         true,
+		ProjectileScale:        largeGrenadeScale,
+		ImpactScale:            largeGrenadeImpactScale,
+		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 	}
 }

@@ -6,13 +6,14 @@ const (
 
 func Grenade() Weapon {
 	return Weapon{
-		Name:            "Granate",
-		Color:           whiteProjectileColor(),
-		Damage:          DirectHitDamage,
-		ImpactCycles:    1,
-		Unlocked:        true,
-		RoundProjectile: true,
-		DamagesTerrain:  true,
-		ProjectileScale: grenadeScale,
+		Name:                   "Granate",
+		Color:                  whiteProjectileColor(),
+		Damage:                 DirectHitDamage,
+		ImpactCycles:           1,
+		Unlocked:               true,
+		RoundProjectile:        true,
+		DamagesTerrain:         true,
+		ProjectileScale:        grenadeScale,
+		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 	}
 }

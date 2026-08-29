@@ -2923,7 +2923,7 @@ func (s *GameScene) fireActiveWeapon() {
 		if !hasEffectiveWeapon && s.consumeMFSBoosterCharge(tank.playerIndex) {
 			atomImpact := weaponspkg.AtomBomb()
 			weapon.ImpactScale = atomImpact.ImpactScale
-			weapon.ImpactAnimationExtraSeconds = atomImpact.ImpactAnimationExtraSeconds
+			weapon.ImpactAnimationSeconds = atomImpact.ImpactAnimationSeconds
 			weapon.ImpactCycles = atomImpact.ImpactCycles
 			weapon.ImpactGradientOutward = atomImpact.ImpactGradientOutward
 			weapon.ImpactAnimationStyle = atomImpact.ImpactAnimationStyle
@@ -7465,12 +7465,8 @@ func (s *GameScene) spawnLandingPauseFrames() int {
 	return secondsToFrames(core.Config().Gameplay.SpawnLandingPauseSeconds)
 }
 
-func (s *GameScene) impactAnimationFrames() int {
-	return secondsToFrames(core.Config().Gameplay.ImpactAnimationSeconds)
-}
-
 func (s *GameScene) impactAnimationFramesForWeapon(weapon weaponspkg.Weapon) int {
-	return secondsToFrames(core.Config().Gameplay.ImpactAnimationSeconds + weapon.ImpactAnimationExtraSeconds)
+	return secondsToFrames(weaponspkg.ImpactAnimationSeconds(weapon))
 }
 
 func (s *GameScene) impactPauseFrames() int {

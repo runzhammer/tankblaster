@@ -1,21 +1,21 @@
 package weapons
 
 const (
-	atomBombImpactScale        = 4.0
-	atomBombImpactExtraSeconds = 0.8
+	atomBombImpactScale            = 4.0
+	atomBombImpactAnimationSeconds = 0.8
 )
 
 func AtomBomb() Weapon {
 	return Weapon{
-		Name:                        "Atombombe",
-		Color:                       whiteProjectileColor(),
-		Damage:                      DirectHitDamage,
-		Unlocked:                    true,
-		RoundProjectile:             true,
-		DamagesTerrain:              true,
-		ImpactScale:                 atomBombImpactScale,
-		ImpactAnimationExtraSeconds: atomBombImpactExtraSeconds,
-		ImpactCycles:                1,
-		ImpactGradientOutward:       true,
+		Name:                   "Atombombe",
+		Color:                  whiteProjectileColor(),
+		Damage:                 DirectHitDamage,
+		Unlocked:               true,
+		RoundProjectile:        true,
+		DamagesTerrain:         true,
+		ImpactScale:            atomBombImpactScale,
+		ImpactAnimationSeconds: atomBombImpactAnimationSeconds,
+		ImpactCycles:           1,
+		ImpactGradientOutward:  true,
 	}
 }
