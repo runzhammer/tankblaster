@@ -794,7 +794,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		return nil, err
 	}
 	s.waterBlotchAnimation = waterBlotchAnimation
-	dudImpactAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 0.5, scaleY: 0.5})
+	dudImpactAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 1, scaleY: 1})
 	if err != nil {
 		return nil, err
 	}
@@ -1963,7 +1963,7 @@ func loadSpriteAnimation(spec zeroPowerAnimationSheet) (spriteAnimation, error) 
 
 func loadZeroPowerAnimations() ([]spriteAnimation, error) {
 	sources := []zeroPowerAnimationSheet{
-		{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 0.5, scaleY: 0.5},
+		{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 1, scaleY: 1},
 		{data: r.ZeroPowerExplosionPNG, frameWidth: 67, frameHeight: 64, delay: 6},
 		{data: r.ZeroPowerMushroomExplosionPNG, frameWidth: 51, frameHeight: 57, delay: 6, anchor: zeroPowerAnchorTankBottom},
 		{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 15, delay: 6, scaleX: 1.0, scaleY: 1.0},

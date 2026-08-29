@@ -27,57 +27,57 @@ debug:
   game:
     rounds: 10
     players:
-      - kind: human
-        name: "Spieler 1"
-        color:
-          r: 11
-          g: 31
-          b: 255
-          a: 255
-      - kind: human
-        name: "Spieler 2"
+      # - kind: human
+      #   name: "Spieler 1"
+      #   color:
+      #     r: 11
+      #     g: 31
+      #     b: 255
+      #     a: 255
+      # - kind: human
+      #   name: "Spieler 2"
+      #   color:
+      #     r: 230
+      #     g: 70
+      #     b: 20
+      #     a: 255
+      - kind: computer
+        name: "F. Merz"
+        computer_id: 0
         color:
           r: 230
-          g: 70
-          b: 20
+          g: 20
+          b: 70
           a: 255
-      # - kind: computer
-      #   name: "F. Merz"
-      #   computer_id: 0
-      #   color:
-      #     r: 230
-      #     g: 20
-      #     b: 70
-      #     a: 255
-      # - kind: computer
-      #   name: "A. Merkel"
-      #   computer_id: 1
-      #   color:
-      #     r: 200
-      #     g: 90
-      #     b: 45
-      #     a: 255
-      # - kind: computer
-      #   name: "Spongebob"
-      #   computer_id: 2
-      #   color:
-      #     r: 230
-      #     g: 34
-      #     b: 45
-      #     a: 255
-      # - kind: computer
-      #   name: "Batman"
-      #   computer_id: 3
-      #   color:
-      #     r: 10
-      #     g: 84
-      #     b: 45
-      #     a: 255
-      # - kind: computer
-      #   name: "Gevatter T."
-      #   computer_id: 4
-      #   color:
-      #     r: 110
-      #     g: 184
-      #     b: 43
-      #     a: 255
+      - kind: computer
+        name: "A. Merkel"
+        computer_id: 1
+        color:
+          r: 200
+          g: 90
+          b: 45
+          a: 255
+      - kind: computer
+        name: "Spongebob"
+        computer_id: 2
+        color:
+          r: 230
+          g: 34
+          b: 45
+          a: 255
+      - kind: computer
+        name: "Batman"
+        computer_id: 3
+        color:
+          r: 10
+          g: 84
+          b: 45
+          a: 255
+      - kind: computer
+        name: "Gevatter T."
+        computer_id: 4
+        color:
+          r: 110
+          g: 184
+          b: 43
+          a: 255
