@@ -2708,6 +2708,12 @@ func (s *GameScene) cannonAngleDegreesForTank(tank *battleTank) float64 {
 	return math.Max(0, math.Min(180, displayAngle))
 }
 
+func (s *GameScene) cannonDisplayAngleDegreesForTank(tank *battleTank) float64 {
+	rawAngle := s.cannonAngleDegreesForTank(tank)
+	displayAngle := 90 - math.Abs(rawAngle-90)
+	return math.Max(0, math.Min(90, displayAngle))
+}
+
 func (s *GameScene) computerMemory(playerIndex int) computerplayers.Memory {
 	if playerIndex < 0 || playerIndex >= len(s.computerMemories) {
 		return computerplayers.Memory{}
@@ -5506,10 +5512,10 @@ func (s *GameScene) maxShotStrength() int {
 }
 
 func (s *GameScene) minShotStrength() int {
-	if s.maxShotStrength() <= 0 {
+	if s.maxShotStrength() < 0 {
 		return 0
 	}
-	return 1
+	return 0
 }
 
 func (s *GameScene) clampActiveShotStrength() {
@@ -5999,7 +6005,7 @@ func (s *GameScene) drawReentryTank(screen *ebiten.Image, anim *projectileReentr
 	mount := engine.V(body.Size.X, body.Size.Y+20)
 	anchor := engine.V(cannon.Size.X, cannon.Size.Y)
 	if cannon.RotAnchor != nil {
-		mount = models.SmallTankCannonMount
+		mount = models.TankCannonMount(body)
 		anchor = *cannon.RotAnchor
 	}
 	cannon.Pos = &engine.Vec{
@@ -6720,7 +6726,7 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 	}
 
 	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+14, 112, hud.Min.Y+44), "Stärke", shotStrength)
-	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+50, 122, hud.Min.Y+80), "Winkel", int(math.Round(s.cannonAngleDegreesForTank(active))))
+	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+50, 122, hud.Min.Y+80), "Winkel", int(math.Round(s.cannonDisplayAngleDegreesForTank(active))))
 
 	centerX := int(screenCfg.Width) / 2
 	drawText(screen, playerName, centerX-42, hud.Min.Y+30, playerColor)
@@ -7297,7 +7303,7 @@ func (s *GameScene) shopItemCountForPlayer(playerIndex, itemIndex int) int {
 }
 
 func (s *GameScene) cannonAngleDegrees() float64 {
-	return s.cannonAngleDegreesForTank(s.activeTank())
+	return s.cannonDisplayAngleDegreesForTank(s.activeTank())
 }
 
 func minInt(a, b int) int {
@@ -7580,12 +7586,16 @@ func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behav
 	}
 }
 
-func (s *GameScene) behaviorRotateOnButton(source *engine.Sprite) {
+func (s *GameScene) behaviorRotateOnButton(source *engine.Sprite) bool {
 	if shouldAdjustCannon(ebiten.KeyArrowLeft) {
 		source.Rot -= engine.DegToRad(s.humanCannonStep())
-	} else if shouldAdjustCannon(ebiten.KeyArrowRight) {
-		source.Rot += engine.DegToRad(s.humanCannonStep())
+		return true
 	}
+	if shouldAdjustCannon(ebiten.KeyArrowRight) {
+		source.Rot += engine.DegToRad(s.humanCannonStep())
+		return true
+	}
+	return false
 }
 
 func (s *GameScene) humanCannonStep() float64 {
@@ -7600,7 +7610,7 @@ func (s *GameScene) adjustTankCannon(tank *battleTank, degrees float64) {
 		return
 	}
 	tank.cannon.Rot += engine.DegToRad(degrees)
-	s.clampCannonRotationToTank(tank.cannon, tank.body)
+	s.wrapCannonRotationToTank(tank.cannon, tank.body)
 	s.updateXMV12FacingFromCannon(tank)
 }
 
@@ -7622,8 +7632,11 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 	if s.scrollOMatActive() {
 		return
 	}
-	s.behaviorRotateOnButton(source)
-	s.clampCannonRotationToTank(source, tank.body)
+	if s.behaviorRotateOnButton(source) {
+		s.wrapCannonRotationToTank(source, tank.body)
+	} else {
+		s.clampCannonRotationToTank(source, tank.body)
+	}
 	s.updateXMV12FacingFromCannon(tank)
 }
 
@@ -7642,4 +7655,19 @@ func (s *GameScene) clampCannonRotationToTank(cannon, tank *engine.Sprite) {
 	minRot := tank.Rot - math.Pi
 	maxRot := tank.Rot
 	cannon.Rot = math.Max(minRot, math.Min(maxRot, cannon.Rot))
+}
+
+func (s *GameScene) wrapCannonRotationToTank(cannon, tank *engine.Sprite) {
+	if cannon == nil || tank == nil {
+		return
+	}
+	minRot := tank.Rot - math.Pi
+	maxRot := tank.Rot
+	if cannon.Rot < minRot {
+		cannon.Rot = maxRot
+		return
+	}
+	if cannon.Rot > maxRot {
+		cannon.Rot = minRot
+	}
 }
