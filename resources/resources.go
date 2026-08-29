@@ -17,6 +17,18 @@ var TankSmallSprite []byte
 //go:embed tank_small.yaml
 var TankSmallSpec []byte
 
+//go:embed xm-v12-tank.png
+var XMV12TankSprite []byte
+
+//go:embed tankanzeige.png
+var FuelGaugePNG []byte
+
+//go:embed slopemeter.png
+var SlopeMeterPNG []byte
+
+//go:embed button-ignition.png
+var ButtonIgnitionPNG []byte
+
 //go:embed cannon.png
 var CannonSprite []byte
 

@@ -24,18 +24,39 @@ type Tank struct {
 
 var SmallTankCannonMount = engine.V(8, 0)
 
+const (
+	TankBodyKindSmall = "small"
+	TankBodyKindXMV12 = "xm-v12"
+)
+
+type TankBodyMeta struct {
+	Kind             string
+	Facing           int
+	CannonMountRight engine.Vec
+	CannonLength     int
+}
+
 func IsSmallTankBody(body *engine.Sprite) bool {
 	if body == nil || body.Drawable == nil {
 		return false
+	}
+	if meta, ok := body.Meta.(*TankBodyMeta); ok {
+		return meta.Kind == TankBodyKindSmall
 	}
 	bounds := body.Drawable.Bounds()
 	return int(bounds.W()) == 17 && int(bounds.H()) == 14
 }
 
 func NewTank(name string, tankColor color.RGBA) Tank {
+	return newTankFromSprite(name, tankColor, r.TankSmallSprite, TankBodyKindSmall, engine.V(8, 0), 9)
+}
 
+func NewXMV12Tank(name string, tankColor color.RGBA) Tank {
+	return newTankFromSprite(name, tankColor, r.XMV12TankSprite, TankBodyKindXMV12, engine.V(6, 10), 12)
+}
+
+func newTankFromSprite(name string, tankColor color.RGBA, sprite []byte, bodyKind string, cannonMount engine.Vec, cannonLength int) Tank {
 	scaleFactor := float64(1.0)
-	cannonLength := 9
 	cannonAnchor := engine.V(8, 1)
 	cannonWidth := float64(int(cannonAnchor.X) + cannonLength)
 	cannonHeight := 3.0
@@ -43,8 +64,7 @@ func NewTank(name string, tankColor color.RGBA) Tank {
 	m := Tank{Name: name}
 	m.Sprites = engine.NewSprites()
 
-	tankSprite := engine.NewSprite(r.TankSmallSprite, r.TankSmallSpec)
-	tankSprite.Image = colorizedSpriteImage(r.TankSmallSprite, tankColor)
+	tankSprite := newTankBodySprite(sprite, tankColor)
 	tankSprite.Drawable = engine.NewImageDrawableFrames(tankSprite.Image, engine.R(0, 0, tankSprite.Drawable.Bounds().W(), tankSprite.Drawable.Bounds().H()))
 	m.Position = &engine.Vec{X: 200, Y: 600} //core.Config().Screen.Height/2 - t.Sprite.Bounds().H()/2}
 	m.Size = &engine.Vec{X: tankSprite.Drawable.Bounds().W() * scaleFactor, Y: tankSprite.Drawable.Bounds().H() * scaleFactor}
@@ -55,6 +75,12 @@ func NewTank(name string, tankColor color.RGBA) Tank {
 	tankSprite.Tag = name
 	tankSprite.Pos = m.Position
 	tankSprite.Size = m.Size
+	tankSprite.Meta = &TankBodyMeta{
+		Kind:             bodyKind,
+		Facing:           1,
+		CannonMountRight: cannonMount,
+		CannonLength:     cannonLength,
+	}
 
 	m.Sprites.Add(tankSprite)
 
@@ -64,8 +90,8 @@ func NewTank(name string, tankColor color.RGBA) Tank {
 
 	cannonSprite.Tag = "cannon"
 	cannonSprite.Pos = &engine.Vec{
-		X: m.Position.X + SmallTankCannonMount.X - cannonAnchor.X,
-		Y: m.Position.Y + SmallTankCannonMount.Y - cannonAnchor.Y,
+		X: m.Position.X + cannonMount.X - cannonAnchor.X,
+		Y: m.Position.Y + cannonMount.Y - cannonAnchor.Y,
 	}
 	cannonSprite.Size = &engine.Vec{X: cannonWidth, Y: cannonHeight}
 	cannonSprite.RotAnchor = &cannonAnchor
@@ -81,6 +107,15 @@ func NewTank(name string, tankColor color.RGBA) Tank {
 	// ),
 
 	return m
+}
+
+func newTankBodySprite(sprite []byte, tankColor color.RGBA) *engine.Sprite {
+	img := colorizedSpriteImage(sprite, tankColor)
+	bounds := img.Bounds()
+	return &engine.Sprite{
+		Image:    img,
+		Drawable: engine.NewImageDrawableFrames(img, engine.R(0, 0, float64(bounds.Dx()), float64(bounds.Dy()))),
+	}
 }
 
 func colorizedSpriteImage(sprite []byte, tint color.RGBA) *ebiten.Image {
@@ -110,7 +145,14 @@ func RecolorTankBody(body *engine.Sprite, tankColor color.RGBA) {
 		return
 	}
 	bounds := body.Drawable.Bounds()
-	body.Image = colorizedSpriteImage(r.TankSmallSprite, tankColor)
+	sprite := r.TankSmallSprite
+	if meta, ok := body.Meta.(*TankBodyMeta); ok && meta.Kind == TankBodyKindXMV12 {
+		sprite = r.XMV12TankSprite
+	}
+	body.Image = colorizedSpriteImage(sprite, tankColor)
+	if meta, ok := body.Meta.(*TankBodyMeta); ok && meta.Kind == TankBodyKindXMV12 && meta.Facing < 0 {
+		body.Image = mirroredImage(body.Image)
+	}
 	body.Drawable = engine.NewImageDrawableFrames(body.Image, engine.R(0, 0, bounds.W(), bounds.H()))
 }
 
@@ -128,6 +170,52 @@ func RecolorCannon(cannon *engine.Sprite, tankColor color.RGBA) {
 	length := int(bounds.W()) - anchorX
 	cannon.Image = generateCannonImage(int(bounds.W()), int(bounds.H()), anchorX, anchorY, length, tankColor)
 	cannon.Drawable = engine.NewImageDrawable(cannon.Image)
+}
+
+func SetTankFacing(body *engine.Sprite, tankColor color.RGBA, facing int) {
+	if body == nil {
+		return
+	}
+	meta, ok := body.Meta.(*TankBodyMeta)
+	if !ok || meta.Kind != TankBodyKindXMV12 {
+		return
+	}
+	nextFacing := 1
+	if facing < 0 {
+		nextFacing = -1
+	}
+	if meta.Facing == nextFacing {
+		return
+	}
+	meta.Facing = nextFacing
+	RecolorTankBody(body, tankColor)
+}
+
+func TankCannonMount(body *engine.Sprite) engine.Vec {
+	if body == nil {
+		return SmallTankCannonMount
+	}
+	meta, ok := body.Meta.(*TankBodyMeta)
+	if !ok {
+		return SmallTankCannonMount
+	}
+	if meta.Kind != TankBodyKindXMV12 || meta.Facing >= 0 || body.Size == nil {
+		return meta.CannonMountRight
+	}
+	return engine.V(body.Size.X-meta.CannonMountRight.X, meta.CannonMountRight.Y)
+}
+
+func mirroredImage(src *ebiten.Image) *ebiten.Image {
+	if src == nil {
+		return nil
+	}
+	bounds := src.Bounds()
+	dst := ebiten.NewImage(bounds.Dx(), bounds.Dy())
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(-1, 1)
+	op.GeoM.Translate(float64(bounds.Dx()), 0)
+	dst.DrawImage(src, op)
+	return dst
 }
 
 func generateCannonImage(width, height, anchorX, anchorY, length int, tankColor color.RGBA) *ebiten.Image {

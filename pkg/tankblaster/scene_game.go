@@ -151,6 +151,11 @@ const (
 	laserLineThickness        = 2.0
 	laserSmokeSpacing         = 12.0
 	laserMaxSmokeCount        = 3
+	humanCannonRepeatStart    = 16
+	humanCannonRepeatFrames   = 6
+	humanCannonStepDegrees    = 1.0
+	xmV12EngineOffDelayFrames = 30
+	xmV12OutOfBoundsDelay     = 1.0
 )
 
 type damageCause uint8
@@ -576,6 +581,9 @@ type GameScene struct {
 	lightningImage          *ebiten.Image
 	reentrySymbol           *ebiten.Image
 	reentryEarth            *ebiten.Image
+	fuelGaugeImage          *ebiten.Image
+	slopeMeterImage         *ebiten.Image
+	ignitionFrames          []*ebiten.Image
 	humanPortrait           *ebiten.Image
 	computerPortraits       map[computerplayers.ID]*ebiten.Image
 	zeroPowerSmoke          spriteAnimation
@@ -656,6 +664,10 @@ type GameScene struct {
 	waterBlotchFocus     *waterSurfaceImpact
 	crumblerCameraFocus  *engine.Vec
 	moskitoCameraFocus   *engine.Vec
+	xmV12DriveMode       bool
+	xmV12DriveDirection  int
+	xmV12EngineOffDelay  int
+	xmV12IdleOffset      engine.Vec
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -671,6 +683,8 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		playerInfoIndex:   -1,
 		reentrySymbol:     mustImageFromPNG(r.SymbolReentry),
 		reentryEarth:      mustImageFromPNG(r.EarthReentry),
+		fuelGaugeImage:    mustImageFromPNG(r.FuelGaugePNG),
+		slopeMeterImage:   mustImageFromPNG(r.SlopeMeterPNG),
 		humanPortrait:     mustImageFromPNG(r.PlayerHuman),
 		computerPortraits: map[computerplayers.ID]*ebiten.Image{
 			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
@@ -680,6 +694,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 			computerplayers.HaraldID:   mustImageFromPNG(r.PlayerComputerHarald),
 		},
 	}
+	s.ignitionFrames = splitImageFrames(mustImageFromPNG(r.ButtonIgnitionPNG), 31)
 	zeroPowerAnimations, err := loadZeroPowerAnimations()
 	if err != nil {
 		return nil, err
@@ -875,6 +890,10 @@ func (s *GameScene) startRound() {
 	s.projectileReentry = s.projectileReentryEnabledForRound()
 	s.cameraY = 0
 	s.cameraGoalY = 0
+	s.xmV12DriveMode = false
+	s.xmV12DriveDirection = 0
+	s.xmV12EngineOffDelay = 0
+	s.xmV12IdleOffset = engine.Vec{}
 
 	s.worldWidth = worldWidthForPlayers(len(s.players))
 
@@ -901,6 +920,9 @@ func (s *GameScene) startRound() {
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
+		if s.playerHasXMV12(tankIndex) {
+			tank = models.NewXMV12Tank(player.Name, player.Color)
+		}
 		battleTank := &battleTank{
 			playerIndex:    tankIndex,
 			player:         player,
@@ -1553,6 +1575,54 @@ func (s *GameScene) placeTanksOnGroundForQuickStart() {
 	s.spawnPauseFrames = 0
 }
 
+func (s *GameScene) replaceTankModel(playerIndex int) {
+	if playerIndex < 0 || playerIndex >= len(s.tanks) {
+		return
+	}
+	battleTank := s.tanks[playerIndex]
+	if battleTank == nil || !s.playerHasXMV12(playerIndex) {
+		return
+	}
+
+	var oldPos engine.Vec
+	var oldRot float64
+	var oldVelocity engine.Vec
+	if battleTank.body != nil {
+		oldPos = *battleTank.body.Pos
+		oldRot = battleTank.body.Rot
+		oldVelocity = battleTank.body.Velocity
+	} else {
+		oldPos = engine.V(200, 600)
+	}
+
+	tank := models.NewXMV12Tank(battleTank.player.Name, battleTank.tint)
+	body := tank.Body()
+	cannon := tank.Cannon()
+	if body != nil {
+		body.Pos = &engine.Vec{X: oldPos.X, Y: oldPos.Y}
+		body.Rot = oldRot
+		body.Velocity = oldVelocity
+	}
+	if cannon != nil {
+		cannon.Steps = engine.MakeBehaviors(
+			s.behaviorRotateActiveCannon,
+		)
+		cannon.PostSteps = engine.MakeBehaviors(
+			s.behaviorAttachCannonToTank(body),
+		)
+	}
+
+	s.removeTankSprites(battleTank)
+	battleTank.body = body
+	battleTank.cannon = cannon
+	if battleTank.landed && body != nil {
+		s.alignTankBodyToSurface(body)
+	}
+	if s.layers[layerTanks] != nil {
+		s.layers[layerTanks] = engine.AddSprites(s.layers[layerTanks], tank.Sprites)
+	}
+}
+
 func (s *GameScene) minimumPalmDistance() float64 {
 	playerCount := maxInt(1, len(s.players))
 	laneWidth := s.worldWidth / float64(playerCount)
@@ -1712,6 +1782,8 @@ func (s *GameScene) Update() error {
 				s.updateTurnAdvanceDelay()
 			} else if s.turnAdvanceBlocked() {
 				s.updateBattleCamera()
+			} else if s.xmV12DriveMode {
+				s.updateXMV12DriveMode()
 			} else {
 				s.clampActiveShotStrength()
 				s.handleBattleInput()
@@ -2204,6 +2276,7 @@ func (s *GameScene) handleBattleInput() {
 	if shouldAdjustStrength(ebiten.KeyArrowDown) {
 		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-strengthStep)
 	}
+	s.handleBattleHUDButtons(tank, strengthStep)
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
 		if shiftPressed() {
 			s.selectPreviousWeapon(tank)
@@ -2223,6 +2296,11 @@ func (s *GameScene) handleBattleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
 		s.toggleScrollOMat(tank)
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyM) && s.playerHasXMV12(tank.playerIndex) && s.dieselForPlayer(tank.playerIndex) > 0 {
+		s.xmV12DriveMode = true
+		s.xmV12DriveDirection = 0
+		return
+	}
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		x, y := ebiten.CursorPosition()
@@ -2237,6 +2315,36 @@ func (s *GameScene) handleBattleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
 		s.fireActiveWeapon()
 	}
+}
+
+func (s *GameScene) handleBattleHUDButtons(tank *battleTank, strengthStep int) {
+	if tank == nil || !s.hudMouseAction() {
+		return
+	}
+	x, y := ebiten.CursorPosition()
+	cursor := image.Pt(x, y)
+	switch {
+	case cursor.In(s.hudStrengthMinusRect()):
+		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-strengthStep)
+	case cursor.In(s.hudStrengthPlusRect()):
+		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+strengthStep)
+	case cursor.In(s.hudAngleMinusRect()):
+		s.adjustTankCannon(tank, -s.humanCannonStep())
+	case cursor.In(s.hudAnglePlusRect()):
+		s.adjustTankCannon(tank, s.humanCannonStep())
+	case cursor.In(s.hudFireButtonRect()):
+		s.fireActiveWeapon()
+	case cursor.In(s.hudIgnitionRect()) && s.playerHasXMV12(tank.playerIndex) && s.dieselForPlayer(tank.playerIndex) > 0:
+		s.xmV12DriveMode = true
+		s.xmV12DriveDirection = 0
+	}
+}
+
+func (s *GameScene) hudMouseAction() bool {
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return true
+	}
+	return ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && int(s.time)%humanCannonRepeatFrames == 0
 }
 
 func (s *GameScene) handleComputerTurn() {
@@ -2313,6 +2421,158 @@ func (s *GameScene) updateComputerTurnPlan(tank *battleTank) {
 		}
 		s.fireActiveWeapon()
 	}
+}
+
+func (s *GameScene) updateXMV12DriveMode() {
+	tank := s.activeTank()
+	if tank == nil || !s.playerHasXMV12(tank.playerIndex) || tank.player.Kind == PlayerComputer {
+		s.clearXMV12IdleVibration(tank)
+		s.xmV12DriveMode = false
+		return
+	}
+	s.handleXMV12HUDInput(tank)
+	if s.xmV12EngineOffDelay > 0 {
+		s.clearXMV12IdleVibration(tank)
+		s.xmV12EngineOffDelay--
+		if s.xmV12EngineOffDelay == 0 {
+			s.xmV12DriveMode = false
+			s.xmV12DriveDirection = 0
+			s.turnAdvanceDelay = 1
+		}
+		s.updateBattleCamera()
+		return
+	}
+	if s.xmV12DriveDirection == 0 {
+		s.applyXMV12IdleVibration(tank)
+		s.updateBattleCamera()
+		return
+	}
+	if s.dieselForPlayer(tank.playerIndex) <= 0 {
+		s.clearXMV12IdleVibration(tank)
+		s.endXMV12Turn()
+		return
+	}
+	if tank.body == nil || tank.body.Pos == nil {
+		s.clearXMV12IdleVibration(tank)
+		s.endXMV12Turn()
+		return
+	}
+	s.clearXMV12IdleVibration(tank)
+	s.updateXMV12Facing(tank, s.xmV12DriveDirection)
+	tank.body.Pos.X += float64(s.xmV12DriveDirection) * xmV12DriveSpeed
+	s.ensureInventory(tank.playerIndex)
+	s.inventories[tank.playerIndex].diesel = math.Max(0, s.inventories[tank.playerIndex].diesel-xmV12DieselPerFrame)
+	if tank.body.Pos.X+tank.body.Size.X < 0 || tank.body.Pos.X > s.worldWidth {
+		s.destroyTankOutOfBounds(tank)
+		return
+	}
+	s.alignTankBodyToSurface(tank.body)
+	if tank.cannon != nil {
+		if s.xmV12DriveDirection < 0 {
+			tank.cannon.Rot = tank.body.Rot - math.Pi
+		} else {
+			tank.cannon.Rot = tank.body.Rot
+		}
+		s.clampCannonRotationToTank(tank.cannon, tank.body)
+	}
+	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+	s.cameraGoalY = 0
+	s.updateBattleCamera()
+	if s.dieselForPlayer(tank.playerIndex) <= 0 {
+		s.endXMV12Turn()
+	}
+}
+
+func (s *GameScene) applyXMV12IdleVibration(tank *battleTank) {
+	if tank == nil || tank.body == nil || tank.body.Pos == nil || !s.playerHasXMV12(tank.playerIndex) {
+		return
+	}
+	s.clearXMV12IdleVibration(tank)
+	centerX := tank.body.Pos.X + tank.body.Size.X/2
+	s.alignTankBodyToSurface(tank.body)
+	tank.body.Pos.X = centerX - tank.body.Size.X/2
+	if int(s.time)%4 >= 2 {
+		return
+	}
+	normal := engine.V(-math.Sin(tank.body.Rot), -math.Cos(tank.body.Rot))
+	s.xmV12IdleOffset = normal.Scaled(2)
+	tank.body.Pos = tank.body.Pos.Add(s.xmV12IdleOffset)
+	if tank.cannon != nil {
+		s.clampCannonRotationToTank(tank.cannon, tank.body)
+	}
+}
+
+func (s *GameScene) clearXMV12IdleVibration(tank *battleTank) {
+	if s.xmV12IdleOffset.X == 0 && s.xmV12IdleOffset.Y == 0 {
+		return
+	}
+	if tank != nil && tank.body != nil && tank.body.Pos != nil {
+		pos := tank.body.Pos.Sub(s.xmV12IdleOffset)
+		tank.body.Pos = &engine.Vec{X: pos.X, Y: pos.Y}
+	}
+	s.xmV12IdleOffset = engine.Vec{}
+}
+
+func (s *GameScene) updateXMV12Facing(tank *battleTank, facing int) {
+	if tank == nil || tank.body == nil || !s.playerHasXMV12(tank.playerIndex) || facing == 0 {
+		return
+	}
+	models.SetTankFacing(tank.body, tank.tint, facing)
+}
+
+func (s *GameScene) updateXMV12FacingFromCannon(tank *battleTank) {
+	if tank == nil || !s.playerHasXMV12(tank.playerIndex) {
+		return
+	}
+	if s.cannonAngleDegreesForTank(tank) < 90 {
+		s.updateXMV12Facing(tank, -1)
+		return
+	}
+	s.updateXMV12Facing(tank, 1)
+}
+
+func (s *GameScene) handleXMV12HUDInput(tank *battleTank) {
+	if tank == nil || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return
+	}
+	x, y := ebiten.CursorPosition()
+	cursor := image.Pt(x, y)
+	switch {
+	case cursor.In(s.xmV12LeftButtonRect()):
+		s.xmV12DriveDirection = -1
+	case cursor.In(s.xmV12StopButtonRect()):
+		s.xmV12DriveDirection = 0
+	case cursor.In(s.xmV12RightButtonRect()):
+		s.xmV12DriveDirection = 1
+	case cursor.In(s.xmV12MotorOffRect()):
+		s.xmV12DriveDirection = 0
+		s.xmV12EngineOffDelay = xmV12EngineOffDelayFrames
+	}
+}
+
+func (s *GameScene) endXMV12Turn() {
+	s.clearXMV12IdleVibration(s.activeTank())
+	s.xmV12DriveMode = false
+	s.xmV12DriveDirection = 0
+	s.xmV12EngineOffDelay = 0
+	s.turnAdvanceDelay = 1
+}
+
+func (s *GameScene) destroyTankOutOfBounds(tank *battleTank) {
+	if tank == nil || tank.power <= 0 {
+		return
+	}
+	s.clearXMV12IdleVibration(tank)
+	tank.power = 0
+	tank.shotStrength = 0
+	tank.zeroPowerShown = true
+	tank.zeroPowerGone = true
+	s.awardZeroPowerScore(tank, tank, damageCauseDirect)
+	s.removeTankSprites(tank)
+	s.xmV12DriveMode = false
+	s.xmV12DriveDirection = 0
+	s.xmV12EngineOffDelay = 0
+	s.turnAdvanceDelay = secondsToFrames(xmV12OutOfBoundsDelay)
 }
 
 func (s *GameScene) computerPlayerState(active *battleTank) computerplayers.State {
@@ -2498,6 +2758,14 @@ func shouldAdjustStrength(key ebiten.Key) bool {
 	}
 	held := inpututil.KeyPressDuration(key)
 	return held > 18 && held%4 == 0
+}
+
+func shouldAdjustCannon(key ebiten.Key) bool {
+	if inpututil.IsKeyJustPressed(key) {
+		return true
+	}
+	held := inpututil.KeyPressDuration(key)
+	return held > humanCannonRepeatStart && held%humanCannonRepeatFrames == 0
 }
 
 func (s *GameScene) canSelectWeaponSlot(tank *battleTank, slot int) bool {
@@ -3331,6 +3599,7 @@ func (s *GameScene) activePlayerCanAdjustShot() bool {
 		s.allTanksLanded() &&
 		!s.projectilesActive() &&
 		!s.turnAdvanceBlocked() &&
+		!s.xmV12DriveMode &&
 		s.turnAdvanceDelay <= 0 &&
 		s.roundTransitionDelay <= 0 &&
 		!s.roundSeriesComplete &&
@@ -3360,6 +3629,7 @@ func (s *GameScene) advanceActivePlayer() {
 	if len(s.tanks) == 0 {
 		return
 	}
+	s.clearXMV12IdleVibration(s.activeTank())
 	if s.endRoundIfOnlyOneTankRemains() {
 		return
 	}
@@ -3370,6 +3640,9 @@ func (s *GameScene) advanceActivePlayer() {
 	s.crumblerCameraFocus = nil
 	s.moskitoCameraFocus = nil
 	s.cloudSearchEffects = nil
+	s.xmV12DriveMode = false
+	s.xmV12DriveDirection = 0
+	s.xmV12EngineOffDelay = 0
 	next := s.nextActivePlayerIndex()
 	if next < 0 {
 		return
@@ -5340,7 +5613,11 @@ func (s *GameScene) alignedTankBottomY(tank *engine.Sprite) float64 {
 	copy := *tank
 	pos := *tank.Pos
 	copy.Pos = &pos
-	s.ground.AlignSpriteToSurface(&copy)
+	if s.isXMV12TankBody(tank) {
+		s.alignXMV12TankBodyToSurface(&copy)
+	} else {
+		s.ground.AlignSpriteToSurface(&copy)
+	}
 	return copy.Pos.Y + copy.Size.Y
 }
 
@@ -5362,7 +5639,39 @@ func (s *GameScene) alignTankBodyToSurface(tank *engine.Sprite) {
 		s.ground.AlignSpriteUprightToSurface(tank)
 		return
 	}
+	if s.isXMV12TankBody(tank) {
+		s.alignXMV12TankBodyToSurface(tank)
+		return
+	}
 	s.ground.AlignSpriteToSurface(tank)
+}
+
+func (s *GameScene) isXMV12TankBody(tank *engine.Sprite) bool {
+	if tank == nil {
+		return false
+	}
+	meta, ok := tank.Meta.(*models.TankBodyMeta)
+	return ok && meta.Kind == models.TankBodyKindXMV12
+}
+
+func (s *GameScene) alignXMV12TankBodyToSurface(tank *engine.Sprite) {
+	if tank == nil || tank.Pos == nil || tank.Size == nil || s.ground.Size == nil {
+		return
+	}
+	const treadContact = 0.34
+
+	centerX := tank.Pos.X + tank.Size.X/2
+	leftX := centerX - tank.Size.X*treadContact
+	rightX := centerX + tank.Size.X*treadContact
+	leftY := s.ground.SurfaceY(leftX)
+	rightY := s.ground.SurfaceY(rightX)
+
+	tank.Rot = math.Atan2(rightY-leftY, rightX-leftX)
+	centerY := (leftY+rightY)/2 - math.Cos(tank.Rot)*tank.Size.Y/2
+	tank.Pos = &engine.Vec{
+		X: tank.Pos.X,
+		Y: centerY - tank.Size.Y/2,
+	}
 }
 
 func (s *GameScene) tankSupportState(tank *engine.Sprite) (float64, bool) {
@@ -6262,6 +6571,10 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 	drawFilledRect(screen, image.Rect(hud.Min.X, hud.Min.Y, hud.Max.X, hud.Min.Y+2), color.RGBA{R: 245, G: 246, B: 214, A: 255})
 
 	active := s.hudTank()
+	if s.xmV12DriveMode {
+		s.drawXMV12HUD(screen, hud, active)
+		return
+	}
 	playerName := "Spieler"
 	playerColor := color.RGBA{R: 255, G: 160, B: 28, A: 255}
 	power := 100
@@ -6278,7 +6591,11 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 
 	centerX := int(screenCfg.Width) / 2
 	drawText(screen, playerName, centerX-42, hud.Min.Y+30, playerColor)
-	drawButton(screen, image.Rect(centerX-64, hud.Min.Y+44, centerX+64, hud.Min.Y+76), "Feuer!")
+	drawButton(screen, s.hudFireButtonRect(), "Feuer!")
+	if active != nil && s.playerHasXMV12(active.playerIndex) {
+		s.drawIgnitionButton(screen, s.hudIgnitionRect(), s.mousePressedInRect(s.hudIgnitionRect()))
+		s.drawIgnitionLabel(screen, s.hudIgnitionRect(), "Anlasser")
+	}
 
 	windArrow := "->"
 	if s.windDirection < 0 {
@@ -6485,13 +6802,17 @@ func (s *GameScene) drawPlayerInfoDialog(screen *ebiten.Image) {
 	if portrait := s.portraitForPlayer(tank.player); portrait != nil {
 		drawScaledImage(screen, portrait, insetRect(portraitRect, 2))
 	}
-	drawTextFace(screen, "Panzermodell", dialogTextFace, left.Min.X+134, left.Min.Y+28, colornames.Black)
-	modelRect := image.Rect(left.Min.X+149, left.Min.Y+40, left.Min.X+190, left.Min.Y+82)
+	drawCenteredTextFace(screen, "Panzermodell", image.Rect(left.Min.X+122, left.Min.Y+20, left.Max.X-8, left.Min.Y+38), dialogTextFace, colornames.Black)
+	modelRect := image.Rect(left.Min.X+132, left.Min.Y+42, left.Max.X-18, left.Min.Y+86)
 	drawFilledRect(screen, modelRect, colornames.Black)
 	if tank.body != nil && tank.body.Image != nil {
-		drawScaledImage(screen, tank.body.Image, insetRect(modelRect, 5))
+		drawScaledImage(screen, tank.body.Image, insetRect(modelRect, 4))
 	}
-	drawCenteredTextFace(screen, "Standard", image.Rect(left.Min.X+126, left.Min.Y+88, left.Max.X-8, left.Min.Y+108), dialogTextFace, colornames.Black)
+	modelName := "Standard"
+	if s.playerHasXMV12(tank.playerIndex) {
+		modelName = "XM-V12"
+	}
+	drawCenteredTextFace(screen, modelName, image.Rect(left.Min.X+126, left.Min.Y+88, left.Max.X-8, left.Min.Y+108), dialogTextFace, colornames.Black)
 
 	status := "aktiv"
 	if tank.power <= 0 || tank.zeroPowerGone {
@@ -6570,6 +6891,12 @@ func (s *GameScene) drawPlayerArsenal(screen *ebiten.Image, tank *battleTank, r 
 	}
 	if shield := s.energyShieldPercentForPlayer(tank.playerIndex); shield > 0 {
 		drawArsenalRow(energyShieldItemName, shield)
+	}
+	if s.playerHasXMV12(tank.playerIndex) {
+		drawArsenalRow(xmV12ItemName, 1)
+		if diesel := s.dieselForPlayer(tank.playerIndex); diesel > 0 {
+			drawArsenalRow(dieselItemName, diesel)
+		}
 	}
 
 	weaponList := weaponspkg.List()
@@ -6655,6 +6982,20 @@ func drawScaledImage(screen, img *ebiten.Image, r image.Rectangle) {
 	screen.DrawImage(img, op)
 }
 
+func splitImageFrames(img *ebiten.Image, frameWidth int) []*ebiten.Image {
+	if img == nil || frameWidth <= 0 {
+		return nil
+	}
+	bounds := img.Bounds()
+	frames := make([]*ebiten.Image, 0, bounds.Dx()/frameWidth)
+	for x := bounds.Min.X; x+frameWidth <= bounds.Max.X; x += frameWidth {
+		if frame, ok := img.SubImage(image.Rect(x, bounds.Min.Y, x+frameWidth, bounds.Max.Y)).(*ebiten.Image); ok {
+			frames = append(frames, frame)
+		}
+	}
+	return frames
+}
+
 func insetRect(r image.Rectangle, inset int) image.Rectangle {
 	return image.Rect(r.Min.X+inset, r.Min.Y+inset, r.Max.X-inset, r.Max.Y-inset)
 }
@@ -6664,6 +7005,83 @@ func (s *GameScene) drawHUDStepper(screen *ebiten.Image, r image.Rectangle, labe
 	drawButton(screen, image.Rect(r.Min.X, r.Min.Y, r.Min.X+buttonW, r.Min.Y+22), "-")
 	drawButton(screen, image.Rect(r.Min.X+buttonW+4, r.Min.Y, r.Min.X+buttonW*2+4, r.Min.Y+22), "+")
 	drawText(screen, label+": "+strconv.Itoa(value), r.Min.X+buttonW*2+12, r.Min.Y+17, colornames.White)
+}
+
+func (s *GameScene) drawXMV12HUD(screen *ebiten.Image, hud image.Rectangle, tank *battleTank) {
+	if tank == nil {
+		return
+	}
+	hudCenterY := hud.Min.Y + hud.Dy()/2
+	gaugeHeight := 69
+	gaugeRect := image.Rect(hud.Min.X+28, hudCenterY-gaugeHeight/2, hud.Min.X+125, hudCenterY-gaugeHeight/2+gaugeHeight)
+	drawScaledImage(screen, s.fuelGaugeImage, gaugeRect)
+	s.drawFuelNeedle(screen, gaugeRect, float64(s.dieselForPlayer(tank.playerIndex))/float64(xmV12MaxDiesel))
+
+	slopeHeight := 33
+	slopeRect := image.Rect(gaugeRect.Max.X+89, hudCenterY-slopeHeight/2, gaugeRect.Max.X+200, hudCenterY-slopeHeight/2+slopeHeight)
+	drawScaledImage(screen, s.slopeMeterImage, slopeRect)
+	s.drawSlopeMarker(screen, slopeRect, tank)
+
+	centerX := int(core.Config().Screen.Width) / 2
+	drawText(screen, tank.player.Name, centerX-38, hudCenterY-18, tank.player.Color)
+	drawButton(screen, s.xmV12LeftButtonRect(), "<")
+	drawButton(screen, s.xmV12StopButtonRect(), "STOP")
+	drawButton(screen, s.xmV12RightButtonRect(), ">")
+
+	s.drawIgnitionButton(screen, s.xmV12MotorOffRect(), s.mousePressedInRect(s.xmV12MotorOffRect()))
+	s.drawIgnitionLabel(screen, s.xmV12MotorOffRect(), "Motor aus")
+}
+
+func (s *GameScene) drawFuelNeedle(screen *ebiten.Image, r image.Rectangle, ratio float64) {
+	ratio = math.Max(0, math.Min(1, ratio))
+	anchor := engine.V(float64(r.Min.X)+37*float64(r.Dx())/97, float64(r.Min.Y)+65*float64(r.Dy())/69)
+	length := float32(56 * float64(r.Dx()) / 97)
+	angle := engine.DegToRad(-4 - ratio*76)
+	end := anchor.Add(engine.V(float64(length), 0).Rotated(angle))
+	vector.StrokeLine(screen, float32(anchor.X), float32(anchor.Y), float32(end.X), float32(end.Y), 1, colornames.White, false)
+}
+
+func (s *GameScene) drawSlopeMarker(screen *ebiten.Image, r image.Rectangle, tank *battleTank) {
+	if tank == nil || tank.body == nil {
+		return
+	}
+	degrees := math.Max(-60, math.Min(60, engine.RadToDeg(tank.body.Rot)))
+	x := float64(r.Min.X) + float64(r.Dx())*(degrees+60)/120
+	centerX := float64(r.Min.X) + float64(r.Dx())/2
+	x1 := int(math.Min(centerX, x))
+	x2 := int(math.Max(centerX, x))
+	if x2 <= x1 {
+		x2 = x1 + 1
+	}
+	bar := image.Rect(x1, r.Min.Y+13, x2, r.Min.Y+30)
+	c := colornames.White
+	absSlope := math.Abs(degrees)
+	switch {
+	case absSlope >= 50:
+		c = color.RGBA{R: 220, G: 0, B: 0, A: 255}
+	case absSlope >= 40:
+		c = color.RGBA{R: 245, G: 118, B: 0, A: 255}
+	case absSlope >= 30:
+		c = color.RGBA{R: 245, G: 232, B: 0, A: 255}
+	}
+	drawFilledRect(screen, bar, c)
+}
+
+func (s *GameScene) drawIgnitionButton(screen *ebiten.Image, r image.Rectangle, pressed bool) {
+	if len(s.ignitionFrames) == 0 {
+		drawButton(screen, r, "")
+		return
+	}
+	frame := s.ignitionFrames[0]
+	if pressed && len(s.ignitionFrames) > 1 {
+		frame = s.ignitionFrames[1]
+	}
+	drawScaledImage(screen, frame, r)
+}
+
+func (s *GameScene) drawIgnitionLabel(screen *ebiten.Image, button image.Rectangle, label string) {
+	labelRect := image.Rect(button.Min.X-20, button.Max.Y+4, button.Max.X+20, button.Max.Y+20)
+	drawCenteredTextFace(screen, label, labelRect, dialogTextFace, colornames.White)
 }
 
 func (s *GameScene) drawWeaponSlot(screen *ebiten.Image, index int) {
@@ -6767,6 +7185,69 @@ func debugScrollBarRect() image.Rectangle {
 	screen := core.Config().Screen
 	y := int(screen.Height) - gameHUDHeight - 20
 	return image.Rect(12, y, int(screen.Width)-12, y+16)
+}
+
+func (s *GameScene) hudStrengthMinusRect() image.Rectangle {
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(10, hudY+14, 34, hudY+36)
+}
+
+func (s *GameScene) hudStrengthPlusRect() image.Rectangle {
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(38, hudY+14, 62, hudY+36)
+}
+
+func (s *GameScene) hudAngleMinusRect() image.Rectangle {
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(10, hudY+50, 34, hudY+72)
+}
+
+func (s *GameScene) hudAnglePlusRect() image.Rectangle {
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(38, hudY+50, 62, hudY+72)
+}
+
+func (s *GameScene) hudFireButtonRect() image.Rectangle {
+	centerX := int(core.Config().Screen.Width) / 2
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(centerX-64, hudY+44, centerX+64, hudY+76)
+}
+
+func (s *GameScene) hudIgnitionRect() image.Rectangle {
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(190, hudY+14, 221, hudY+44)
+}
+
+func (s *GameScene) xmV12LeftButtonRect() image.Rectangle {
+	centerX := int(core.Config().Screen.Width) / 2
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(centerX-80, hudY+56, centerX-58, hudY+78)
+}
+
+func (s *GameScene) xmV12StopButtonRect() image.Rectangle {
+	centerX := int(core.Config().Screen.Width) / 2
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(centerX-54, hudY+56, centerX+54, hudY+78)
+}
+
+func (s *GameScene) xmV12RightButtonRect() image.Rectangle {
+	centerX := int(core.Config().Screen.Width) / 2
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(centerX+58, hudY+56, centerX+80, hudY+78)
+}
+
+func (s *GameScene) xmV12MotorOffRect() image.Rectangle {
+	screen := core.Config().Screen
+	hudY := int(s.battlefieldHeight())
+	return image.Rect(int(screen.Width)-78, hudY+40, int(screen.Width)-47, hudY+70)
+}
+
+func (s *GameScene) mousePressedInRect(r image.Rectangle) bool {
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		return false
+	}
+	x, y := ebiten.CursorPosition()
+	return image.Pt(x, y).In(r)
 }
 
 func (s *GameScene) battlefieldHeight() float64 {
@@ -6949,9 +7430,13 @@ func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behav
 			return
 		}
 		if source.RotAnchor != nil {
+			mount := models.TankCannonMount(tank)
+			center := engine.V(tank.Size.X/2, tank.Size.Y/2)
+			offset := mount.Sub(center).Rotated(tank.Rot)
+			anchorWorld := engine.V(tank.Pos.X+center.X, tank.Pos.Y+center.Y).Add(offset)
 			source.Pos = &engine.Vec{
-				X: tank.Pos.X + models.SmallTankCannonMount.X - source.RotAnchor.X,
-				Y: tank.Pos.Y + models.SmallTankCannonMount.Y - source.RotAnchor.Y,
+				X: anchorWorld.X - source.RotAnchor.X,
+				Y: anchorWorld.Y - source.RotAnchor.Y,
 			}
 			return
 		}
@@ -6963,15 +7448,27 @@ func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behav
 }
 
 func (s *GameScene) behaviorRotateOnButton(source *engine.Sprite) {
-	step := float64(source.RotationSpeed)
+	if shouldAdjustCannon(ebiten.KeyArrowLeft) {
+		source.Rot -= engine.DegToRad(s.humanCannonStep())
+	} else if shouldAdjustCannon(ebiten.KeyArrowRight) {
+		source.Rot += engine.DegToRad(s.humanCannonStep())
+	}
+}
+
+func (s *GameScene) humanCannonStep() float64 {
 	if shiftPressed() {
-		step *= 10
+		return humanCannonStepDegrees * 10
 	}
-	if RotateLeft() {
-		source.Rot -= engine.DegToRad(step)
-	} else if RotateRight() {
-		source.Rot += engine.DegToRad(step)
+	return humanCannonStepDegrees
+}
+
+func (s *GameScene) adjustTankCannon(tank *battleTank, degrees float64) {
+	if tank == nil || tank.cannon == nil {
+		return
 	}
+	tank.cannon.Rot += engine.DegToRad(degrees)
+	s.clampCannonRotationToTank(tank.cannon, tank.body)
+	s.updateXMV12FacingFromCannon(tank)
 }
 
 func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
@@ -6994,6 +7491,7 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 	}
 	s.behaviorRotateOnButton(source)
 	s.clampCannonRotationToTank(source, tank.body)
+	s.updateXMV12FacingFromCannon(tank)
 }
 
 func (s *GameScene) resetComputerTurnPlans() {

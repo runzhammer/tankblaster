@@ -63,6 +63,8 @@ type shopInventory struct {
 	classB            []int
 	mfsBoosterCharges int
 	energyShield      float64
+	hasXMV12          bool
+	diesel            float64
 }
 
 type shopAssets struct {
@@ -150,6 +152,10 @@ func makeShopInventories(playerCount int) []shopInventory {
 			if itemIndex := shopItemIndexByName(mfsBoosterItemName); itemIndex >= 0 {
 				inventories[i].classA[itemIndex] = maxInt(inventories[i].classA[itemIndex], 1)
 				inventories[i].mfsBoosterCharges = mfsBoosterUsesPerPurchase
+			}
+			if i == 0 {
+				inventories[i].hasXMV12 = true
+				inventories[i].diesel = xmV12DebugDiesel
 			}
 		}
 	}
@@ -393,6 +399,12 @@ func (s *GameScene) affordableComputerShopChoices(playerIndex int, mode shopMode
 		if s.isEnergyShieldItem(itemIndex) && s.energyShieldPercentForPlayer(playerIndex) >= int(energyShieldMaxPercent) {
 			continue
 		}
+		if s.isXMV12Item(itemIndex) && s.playerHasXMV12(playerIndex) {
+			continue
+		}
+		if s.isDieselItem(itemIndex) && (!s.playerHasXMV12(playerIndex) || s.dieselForPlayer(playerIndex) >= xmV12MaxDiesel) {
+			continue
+		}
 		choices = append(choices, computerShopChoice{mode: mode, targetIndex: listIndex})
 	}
 	return choices
@@ -565,6 +577,12 @@ func (s *GameScene) buySelectedShopItem() {
 	if s.isEnergyShieldItem(itemIndex) && s.energyShieldPercentForPlayer(playerIndex) >= int(energyShieldMaxPercent) {
 		return
 	}
+	if s.isXMV12Item(itemIndex) && s.playerHasXMV12(playerIndex) {
+		return
+	}
+	if s.isDieselItem(itemIndex) && (!s.playerHasXMV12(playerIndex) || s.dieselForPlayer(playerIndex) >= xmV12MaxDiesel) {
+		return
+	}
 	s.credits[playerIndex] -= price
 	defer s.ensureDebugHumanCredits()
 	quantity := shopItems()[itemIndex].stock
@@ -577,6 +595,12 @@ func (s *GameScene) buySelectedShopItem() {
 	}
 	if s.isEnergyShieldItem(itemIndex) {
 		s.addEnergyShield(playerIndex, quantity)
+	}
+	if s.isXMV12Item(itemIndex) {
+		s.buyXMV12(playerIndex)
+	}
+	if s.isDieselItem(itemIndex) {
+		s.addDiesel(playerIndex, quantity)
 	}
 	if s.shopMode == shopModeClassB {
 		s.inventories[playerIndex].classB[itemIndex] += quantity
@@ -762,11 +786,24 @@ func (s *GameScene) selectedShopItemInventoryText(playerIndex int) (string, bool
 	if itemIndex < 0 {
 		return "", false
 	}
+	items := shopItems()
+	if itemIndex >= len(items) {
+		return "", false
+	}
+	if items[itemIndex].name == dieselItemName {
+		return strconv.Itoa(s.dieselForPlayer(playerIndex)) + "/" + strconv.Itoa(xmV12MaxDiesel), true
+	}
 	if s.isEnergyShieldItem(itemIndex) {
 		return strconv.Itoa(s.energyShieldPercentForPlayer(playerIndex)) + "%", true
 	}
 	if s.isMFSBoosterItem(itemIndex) {
 		return strconv.Itoa(s.mfsBoosterCountForPlayer(playerIndex)), true
+	}
+	if s.isXMV12Item(itemIndex) {
+		if s.playerHasXMV12(playerIndex) {
+			return "1", true
+		}
+		return "0", true
 	}
 	return strconv.Itoa(s.shopItemCountForPlayer(playerIndex, itemIndex)), true
 }

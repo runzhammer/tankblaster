@@ -30,7 +30,7 @@ func shopItems() []shopItem {
 		{name: scrollOMatItemName, price: 1000, stock: 1, screenIndex: 19},
 		{name: energyShieldItemName, price: 15000, stock: 1, screenIndex: 20},
 		{name: "MFS Verstärker", price: 12000, stock: 1, screenIndex: 21},
-		{name: "XM-V12 Panzer", price: 9890, stock: 1, screenIndex: 22},
-		{name: "Diesel (F54)", price: 400, stock: 100, screenIndex: 23},
+		{name: xmV12ItemName, price: 9890, stock: 1, screenIndex: 22},
+		{name: dieselItemName, price: 400, stock: xmV12DieselPerPurchase, screenIndex: 23},
 	}
 }
