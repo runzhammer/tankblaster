@@ -649,6 +649,7 @@ type GameScene struct {
 	gameHelpOpen         bool
 	playerInfoOpen       bool
 	playerInfoIndex      int
+	pressedDialogButton  string
 	gamePaused           bool
 	lastDamageSource     *battleTank
 	shopPlayerOrder      []int
@@ -2151,21 +2152,37 @@ func (s *GameScene) handleGameDialogInput() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyF1) {
 		s.gameHelpOpen = true
 		s.playerInfoOpen = false
+		s.pressedDialogButton = ""
 		return nil
 	}
 	if s.gameHelpOpen || s.playerInfoOpen {
 		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
 			s.gameHelpOpen = false
 			s.playerInfoOpen = false
+			s.pressedDialogButton = ""
 			return nil
 		}
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			x, y := ebiten.CursorPosition()
 			if s.gameHelpOpen && image.Pt(x, y).In(gameHelpOKRect()) {
-				s.gameHelpOpen = false
+				s.pressedDialogButton = "game_help_ok"
 				return nil
 			}
 			if s.playerInfoOpen && image.Pt(x, y).In(playerInfoOKRect()) {
+				s.pressedDialogButton = "player_info_ok"
+				return nil
+			}
+		}
+		if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+			x, y := ebiten.CursorPosition()
+			p := image.Pt(x, y)
+			button := s.pressedDialogButton
+			s.pressedDialogButton = ""
+			switch {
+			case button == "game_help_ok" && s.gameHelpOpen && p.In(gameHelpOKRect()):
+				s.gameHelpOpen = false
+				return nil
+			case button == "player_info_ok" && s.playerInfoOpen && p.In(playerInfoOKRect()):
 				s.playerInfoOpen = false
 				return nil
 			}

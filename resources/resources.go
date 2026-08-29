@@ -68,6 +68,9 @@ var PlayerComputerDrNuke []byte
 //go:embed player_computer_harald.png
 var PlayerComputerHarald []byte
 
+//go:embed klecks.png
+var PaintSplotchPNG []byte
+
 //go:embed zero_power_dust_explosion.png
 var ZeroPowerDustExplosionPNG []byte
 

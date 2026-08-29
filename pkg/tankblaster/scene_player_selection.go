@@ -45,6 +45,7 @@ var defaultPlayerColors = []color.RGBA{
 var (
 	uiTextFace     font.Face = loadUIFont(15)
 	dialogTextFace font.Face = loadUIFont(11)
+	paintSplotch   *ebiten.Image
 )
 
 func loadUIFont(size float64) font.Face {
@@ -67,6 +68,8 @@ var paletteColors = []color.RGBA{
 	{R: 240, G: 220, B: 20, A: 255},
 	{R: 0, G: 170, B: 180, A: 255},
 	{R: 235, G: 85, B: 170, A: 255},
+	{R: 245, G: 245, B: 245, A: 255},
+	{R: 40, G: 40, B: 40, A: 255},
 }
 
 type playerSelectionSlot struct {
@@ -93,6 +96,8 @@ type playerSelectionScene struct {
 	canvas            *ebiten.Image
 	humanPortrait     *ebiten.Image
 	computerPortraits map[computerplayers.ID]*ebiten.Image
+
+	pressedDialogButton string
 }
 
 func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
@@ -129,14 +134,27 @@ func (s *playerSelectionScene) Update() error {
 	}
 	if s.optionsOpen || s.helpOpen {
 		s.handleDialogKeyboard()
+		if !s.optionsOpen && !s.helpOpen {
+			s.pressedDialogButton = ""
+			return nil
+		}
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			x, y := ebiten.CursorPosition()
 			x, y = s.toSelectionCoords(x, y)
+			if button := s.dialogButtonAt(x, y); button != "" {
+				s.pressedDialogButton = button
+				return nil
+			}
 			if s.optionsOpen {
 				s.handleOptionsDialogClick(x, y)
 			} else {
 				s.handleHelpDialogClick(x, y)
 			}
+		}
+		if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+			x, y := ebiten.CursorPosition()
+			x, y = s.toSelectionCoords(x, y)
+			s.releaseDialogButton(x, y)
 		}
 		return nil
 	}
@@ -334,6 +352,48 @@ func (s *playerSelectionScene) handleHelpDialogClick(x, y int) {
 	}
 }
 
+func (s *playerSelectionScene) dialogButtonAt(x, y int) string {
+	p := image.Pt(x, y)
+	if s.optionsOpen {
+		r := optionsDialogRect()
+		switch {
+		case p.In(image.Rect(r.Max.X-88, r.Min.Y+56, r.Max.X-16, r.Min.Y+77)):
+			return "options_ok"
+		case p.In(image.Rect(r.Max.X-88, r.Min.Y+86, r.Max.X-16, r.Min.Y+107)):
+			return "options_cancel"
+		case p.In(image.Rect(r.Max.X-88, r.Min.Y+166, r.Max.X-16, r.Min.Y+187)):
+			return "options_language"
+		}
+	}
+	if s.helpOpen {
+		r := helpDialogRect()
+		if p.In(image.Rect(r.Max.X-75, r.Max.Y-63, r.Max.X-12, r.Max.Y-39)) {
+			return "selection_help_ok"
+		}
+	}
+	return ""
+}
+
+func (s *playerSelectionScene) releaseDialogButton(x, y int) {
+	if s.pressedDialogButton == "" {
+		return
+	}
+	button := s.pressedDialogButton
+	s.pressedDialogButton = ""
+	if s.dialogButtonAt(x, y) != button {
+		return
+	}
+	switch button {
+	case "options_ok":
+		s.g.options = s.optionsDraft
+		s.optionsOpen = false
+	case "options_cancel":
+		s.optionsOpen = false
+	case "selection_help_ok":
+		s.helpOpen = false
+	}
+}
+
 func (s *playerSelectionScene) handleOptionsDialogClick(x, y int) {
 	p := image.Pt(x, y)
 	r := optionsDialogRect()
@@ -498,6 +558,8 @@ func (s *playerSelectionScene) startGame() error {
 func (s *playerSelectionScene) drawRounds(screen *ebiten.Image) {
 	drawFilledRect(screen, image.Rect(205, 76, 432, 99), colornames.White)
 	drawText(screen, "Anzahl Runden: "+strconv.Itoa(s.rounds), 218, 93, colornames.Black)
+	drawButton(screen, image.Rect(434, 72, 466, 103), "-")
+	drawButton(screen, image.Rect(474, 72, 506, 103), "+")
 }
 
 func (s *playerSelectionScene) drawStartState(screen *ebiten.Image) {
@@ -774,7 +836,9 @@ func (s *playerSelectionScene) drawPalette(screen *ebiten.Image, slotIndex int) 
 	frame := image.Rect(x0-6, y0-6, x0+len(paletteColors)*26+4, y0+28)
 	drawFrame(screen, frame, colornames.White, colornames.Black)
 	for i, c := range paletteColors {
-		drawFrame(screen, image.Rect(x0+i*26, y0, x0+i*26+22, y0+22), c, colornames.Black)
+		cell := image.Rect(x0+i*26, y0, x0+i*26+22, y0+22)
+		drawFrame(screen, cell, colornames.White, colornames.Black)
+		drawPaintSwatch(screen, insetRect(cell, 1), c)
 	}
 }
 
@@ -795,17 +859,63 @@ func palettePosForSlot(index int) (int, int) {
 }
 
 func drawButton(screen *ebiten.Image, r image.Rectangle, label string) {
+	pressed := buttonPressed(screen, r)
 	drawFrame(screen, r, color.RGBA{R: 210, G: 210, B: 210, A: 255}, colornames.Black)
-	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Min.Y+2, r.Max.X-2, r.Min.Y+5), colornames.White)
-	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Max.Y-5, r.Max.X-2, r.Max.Y-2), color.RGBA{R: 115, G: 115, B: 115, A: 255})
+	if pressed {
+		drawPressedButtonEdges(screen, r, 3)
+		drawCenteredText(screen, label, r.Add(image.Pt(1, 1)), colornames.Black)
+		return
+	}
+	drawRaisedButtonEdges(screen, r, 3)
 	drawCenteredText(screen, label, r, colornames.Black)
 }
 
 func drawDialogButton(screen *ebiten.Image, r image.Rectangle, label string) {
+	pressed := buttonPressed(screen, r)
 	drawFrame(screen, r, color.RGBA{R: 214, G: 214, B: 214, A: 255}, colornames.Black)
-	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Min.Y+2, r.Max.X-2, r.Min.Y+4), colornames.White)
-	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Max.Y-4, r.Max.X-2, r.Max.Y-2), color.RGBA{R: 120, G: 120, B: 120, A: 255})
+	if pressed {
+		drawPressedButtonEdges(screen, r, 2)
+		drawCenteredTextFace(screen, label, r.Add(image.Pt(1, 1)), dialogTextFace, colornames.Black)
+		return
+	}
+	drawRaisedButtonEdges(screen, r, 2)
 	drawCenteredTextFace(screen, label, r, dialogTextFace, colornames.Black)
+}
+
+func buttonPressed(screen *ebiten.Image, r image.Rectangle) bool {
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		return false
+	}
+	x, y := ebiten.CursorPosition()
+	return buttonCursorPoint(screen, x, y).In(r)
+}
+
+func buttonCursorPoint(screen *ebiten.Image, x, y int) image.Point {
+	bounds := screen.Bounds()
+	screenW := int(core.Config().Screen.Width)
+	screenH := int(core.Config().Screen.Height)
+	if screenW <= 0 || screenH <= 0 {
+		return image.Pt(x, y)
+	}
+	return image.Pt(bounds.Min.X+x*bounds.Dx()/screenW, bounds.Min.Y+y*bounds.Dy()/screenH)
+}
+
+func drawRaisedButtonEdges(screen *ebiten.Image, r image.Rectangle, depth int) {
+	light := colornames.White
+	shadow := color.RGBA{R: 115, G: 115, B: 115, A: 255}
+	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Min.Y+2, r.Max.X-2, r.Min.Y+2+depth), light)
+	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Min.Y+2, r.Min.X+2+depth, r.Max.Y-2), light)
+	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Max.Y-2-depth, r.Max.X-2, r.Max.Y-2), shadow)
+	drawFilledRect(screen, image.Rect(r.Max.X-2-depth, r.Min.Y+2, r.Max.X-2, r.Max.Y-2), shadow)
+}
+
+func drawPressedButtonEdges(screen *ebiten.Image, r image.Rectangle, depth int) {
+	light := colornames.White
+	shadow := color.RGBA{R: 105, G: 105, B: 105, A: 255}
+	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Min.Y+2, r.Max.X-2, r.Min.Y+2+depth), shadow)
+	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Min.Y+2, r.Min.X+2+depth, r.Max.Y-2), shadow)
+	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Max.Y-2-depth, r.Max.X-2, r.Max.Y-2), light)
+	drawFilledRect(screen, image.Rect(r.Max.X-2-depth, r.Min.Y+2, r.Max.X-2, r.Max.Y-2), light)
 }
 
 func drawFrame(screen *ebiten.Image, r image.Rectangle, fill, border color.Color) {
@@ -839,10 +949,16 @@ func drawCenteredTextFace(screen *ebiten.Image, value string, r image.Rectangle,
 	drawTextFace(screen, value, face, x, y, c)
 }
 
-func drawPaintSwatch(screen *ebiten.Image, r image.Rectangle, c color.Color) {
-	drawFilledRect(screen, image.Rect(r.Min.X+7, r.Min.Y, r.Min.X+15, r.Max.Y), c)
-	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y+8, r.Max.X, r.Min.Y+17), c)
-	drawFilledRect(screen, image.Rect(r.Min.X+3, r.Min.Y+4, r.Max.X-3, r.Max.Y-4), c)
+func drawPaintSwatch(screen *ebiten.Image, rect image.Rectangle, c color.Color) {
+	if paintSplotch == nil {
+		paintSplotch = mustImageFromPNG(r.PaintSplotchPNG)
+	}
+	bounds := paintSplotch.Bounds()
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(float64(rect.Dx())/float64(bounds.Dx()), float64(rect.Dy())/float64(bounds.Dy()))
+	op.GeoM.Translate(float64(rect.Min.X), float64(rect.Min.Y))
+	op.ColorScale.ScaleWithColor(c)
+	screen.DrawImage(paintSplotch, op)
 }
 
 func mustImageFromPNG(data []byte) *ebiten.Image {
