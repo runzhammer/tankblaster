@@ -75,6 +75,7 @@ const (
 	debugShopStartingCredits   = 20000
 	roundTransitionSeconds     = 5
 	computerAdjustSpeedFactor  = 1.6
+	additionalVisibleSkyHeight = 500.0
 	palmRevengeAggroMin        = 20.0
 	palmRevengeAggroMax        = 40.0
 	palmRevengeTrigger         = 100.0
@@ -304,6 +305,7 @@ type projectile struct {
 	weaponIndex        int
 	effectiveWeapon    weaponspkg.Weapon
 	hasEffectiveWeapon bool
+	classBDud          bool
 	trail              []engine.Vec
 	shooter            *battleTank
 	launchRot          float64
@@ -592,6 +594,7 @@ type GameScene struct {
 	waterAnimation          spriteAnimation
 	waterBlubberAnimation   spriteAnimation
 	waterBlotchAnimation    spriteAnimation
+	dudImpactAnimation      spriteAnimation
 	moskitosAnimation       spriteAnimation
 	questionAnimation       spriteAnimation
 	blinkBojeAnimation      spriteAnimation
@@ -790,6 +793,11 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		return nil, err
 	}
 	s.waterBlotchAnimation = waterBlotchAnimation
+	dudImpactAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 0.5, scaleY: 0.5})
+	if err != nil {
+		return nil, err
+	}
+	s.dudImpactAnimation = dudImpactAnimation
 	moskitosAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.MoskitosPNG, frameWidth: 23, delay: 8})
 	if err != nil {
 		return nil, err
@@ -2833,31 +2841,31 @@ func (s *GameScene) toggleScrollOMat(tank *battleTank) {
 	tank.selectedWeapon = scrollSlot
 }
 
-func (s *GameScene) consumeSelectedWeaponAmmo(tank *battleTank) bool {
+func (s *GameScene) consumeSelectedWeaponAmmo(tank *battleTank) (bool, bool) {
 	if tank == nil {
-		return false
+		return false, false
 	}
 	slot := tank.selectedWeapon
 	if slot == 0 {
-		return true
+		return true, false
 	}
 	itemIndex := s.itemIndexForWeaponSlot(slot)
 	if itemIndex < 0 || s.shopItemCountForPlayer(tank.playerIndex, itemIndex) <= 0 {
-		return false
+		return false, false
 	}
 	if s.isScrollOMatItem(itemIndex) {
-		return true
+		return true, false
 	}
 	s.ensureInventory(tank.playerIndex)
 	if itemIndex < len(s.inventories[tank.playerIndex].classA) && s.inventories[tank.playerIndex].classA[itemIndex] > 0 {
 		s.inventories[tank.playerIndex].classA[itemIndex]--
-		return true
+		return true, false
 	}
 	if itemIndex < len(s.inventories[tank.playerIndex].classB) && s.inventories[tank.playerIndex].classB[itemIndex] > 0 {
 		s.inventories[tank.playerIndex].classB[itemIndex]--
-		return true
+		return true, s.rng.Intn(2) == 0
 	}
-	return false
+	return false, false
 }
 
 func (s *GameScene) ammoForWeaponSlot(playerIndex, slot int) int {
@@ -2882,7 +2890,8 @@ func (s *GameScene) fireActiveWeapon() {
 	if s.scrollOMatActive() {
 		return
 	}
-	if !s.consumeSelectedWeaponAmmo(tank) {
+	consumed, classBDud := s.consumeSelectedWeaponAmmo(tank)
+	if !consumed {
 		return
 	}
 
@@ -2900,7 +2909,7 @@ func (s *GameScene) fireActiveWeapon() {
 	}
 	tank.computerPlan = nil
 	if weapon.Laser {
-		s.fireLaserWeapon(tank, *muzzle, tank.cannon.Rot, weapon)
+		s.fireLaserWeapon(tank, *muzzle, tank.cannon.Rot, weapon, classBDud)
 		return
 	}
 	angles := []float64{tank.cannon.Rot}
@@ -2927,6 +2936,7 @@ func (s *GameScene) fireActiveWeapon() {
 			weaponIndex:        tank.selectedWeapon,
 			effectiveWeapon:    weapon,
 			hasEffectiveWeapon: hasEffectiveWeapon,
+			classBDud:          classBDud,
 			shooter:            tank,
 			launchRot:          angle,
 			trail:              []engine.Vec{*muzzle},
@@ -3038,16 +3048,29 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 
 	weapon := s.weaponForProjectile(p)
-	if weapon.Mosquitos && s.projectileGroundImpactWithinFrames(p, gravity, windAcceleration, mosquitoPreviewFrames) {
+	if !p.classBDud && weapon.Mosquitos && s.projectileGroundImpactWithinFrames(p, gravity, windAcceleration, mosquitoPreviewFrames) {
 		p.mosquitoPreview = true
 	}
 	if hit, ok := s.projectileHitsWaterSurface(p, projectileRadiusForWeapon(weapon)); ok {
+		if p.classBDud {
+			s.reportComputerShot(hit, -1, false)
+			s.startDudImpact(hit)
+			s.scheduleCloudSearchForProjectile(p)
+			return false, nil
+		}
 		s.reportComputerShot(hit, -1, false)
 		s.startWaterSurfaceImpact(hit)
 		s.scheduleCloudSearchForProjectile(p)
 		return false, nil
 	}
 	if palm := s.projectileHitsPalm(p, projectileRadiusForWeapon(weapon)); palm != nil {
+		if p.classBDud {
+			s.reportComputerShot(p.pos, -1, false)
+			s.handleDudPalmHit(palm)
+			s.startDudImpact(p.pos)
+			s.scheduleCloudSearchForProjectile(p)
+			return false, nil
+		}
 		s.reportComputerShot(p.pos, -1, false)
 		s.spawnPalmLeafFall(palm)
 		if weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationFireball && palm.state == palmStateAlive {
@@ -3088,6 +3111,12 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 			continue
 		}
 		if engine.Collision(hitBounds, tank.body.Bounds().ScaledAtCenter(0.78)) {
+			if p.classBDud {
+				s.reportComputerShot(p.pos, tank.playerIndex, false)
+				s.startDudImpact(p.pos)
+				s.scheduleCloudSearchForProjectile(p)
+				return false, nil
+			}
 			if damage := weapon.Damage; damage > 0 {
 				s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
 				s.awardDirectHitCredits(tank, s.lastDamageSource)
@@ -3103,7 +3132,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 }
 
 func (s *GameScene) shouldSplitProjectile(p *projectile, previousVelocityY float64) bool {
-	if p == nil || !p.splitterArmed {
+	if p == nil || p.classBDud || !p.splitterArmed {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
@@ -3171,7 +3200,7 @@ type laserHit struct {
 	tank *battleTank
 }
 
-func (s *GameScene) fireLaserWeapon(shooter *battleTank, muzzle engine.Vec, angle float64, weapon weaponspkg.Weapon) {
+func (s *GameScene) fireLaserWeapon(shooter *battleTank, muzzle engine.Vec, angle float64, weapon weaponspkg.Weapon, classBDud bool) {
 	dir := engine.V(1, 0).Rotated(angle)
 	dir = normalizedVec(dir)
 	maxDistance := s.laserMaxDistanceToWorld(muzzle, dir)
@@ -3193,6 +3222,24 @@ func (s *GameScene) fireLaserWeapon(shooter *battleTank, muzzle engine.Vec, angl
 	}
 
 	delay := laserHoldFrames
+	if classBDud {
+		effect.end = hit.pos
+		effect.tip = hit.pos
+		if hit.kind == laserHitNone {
+			effect.end = *end
+			effect.tip = *end
+		}
+		if hit.kind == laserHitPalm {
+			s.handleDudPalmHit(hit.palm)
+			s.startDudImpact(effect.tip)
+		} else {
+			s.startDudImpact(effect.tip)
+		}
+		s.reportComputerShot(effect.tip, -1, false)
+		s.laserEffects = append(s.laserEffects, effect)
+		s.delayTurnAdvance(maxInt(delay, s.impactPauseFrames()))
+		return
+	}
 	switch hit.kind {
 	case laserHitTank:
 		effect.end = hit.pos
@@ -3249,6 +3296,22 @@ func (s *GameScene) handleLaserPalmHit(palm *battlePalm) {
 	if s.palmRevenge == nil {
 		s.focusPalmCamera(palm)
 	}
+}
+
+func (s *GameScene) handleDudPalmHit(palm *battlePalm) {
+	if palm == nil {
+		return
+	}
+	s.spawnPalmLeafFall(palm)
+	if palm.state == palmStateSkeleton || palm.state == palmStateSkeletonSmoking {
+		s.crumblePalm(palm)
+	} else if !s.addPalmAggression(palm, s.lastDamageSource) {
+		s.startPalmEyes(palm)
+	}
+	if s.palmRevenge == nil {
+		s.focusPalmCamera(palm)
+	}
+	s.delayTurnAdvance(s.palmEffectDelayFrames(palm))
 }
 
 func (s *GameScene) updateLaserEffects() {
@@ -3686,6 +3749,11 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		return false
 	}
 	weapon := s.weaponForProjectile(p)
+	if p.classBDud {
+		s.reportComputerShot(p.pos, -1, false)
+		s.startDudImpact(p.pos)
+		return true
+	}
 	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && !weapon.Mosquitos && !weapon.Shockwave && !weapon.AirStrike && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
@@ -4703,6 +4771,22 @@ func (s *GameScene) startFireballImpact(pos engine.Vec, weapon weaponspkg.Weapon
 	}
 	s.animatedImpacts = append(s.animatedImpacts, effect)
 	s.damageTanksInRectFixed(s.animationWorldRect(pos, animation), damage)
+	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
+		s.turnAdvanceDelay = minimumDelay
+	}
+}
+
+func (s *GameScene) startDudImpact(pos engine.Vec) {
+	animation := s.dudImpactAnimation
+	if len(animation.frames) == 0 {
+		return
+	}
+	duration := maxInt(1, animation.totalTicks)
+	s.animatedImpacts = append(s.animatedImpacts, animatedImpact{
+		pos:       pos,
+		duration:  duration,
+		animation: animation,
+	})
 	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
 		s.turnAdvanceDelay = minimumDelay
 	}
@@ -5902,7 +5986,7 @@ func (s *GameScene) drawReentryTank(screen *ebiten.Image, anim *projectileReentr
 		return
 	}
 	body := anim.shooter.body
-	scale := math.Max(2.2, earthSize/110)
+	scale := 1.0
 	bodyW := body.Size.X * scale
 	bodyH := body.Size.Y * scale
 	bodyPos := engine.V(center.X-bodyW/2, center.Y-bodyH/2)
@@ -5912,8 +5996,8 @@ func (s *GameScene) drawReentryTank(screen *ebiten.Image, anim *projectileReentr
 		return
 	}
 	cannon := *anim.shooter.cannon
-	mount := engine.V(body.Size.X/2, body.Size.Y*0.28)
-	anchor := engine.V(cannon.Size.X/2, cannon.Size.Y/2)
+	mount := engine.V(body.Size.X, body.Size.Y+20)
+	anchor := engine.V(cannon.Size.X, cannon.Size.Y)
 	if cannon.RotAnchor != nil {
 		mount = models.SmallTankCannonMount
 		anchor = *cannon.RotAnchor
@@ -6809,7 +6893,7 @@ func (s *GameScene) drawGameHelpDialog(screen *ebiten.Image) {
 	for _, line := range lines {
 		if line.key != "" {
 			drawTextFace(screen, line.key, dialogTextFace, keysBox.Min.X+12, y, colornames.Black)
-			drawTextFace(screen, line.desc, dialogTextFace, keysBox.Min.X+130, y, colornames.Black)
+			drawTextFace(screen, line.desc, dialogTextFace, keysBox.Min.X+200, y, colornames.Black)
 		}
 		y += 18
 	}
@@ -7264,7 +7348,7 @@ func (s *GameScene) hudFireButtonRect() image.Rectangle {
 
 func (s *GameScene) hudIgnitionRect() image.Rectangle {
 	hudY := int(s.battlefieldHeight())
-	return image.Rect(190, hudY+14, 221, hudY+44)
+	return image.Rect(210, hudY+19, 241, hudY+49)
 }
 
 func (s *GameScene) xmV12LeftButtonRect() image.Rectangle {
@@ -7304,7 +7388,7 @@ func (s *GameScene) battlefieldHeight() float64 {
 }
 
 func (s *GameScene) skyExtraHeight() float64 {
-	return s.battlefieldHeight() * 0.30
+	return s.battlefieldHeight()*0.10 + additionalVisibleSkyHeight
 }
 
 func (s *GameScene) behaviorMoveOnButton(source *engine.Sprite) {

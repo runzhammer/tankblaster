@@ -678,13 +678,37 @@ func (s *GameScene) resetShopStock() {
 }
 
 func (s *GameScene) pickClassBItems() {
-	items := shopItems()
-	indexes := s.rng.Perm(len(items))
+	indexes := s.classBCandidateItemIndexes()
+	if len(indexes) > 1 {
+		s.rng.Shuffle(len(indexes), func(i, j int) {
+			indexes[i], indexes[j] = indexes[j], indexes[i]
+		})
+	}
 	s.shopClassBItems = append([]int(nil), indexes[:minInt(3, len(indexes))]...)
 	s.shopClassBStock = make([]int, len(s.shopClassBItems))
 	for i := range s.shopClassBStock {
 		s.shopClassBStock[i] = 1
 	}
+}
+
+func (s *GameScene) classBCandidateItemIndexes() []int {
+	items := shopItems()
+	indexes := make([]int, 0, len(items))
+	for index := range items {
+		if s.classBItemAllowed(index) {
+			indexes = append(indexes, index)
+		}
+	}
+	return indexes
+}
+
+func (s *GameScene) classBItemAllowed(itemIndex int) bool {
+	return itemIndex >= 0 &&
+		!s.isScrollOMatItem(itemIndex) &&
+		!s.isEnergyShieldItem(itemIndex) &&
+		!s.isMFSBoosterItem(itemIndex) &&
+		!s.isXMV12Item(itemIndex) &&
+		!s.isDieselItem(itemIndex)
 }
 
 func (s *GameScene) shopListIndexAt(cursor image.Point, count int) (int, bool) {
