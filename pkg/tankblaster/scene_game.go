@@ -5747,14 +5747,7 @@ func (s *GameScene) drawSingleProjectile(screen *ebiten.Image, camera *ebiten.Ge
 	}
 	c := weapon.Color
 	if weapon.ShowTrail {
-		for i, point := range p.trail {
-			if i%2 != 0 {
-				continue
-			}
-			projected := point.Project(camera)
-			alpha := uint8(70 + minInt(185, i*4))
-			drawFilledRect(screen, image.Rect(int(projected.X)-2, int(projected.Y)-2, int(projected.X)+2, int(projected.Y)+2), color.RGBA{R: c.R, G: c.G, B: c.B, A: alpha})
-		}
+		s.drawProjectileTail(screen, camera, p)
 	}
 	projected := p.pos.Project(camera)
 	radius := projectileRadiusForWeapon(weapon)
@@ -5763,6 +5756,61 @@ func (s *GameScene) drawSingleProjectile(screen *ebiten.Image, camera *ebiten.Ge
 		return
 	}
 	drawFilledRect(screen, image.Rect(int(projected.X-radius), int(projected.Y-radius), int(projected.X+radius), int(projected.Y+radius)), c)
+}
+
+func (s *GameScene) drawProjectileTail(screen *ebiten.Image, camera *ebiten.GeoM, p *projectile) {
+	if p == nil || len(p.trail) < 2 {
+		return
+	}
+	const (
+		redAtDistance  = 70.0
+		transparentAt  = 250.0
+		tailLineWidth  = 1.0
+		tailStartAlpha = 200.0
+		tailMidAlpha   = 175.0
+	)
+
+	distanceFromProjectile := 0.0
+	for i := len(p.trail) - 1; i > 0 && distanceFromProjectile < transparentAt; i-- {
+		current := p.trail[i]
+		previous := p.trail[i-1]
+		segment := current.Sub(previous)
+		segmentLength := segment.Len()
+		if segmentLength <= 0 {
+			continue
+		}
+
+		remaining := transparentAt - distanceFromProjectile
+		if segmentLength > remaining {
+			keep := remaining / segmentLength
+			previous = engine.V(
+				current.X-(current.X-previous.X)*keep,
+				current.Y-(current.Y-previous.Y)*keep,
+			)
+			segmentLength = remaining
+		}
+
+		midDistance := distanceFromProjectile + segmentLength/2
+		redProgress := math.Min(1, midDistance/redAtDistance)
+		alpha := tailStartAlpha + (tailMidAlpha-tailStartAlpha)*math.Min(1, midDistance/redAtDistance)
+		if midDistance > redAtDistance {
+			alpha = tailMidAlpha * math.Max(0, 1-(midDistance-redAtDistance)/(transparentAt-redAtDistance))
+		}
+		if alpha <= 0 {
+			break
+		}
+
+		c := color.RGBA{
+			R: 255,
+			G: uint8(math.Round(255 * (1 - redProgress))),
+			B: uint8(math.Round(255 * (1 - redProgress))),
+			A: uint8(math.Round(alpha)),
+		}
+		from := previous.Project(camera)
+		to := current.Project(camera)
+		vector.StrokeLine(screen, float32(from.X), float32(from.Y), float32(to.X), float32(to.Y), tailLineWidth, c, true)
+		distanceFromProjectile += segmentLength
+	}
 }
 
 func (s *GameScene) drawProjectileReentryAnimation(screen *ebiten.Image) {

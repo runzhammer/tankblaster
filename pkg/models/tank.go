@@ -52,7 +52,7 @@ func NewTank(name string, tankColor color.RGBA) Tank {
 }
 
 func NewXMV12Tank(name string, tankColor color.RGBA) Tank {
-	return newTankFromSprite(name, tankColor, r.XMV12TankSprite, TankBodyKindXMV12, engine.V(6, 10), 12)
+	return newTankFromSprite(name, tankColor, r.XMV12TankSprite, TankBodyKindXMV12, engine.V(6, 10), 26)
 }
 
 func newTankFromSprite(name string, tankColor color.RGBA, sprite []byte, bodyKind string, cannonMount engine.Vec, cannonLength int) Tank {
