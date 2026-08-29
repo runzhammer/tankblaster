@@ -282,8 +282,11 @@ func bestShot(state State, target TankState, minStrength, maxStrength int, profi
 }
 
 func simulatedShotError(active, target TankState, strength int, displayAngle float64, state State, profile smartProfile) float64 {
-	const gravity = 0.16
-	windAcceleration := float64(state.WindDirection*state.Wind) * 0.00065
+	const (
+		gravity              = 0.16
+		projectileWindFactor = 0.00195
+	)
+	windAcceleration := float64(state.WindDirection*state.Wind) * projectileWindFactor
 	speed := 1.4 + float64(strength)*0.32
 	rot := (displayAngle - 180) * math.Pi / 180
 	x := active.X

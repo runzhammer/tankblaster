@@ -146,6 +146,7 @@ const (
 	airStrikeImpactScale      = 1.5
 	splitterBombFragmentCount = 9
 	splitterBombSpreadWidth   = 300.0
+	projectileWindFactor      = 0.00195
 	laserHoldFrames           = 60
 	laserDrillSpeed           = 4.0
 	laserLineThickness        = 2.0
@@ -2975,7 +2976,7 @@ func (s *GameScene) updateProjectile() {
 	}
 
 	const gravity = 0.16
-	windAcceleration := float64(s.windDirection*s.wind) * 0.00065
+	windAcceleration := float64(s.windDirection*s.wind) * projectileWindFactor
 
 	active := s.projectiles[:0]
 	spawned := make([]*projectile, 0)
