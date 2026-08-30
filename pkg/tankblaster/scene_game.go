@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -306,6 +307,8 @@ type projectile struct {
 	effectiveWeapon    weaponspkg.Weapon
 	hasEffectiveWeapon bool
 	classBDud          bool
+	zeroPowerScatter   bool
+	scatterImpactColor color.RGBA
 	trail              []engine.Vec
 	shooter            *battleTank
 	launchRot          float64
@@ -330,6 +333,10 @@ type impactAnimation struct {
 	age            int
 	duration       int
 	cycles         int
+	color          color.RGBA
+	damage         int
+	attacker       *battleTank
+	damageApplied  map[int]bool
 	outward        bool
 	style          weaponspkg.ImpactAnimationStyle
 	terrainApplied bool
@@ -526,9 +533,28 @@ type palmLeafFall struct {
 type zeroPowerAnimation struct {
 	tank      *battleTank
 	animation spriteAnimation
+	kind      zeroPowerEffectKind
+	weapon    weaponspkg.Weapon
 	delay     int
 	age       int
 	duration  int
+	triggered bool
+}
+
+type zeroPowerEffectKind uint8
+
+const (
+	zeroPowerEffectSprite zeroPowerEffectKind = iota
+	zeroPowerEffectGrenadeImpact
+	zeroPowerEffectLargeGrenadeImpact
+	zeroPowerEffectAtomImpact
+	zeroPowerEffectScatterProjectiles
+)
+
+type zeroPowerChoice struct {
+	name      string
+	spriteIdx int
+	kind      zeroPowerEffectKind
 }
 
 type spriteAnimation struct {
@@ -640,6 +666,7 @@ type GameScene struct {
 	palmRevengeRemoval   *battleTank
 	zeroPowerEffects     []zeroPowerAnimation
 	zeroPowerAnimations  []spriteAnimation
+	zeroPowerNames       []string
 	shop                 shopAssets
 	turnAdvanceDelay     int
 	roundTransitionDelay int
@@ -700,11 +727,12 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 		},
 	}
 	s.ignitionFrames = splitImageFrames(mustImageFromPNG(r.ButtonIgnitionPNG), 31)
-	zeroPowerAnimations, err := loadZeroPowerAnimations()
+	zeroPowerAnimations, zeroPowerNames, err := loadZeroPowerAnimations()
 	if err != nil {
 		return nil, err
 	}
 	s.zeroPowerAnimations = zeroPowerAnimations
+	s.zeroPowerNames = zeroPowerNames
 	s.shop = shopAssets{
 		human:               mustImageFromPNG(r.PlayerHuman),
 		computer:            mustImageFromPNG(r.PlayerComputerDoedel),
@@ -1894,6 +1922,7 @@ func approach(current, target, smoothing, minStep float64) float64 {
 }
 
 type zeroPowerAnimationSheet struct {
+	name        string
 	data        []byte
 	frameWidth  int
 	frameHeight int
@@ -1961,24 +1990,26 @@ func loadSpriteAnimation(spec zeroPowerAnimationSheet) (spriteAnimation, error) 
 	return animation, nil
 }
 
-func loadZeroPowerAnimations() ([]spriteAnimation, error) {
+func loadZeroPowerAnimations() ([]spriteAnimation, []string, error) {
 	sources := []zeroPowerAnimationSheet{
-		{data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 1, scaleY: 1},
-		{data: r.ZeroPowerExplosionPNG, frameWidth: 67, frameHeight: 64, delay: 6},
-		{data: r.ZeroPowerMushroomExplosionPNG, frameWidth: 51, frameHeight: 57, delay: 6, anchor: zeroPowerAnchorTankBottom},
-		{data: r.ZeroPowerPlayerSmokePNG, frameWidth: 15, delay: 6, scaleX: 1.0, scaleY: 1.0},
+		{name: "dust", data: r.ZeroPowerDustExplosionPNG, frameWidth: 20, delay: 6, scaleX: 1, scaleY: 1},
+		{name: "explosion", data: r.ZeroPowerExplosionPNG, frameWidth: 65, frameHeight: 59, delay: 6},
+		{name: "mushroom", data: r.ZeroPowerMushroomExplosionPNG, frameWidth: 51, frameHeight: 57, delay: 6, anchor: zeroPowerAnchorTankBottom},
+		{name: "smoke", data: r.ZeroPowerPlayerSmokePNG, frameWidth: 15, delay: 6, scaleX: 1.0, scaleY: 1.0},
 	}
 	animations := make([]spriteAnimation, 0, len(sources))
+	names := make([]string, 0, len(sources))
 	for _, source := range sources {
 		animation, err := loadSpriteAnimation(source)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(animation.frames) > 0 {
 			animations = append(animations, animation)
+			names = append(names, source.name)
 		}
 	}
-	return animations, nil
+	return animations, names, nil
 }
 
 func loadPalmAsset() (*ebiten.Image, *image.RGBA, error) {
@@ -3042,7 +3073,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 	p.pos = *p.pos.Add(p.velocity)
 	p.trail = append(p.trail, p.pos)
-	if len(p.trail) > 260 {
+	if !p.zeroPowerScatter && len(p.trail) > 260 {
 		p.trail = p.trail[len(p.trail)-260:]
 	}
 	if alive, paused := s.handleProjectileWorldEdge(p); !alive {
@@ -3119,6 +3150,11 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 
 	if p.pos.Y >= s.ground.SurfaceY(p.pos.X) {
+		if p.zeroPowerScatter {
+			s.onZeroPowerScatterGroundImpact(p)
+			s.scheduleCloudSearchForProjectile(p)
+			return false, nil
+		}
 		if s.onGroundImpact(p) {
 			s.scheduleCloudSearchForProjectile(p)
 			return false, nil
@@ -3847,10 +3883,11 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 
 	impactPos := p.pos
 	terrainApplied := true
+	damageApplied := map[int]bool(nil)
 	if weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationPlasma {
 		impactPos.Y -= plasmaImpactVisualYOffset
 		terrainApplied = false
-		s.damageTanksInImpactRadiusFixed(impactPos, radius, weapon.Damage)
+		damageApplied = make(map[int]bool)
 	} else {
 		s.damageTanksInImpactRadius(p.pos, radius)
 		falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
@@ -3867,6 +3904,9 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		radius:         radius,
 		duration:       duration,
 		cycles:         impactCyclesForWeapon(weapon),
+		damage:         weapon.Damage,
+		attacker:       s.lastDamageSource,
+		damageApplied:  damageApplied,
 		outward:        weapon.ImpactGradientOutward,
 		style:          weapon.ImpactAnimationStyle,
 		terrainApplied: terrainApplied,
@@ -3908,6 +3948,158 @@ func (s *GameScene) damageTanksInImpactRadiusFixed(center engine.Vec, radius flo
 			continue
 		}
 		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
+	}
+}
+
+func (s *GameScene) damageTanksInZeroPowerScatterRadius(center engine.Vec, radius float64, attacker *battleTank) {
+	if radius <= 0 {
+		return
+	}
+	coreRadius := 50.0
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 {
+			continue
+		}
+		distance := distancePointToRect(center, tank.body.Bounds().ScaledAtCenter(0.78))
+		if distance > radius {
+			continue
+		}
+		damage := 20
+		if distance <= coreRadius {
+			damage = 100
+		}
+		s.damageTank(tank, damage, attacker, damageCauseDirect)
+	}
+}
+
+func (s *GameScene) startZeroPowerImpactAtTank(tank *battleTank, weapon weaponspkg.Weapon) {
+	center := s.zeroPowerTankImpactCenter(tank)
+	previous := s.lastDamageSource
+	s.lastDamageSource = tank
+	s.startTerrainImpact(center, weapon, true)
+	s.lastDamageSource = previous
+}
+
+func (s *GameScene) startTerrainImpact(pos engine.Vec, weapon weaponspkg.Weapon, damage bool) {
+	radius := impactRadiusForWeapon(weapon)
+	duration := s.impactAnimationFramesForWeapon(weapon)
+	impactPos := pos
+	terrainApplied := true
+	damageApplied := map[int]bool(nil)
+	if weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationPlasma {
+		impactPos.Y -= plasmaImpactVisualYOffset
+		terrainApplied = false
+		if damage {
+			damageApplied = make(map[int]bool)
+		}
+	} else {
+		if damage {
+			s.damageTanksInImpactRadius(pos, radius)
+		}
+		falls := s.ground.ApplyCrater(pos.X, pos.Y, radius)
+		if len(falls) > 0 {
+			s.sandFalls = append(s.sandFalls, sandFallAnimation{
+				pixels:   falls,
+				duration: sandFallFrames,
+			})
+		}
+		s.dropUnsupportedTanks()
+	}
+	s.impacts = append(s.impacts, impactAnimation{
+		pos:            impactPos,
+		radius:         radius,
+		duration:       duration,
+		cycles:         impactCyclesForWeapon(weapon),
+		damage:         weapon.Damage,
+		attacker:       s.lastDamageSource,
+		damageApplied:  damageApplied,
+		outward:        weapon.ImpactGradientOutward,
+		style:          weapon.ImpactAnimationStyle,
+		terrainApplied: terrainApplied,
+	})
+	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
+		s.turnAdvanceDelay = minimumDelay
+	}
+}
+
+func (s *GameScene) zeroPowerTankImpactCenter(tank *battleTank) engine.Vec {
+	if tank == nil || tank.body == nil {
+		return engine.Vec{}
+	}
+	body := tank.body.Bounds()
+	return engine.V(body.Center().X, body.Max.Y)
+}
+
+func (s *GameScene) fireZeroPowerScatterProjectiles(tank *battleTank) {
+	if tank == nil || tank.body == nil {
+		return
+	}
+	center := s.zeroPowerTankScatterOrigin(tank)
+	strength := maxInt(30, tank.shotStrength)
+	speed := 1.4 + float64(strength)*0.32
+	colors := []color.RGBA{
+		{R: 255, G: 230, B: 40, A: 255},
+		{R: 0, G: 220, B: 210, A: 255},
+		{R: 50, G: 95, B: 255, A: 255},
+		{R: 255, G: 45, B: 35, A: 255},
+		{R: 145, G: 255, B: 80, A: 255},
+	}
+	angleOffset := 15 * math.Pi / 180
+	angles := []float64{-math.Pi/2 - angleOffset, -math.Pi / 2, -math.Pi/2 + angleOffset}
+	projectiles := make([]*projectile, 0, 3)
+	for _, angle := range angles {
+		velocity := engine.V(speed, 0).Rotated(angle)
+		weapon := weaponspkg.Grenade()
+		weapon.Color = colors[s.rng.Intn(len(colors))]
+		projectiles = append(projectiles, &projectile{
+			pos:                center,
+			prev:               center,
+			velocity:           velocity,
+			weaponIndex:        1,
+			effectiveWeapon:    weapon,
+			hasEffectiveWeapon: true,
+			zeroPowerScatter:   true,
+			scatterImpactColor: weapon.Color,
+			shooter:            tank,
+			launchRot:          angle,
+			trail:              []engine.Vec{center},
+		})
+	}
+	s.setProjectiles(append(s.projectiles, projectiles...))
+}
+
+func (s *GameScene) zeroPowerTankScatterOrigin(tank *battleTank) engine.Vec {
+	if tank == nil || tank.body == nil {
+		return engine.Vec{}
+	}
+	return tank.body.Bounds().Center()
+}
+
+func (s *GameScene) onZeroPowerScatterGroundImpact(p *projectile) {
+	if p == nil {
+		return
+	}
+	const radius = 100.0
+	duration := s.impactAnimationFramesForWeapon(weaponspkg.Grenade())
+	s.damageTanksInZeroPowerScatterRadius(p.pos, radius, p.shooter)
+	falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
+	if len(falls) > 0 {
+		s.sandFalls = append(s.sandFalls, sandFallAnimation{
+			pixels:   falls,
+			duration: sandFallFrames,
+		})
+	}
+	s.dropUnsupportedTanks()
+	s.impacts = append(s.impacts, impactAnimation{
+		pos:            p.pos,
+		radius:         radius,
+		duration:       duration,
+		cycles:         1,
+		color:          p.scatterImpactColor,
+		terrainApplied: true,
+	})
+	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
+		s.turnAdvanceDelay = minimumDelay
 	}
 }
 
@@ -4864,18 +5056,21 @@ func (s *GameScene) updateImpacts() {
 	active := s.impacts[:0]
 	for _, impact := range s.impacts {
 		impact.age++
-		if impact.style == weaponspkg.ImpactAnimationPlasma && !impact.terrainApplied {
+		if impact.style == weaponspkg.ImpactAnimationPlasma {
 			progress := float64(impact.age) / math.Max(1, float64(impact.duration))
-			if progress >= plasmaGreenProgress {
-				falls := s.ground.ApplyRingCrater(impact.pos.X, impact.pos.Y, impact.radius, plasmaRingSpacing, plasmaRingThickness)
-				if len(falls) > 0 {
-					s.sandFalls = append(s.sandFalls, sandFallAnimation{
-						pixels:   falls,
-						duration: sandFallFrames,
-					})
+			s.damageTanksTouchedByPlasmaImpact(&impact, progress)
+			if !impact.terrainApplied {
+				if progress >= plasmaGreenProgress {
+					falls := s.ground.ApplyRingCrater(impact.pos.X, impact.pos.Y, impact.radius, plasmaRingSpacing, plasmaRingThickness)
+					if len(falls) > 0 {
+						s.sandFalls = append(s.sandFalls, sandFallAnimation{
+							pixels:   falls,
+							duration: sandFallFrames,
+						})
+					}
+					s.dropUnsupportedTanks()
+					impact.terrainApplied = true
 				}
-				s.dropUnsupportedTanks()
-				impact.terrainApplied = true
 			}
 		}
 		if impact.age < impact.duration {
@@ -4883,6 +5078,35 @@ func (s *GameScene) updateImpacts() {
 		}
 	}
 	s.impacts = active
+}
+
+func (s *GameScene) damageTanksTouchedByPlasmaImpact(impact *impactAnimation, progress float64) {
+	if impact == nil || impact.damage <= 0 || impact.damageApplied == nil {
+		return
+	}
+	radius := plasmaVisibleRadius(impact.radius, progress)
+	if radius <= 0 {
+		return
+	}
+	for _, tank := range s.tanks {
+		if tank == nil || tank.body == nil || tank.power <= 0 || impact.damageApplied[tank.playerIndex] {
+			continue
+		}
+		distance := distancePointToRect(impact.pos, tank.body.Bounds().ScaledAtCenter(0.78))
+		if distance > radius {
+			continue
+		}
+		impact.damageApplied[tank.playerIndex] = true
+		s.damageTank(tank, impact.damage, impact.attacker, damageCauseDirect)
+	}
+}
+
+func plasmaVisibleRadius(radius, progress float64) float64 {
+	progress = math.Max(0, math.Min(1, progress))
+	if progress < plasmaBuildProgress {
+		return radius * easeOut(progress/plasmaBuildProgress)
+	}
+	return radius
 }
 
 func (s *GameScene) updateAnimatedImpacts() {
@@ -5194,6 +5418,10 @@ func (s *GameScene) updateZeroPowerEffects() {
 			active = append(active, effect)
 			continue
 		}
+		if !effect.triggered {
+			s.triggerZeroPowerWorldEffect(&effect)
+			effect.triggered = true
+		}
 		s.updateZeroPowerTankDissolve(effect)
 		effect.age++
 		if effect.age < effect.duration {
@@ -5201,6 +5429,18 @@ func (s *GameScene) updateZeroPowerEffects() {
 		}
 	}
 	s.zeroPowerEffects = active
+}
+
+func (s *GameScene) triggerZeroPowerWorldEffect(effect *zeroPowerAnimation) {
+	if effect == nil || effect.tank == nil || effect.tank.body == nil {
+		return
+	}
+	switch effect.kind {
+	case zeroPowerEffectGrenadeImpact, zeroPowerEffectLargeGrenadeImpact, zeroPowerEffectAtomImpact:
+		s.startZeroPowerImpactAtTank(effect.tank, effect.weapon)
+	case zeroPowerEffectScatterProjectiles:
+		s.fireZeroPowerScatterProjectiles(effect.tank)
+	}
 }
 
 func (s *GameScene) updateCloudSearchEffects() {
@@ -5645,20 +5885,131 @@ func (s *GameScene) startZeroPowerAnimation(tank *battleTank) {
 	tank.tint = color.RGBA{A: 255}
 	models.RecolorTankBody(tank.body, tank.tint)
 	models.RecolorCannon(tank.cannon, tank.tint)
-	if len(s.zeroPowerAnimations) == 0 {
+	choices := s.zeroPowerChoices()
+	if len(choices) == 0 {
 		return
 	}
-	animation := s.zeroPowerAnimations[s.rng.Intn(len(s.zeroPowerAnimations))]
-	duration := maxInt(1, animation.totalTicks)
+	choice := choices[s.rng.Intn(len(choices))]
 	delay := maxInt(0, s.zeroPowerStartDelay)
-	s.zeroPowerEffects = append(s.zeroPowerEffects, zeroPowerAnimation{
-		tank:      tank,
-		animation: animation,
-		delay:     delay,
-		duration:  duration,
-	})
+	effect := zeroPowerAnimation{
+		tank:  tank,
+		delay: delay,
+	}
+	if choice.kind == zeroPowerEffectSprite {
+		animation := s.zeroPowerAnimations[choice.spriteIdx]
+		effect.kind = zeroPowerEffectSprite
+		effect.animation = animation
+		effect.duration = maxInt(1, animation.totalTicks)
+	} else {
+		effect.kind = choice.kind
+		effect.weapon = zeroPowerImpactWeapon(effect.kind)
+		effect.duration = s.zeroPowerWorldEffectDuration(effect.kind, effect.weapon)
+	}
+	s.zeroPowerEffects = append(s.zeroPowerEffects, effect)
+	duration := maxInt(1, effect.duration)
 	if s.turnAdvanceDelay < duration+delay {
 		s.turnAdvanceDelay = duration + delay
+	}
+}
+
+func (s *GameScene) zeroPowerChoices() []zeroPowerChoice {
+	all := s.allZeroPowerChoices()
+	if !core.Config().Debug.Enabled || len(core.Config().Debug.ZeroPowerAnimations) == 0 {
+		return all
+	}
+	allowed := make(map[string]bool)
+	for _, name := range core.Config().Debug.ZeroPowerAnimations {
+		allowed[canonicalZeroPowerName(name)] = true
+	}
+	choices := make([]zeroPowerChoice, 0, len(all))
+	for _, choice := range all {
+		if allowed[choice.name] {
+			choices = append(choices, choice)
+		}
+	}
+	if len(choices) == 0 {
+		return all
+	}
+	return choices
+}
+
+func (s *GameScene) allZeroPowerChoices() []zeroPowerChoice {
+	choices := make([]zeroPowerChoice, 0, len(s.zeroPowerAnimations)+int(zeroPowerEffectScatterProjectiles))
+	for i := range s.zeroPowerAnimations {
+		name := "sprite_" + strconv.Itoa(i)
+		if i < len(s.zeroPowerNames) && s.zeroPowerNames[i] != "" {
+			name = canonicalZeroPowerName(s.zeroPowerNames[i])
+		}
+		choices = append(choices, zeroPowerChoice{name: name, spriteIdx: i, kind: zeroPowerEffectSprite})
+	}
+	for kind := zeroPowerEffectGrenadeImpact; kind <= zeroPowerEffectScatterProjectiles; kind++ {
+		choices = append(choices, zeroPowerChoice{name: zeroPowerEffectName(kind), kind: kind})
+	}
+	return choices
+}
+
+func zeroPowerEffectName(kind zeroPowerEffectKind) string {
+	switch kind {
+	case zeroPowerEffectGrenadeImpact:
+		return "grenade_impact"
+	case zeroPowerEffectLargeGrenadeImpact:
+		return "large_grenade_impact"
+	case zeroPowerEffectAtomImpact:
+		return "atom_impact"
+	case zeroPowerEffectScatterProjectiles:
+		return "scatter_projectiles"
+	default:
+		return "sprite"
+	}
+}
+
+func canonicalZeroPowerName(name string) string {
+	value := strings.ToLower(strings.TrimSpace(name))
+	value = strings.ReplaceAll(value, "-", "_")
+	value = strings.ReplaceAll(value, " ", "_")
+	switch value {
+	case "zero_power_dust_explosion", "dust_explosion", "dust":
+		return "dust"
+	case "zero_power_explosion", "explosion":
+		return "explosion"
+	case "zero_power_mushroom_explosion", "mushroom_explosion", "mushroom", "pilz":
+		return "mushroom"
+	case "zero_power_player_smoke", "player_smoke", "smoke", "rauch":
+		return "smoke"
+	case "grenade", "grenade_impact", "granate":
+		return "grenade_impact"
+	case "large_grenade", "large_grenade_impact", "grosse_granate", "große_granate":
+		return "large_grenade_impact"
+	case "atom", "atom_bomb", "atom_impact", "atombombe":
+		return "atom_impact"
+	case "scatter", "scatter_projectiles", "three_projectiles", "drei_geschosse":
+		return "scatter_projectiles"
+	default:
+		return value
+	}
+}
+
+func zeroPowerImpactWeapon(kind zeroPowerEffectKind) weaponspkg.Weapon {
+	switch kind {
+	case zeroPowerEffectGrenadeImpact:
+		return weaponspkg.Grenade()
+	case zeroPowerEffectLargeGrenadeImpact:
+		return weaponspkg.LargeGrenade()
+	case zeroPowerEffectAtomImpact:
+		return weaponspkg.AtomBomb()
+	default:
+		return weaponspkg.Grenade()
+	}
+}
+
+func (s *GameScene) zeroPowerWorldEffectDuration(kind zeroPowerEffectKind, weapon weaponspkg.Weapon) int {
+	switch kind {
+	case zeroPowerEffectScatterProjectiles:
+		return 420
+	case zeroPowerEffectGrenadeImpact, zeroPowerEffectLargeGrenadeImpact, zeroPowerEffectAtomImpact:
+		return s.impactAnimationFramesForWeapon(weapon) + s.impactPauseFrames()
+	default:
+		return zeroPowerFrames
 	}
 }
 
@@ -5853,6 +6204,9 @@ func (s *GameScene) drawSingleProjectile(screen *ebiten.Image, camera *ebiten.Ge
 		return
 	}
 	c := weapon.Color
+	if p.zeroPowerScatter {
+		s.drawScatterProjectileTrail(screen, camera, p)
+	}
 	if weapon.ShowTrail {
 		s.drawProjectileTail(screen, camera, p)
 	}
@@ -5863,6 +6217,21 @@ func (s *GameScene) drawSingleProjectile(screen *ebiten.Image, camera *ebiten.Ge
 		return
 	}
 	drawFilledRect(screen, image.Rect(int(projected.X-radius), int(projected.Y-radius), int(projected.X+radius), int(projected.Y+radius)), c)
+}
+
+func (s *GameScene) drawScatterProjectileTrail(screen *ebiten.Image, camera *ebiten.GeoM, p *projectile) {
+	if p == nil || len(p.trail) < 2 {
+		return
+	}
+	c := p.scatterImpactColor
+	if c.A == 0 {
+		c = color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	}
+	for i := 1; i < len(p.trail); i++ {
+		from := p.trail[i-1].Project(camera)
+		to := p.trail[i].Project(camera)
+		vector.StrokeLine(screen, float32(from.X), float32(from.Y), float32(to.X), float32(to.Y), 1, c, true)
+	}
 }
 
 func (s *GameScene) drawProjectileTail(screen *ebiten.Image, camera *ebiten.GeoM, p *projectile) {
@@ -6062,13 +6431,26 @@ func (s *GameScene) drawImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
 			}
 			continue
 		}
+		impactColor := impact.color
+		if impactColor.A != 0 {
+			vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), float32(impact.radius), impactColor, true)
+			continue
+		}
 		cycleProgress := math.Mod(progress*float64(cycles), 1)
 		steps := 8
+		if impactColor.A == 0 {
+			impactColor = color.RGBA{R: 255, A: 220}
+		}
 		for i := steps; i >= 1; i-- {
 			t := float64(i) / float64(steps)
 			radius := float32(impact.radius * t)
-			red := uint8(255 * math.Pow(t, 0.7) * cycleProgress)
-			vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), radius, color.RGBA{R: red, G: 0, B: 0, A: 220}, true)
+			intensity := math.Pow(t, 0.7) * cycleProgress
+			vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), radius, color.RGBA{
+				R: uint8(float64(impactColor.R) * intensity),
+				G: uint8(float64(impactColor.G) * intensity),
+				B: uint8(float64(impactColor.B) * intensity),
+				A: impactColor.A,
+			}, true)
 		}
 	}
 }

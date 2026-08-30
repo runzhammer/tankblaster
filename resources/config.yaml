@@ -24,6 +24,17 @@ debug:
   enabled: true
   start_scene: game
   start_shop: false
+  # Optional im Debug-Modus: leere/fehlende Liste erlaubt alle Todesanimationen.
+  # Erlaubte Namen:
+  # - dust
+  # - explosion
+  # - mushroom
+  # - smoke
+  # - grenade_impact
+  # - large_grenade_impact
+  # - atom_impact
+  # - scatter_projectiles
+  zero_power_animations: []
   game:
     rounds: 10
     players:

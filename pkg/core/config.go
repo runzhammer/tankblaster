@@ -39,11 +39,12 @@ type FileSettings struct {
 		} `yaml:"clouds"`
 	} `yaml:"gameplay"`
 	Debug struct {
-		Enabled    bool   `yaml:"enabled"`
-		Mode       string `yaml:"mode"`
-		StartScene string `yaml:"start_scene"`
-		StartShop  bool   `yaml:"start_shop"`
-		Game       struct {
+		Enabled             bool     `yaml:"enabled"`
+		Mode                string   `yaml:"mode"`
+		StartScene          string   `yaml:"start_scene"`
+		StartShop           bool     `yaml:"start_shop"`
+		ZeroPowerAnimations []string `yaml:"zero_power_animations"`
+		Game                struct {
 			Rounds  int                   `yaml:"rounds"`
 			Players []DebugPlayerSettings `yaml:"players"`
 		} `yaml:"game"`
@@ -95,11 +96,12 @@ type Settings struct {
 		}
 	}
 	Debug struct {
-		Enabled    bool
-		Mode       string
-		StartScene string
-		StartShop  bool
-		Game       struct {
+		Enabled             bool
+		Mode                string
+		StartScene          string
+		StartShop           bool
+		ZeroPowerAnimations []string
+		Game                struct {
 			Rounds  int
 			Players []DebugPlayerSettings
 		}
@@ -200,6 +202,7 @@ func init() {
 	s.Debug.Mode = fs.Debug.Mode
 	s.Debug.StartScene = fs.Debug.StartScene
 	s.Debug.StartShop = fs.Debug.StartShop
+	s.Debug.ZeroPowerAnimations = fs.Debug.ZeroPowerAnimations
 	if s.Debug.StartScene == "" {
 		s.Debug.StartScene = "game"
 	}
