@@ -40,6 +40,12 @@ var ButtonIgnitionPNG []byte
 //go:embed images/cannon.png
 var CannonSprite []byte
 
+//go:embed images/tankblaster.ico
+var AppIconICO []byte
+
+//go:embed images/tankblaster_icon.png
+var AppIconPNG []byte
+
 //go:embed cannon.yaml
 var CannonSpec []byte
 

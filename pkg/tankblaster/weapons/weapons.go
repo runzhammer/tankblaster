@@ -9,7 +9,8 @@ import (
 const (
 	DirectHitDamage               = 100
 	DefaultImpactAnimationSeconds = 0.2
-	DefaultSound                  = soundpaths.Default
+	DefaultFireSound              = soundpaths.WeaponFireDefault
+	DefaultImpactSound            = soundpaths.WeaponImpactDefault
 )
 
 type Weapon struct {
@@ -104,8 +105,8 @@ func UtilityItem(name string) Weapon {
 }
 
 func withDefaultSounds(weapon Weapon) Weapon {
-	weapon.FireSound = DefaultSound
-	weapon.ImpactSound = DefaultSound
+	weapon.FireSound = DefaultFireSound
+	weapon.ImpactSound = DefaultImpactSound
 	return weapon
 }
 

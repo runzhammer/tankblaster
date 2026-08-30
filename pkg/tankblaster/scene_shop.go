@@ -425,6 +425,7 @@ func (s *GameScene) currentShopPlayerIsComputer() bool {
 }
 
 func (s *GameScene) drawShop(screen *ebiten.Image) {
+	t := texts()
 	if s.shopMode != shopModeEntry {
 		s.drawShopList(screen)
 		return
@@ -434,18 +435,20 @@ func (s *GameScene) drawShop(screen *ebiten.Image) {
 	switch s.shopHoverClass {
 	case 1:
 		s.drawStoreOverlay(screen, s.shop.storeMainLeft, shopMainLeftOverlayRect)
+		s.drawShopEntryListHover(screen, s.shopClassARect(), s.shopStoreScaledRect(image.Rect(92, 68, 264, 88)), t.ShopClassA, colornames.Red)
 	case 2:
 		s.drawStoreOverlay(screen, s.shop.storeMainRight, shopMainRightOverlayRect)
+		s.drawShopEntryListHover(screen, s.shopClassBRect(), s.shopStoreScaledRect(image.Rect(358, 60, 570, 82)), t.ShopClassB, color.RGBA{R: 0, G: 45, B: 255, A: 255})
 	}
 
 	playerIndex := s.currentShopPlayerIndex()
-	player := PlayerConfig{Name: "Spieler"}
+	player := PlayerConfig{Name: t.GameDefaultPlayerName}
 	if playerIndex >= 0 && playerIndex < len(s.players) {
 		player = s.players[playerIndex]
 	}
 
 	s.drawShopPlayerPanel(screen, playerIndex, player)
-	drawButton(screen, s.shopContinueRect(), "Weiter")
+	drawButton(screen, s.shopContinueRect(), t.ShopContinue)
 }
 
 func (s *GameScene) handleShopListInput(cursor image.Point) {
@@ -454,17 +457,17 @@ func (s *GameScene) handleShopListInput(cursor image.Point) {
 		return
 	}
 	if shouldNavigateShopList(ebiten.KeyArrowUp) {
-		s.shopSelectedIndex = maxInt(0, s.shopSelectedIndex-1)
+		s.setShopSelectedIndex(maxInt(0, s.shopSelectedIndex-1))
 	}
 	if shouldNavigateShopList(ebiten.KeyArrowDown) {
-		s.shopSelectedIndex = minInt(len(items)-1, s.shopSelectedIndex+1)
+		s.setShopSelectedIndex(minInt(len(items)-1, s.shopSelectedIndex+1))
 	}
 	_, wheelY := ebiten.Wheel()
 	if wheelY > 0 {
-		s.shopSelectedIndex = maxInt(0, s.shopSelectedIndex-int(math.Ceil(wheelY)))
+		s.setShopSelectedIndex(maxInt(0, s.shopSelectedIndex-int(math.Ceil(wheelY))))
 	}
 	if wheelY < 0 {
-		s.shopSelectedIndex = minInt(len(items)-1, s.shopSelectedIndex+int(math.Ceil(-wheelY)))
+		s.setShopSelectedIndex(minInt(len(items)-1, s.shopSelectedIndex+int(math.Ceil(-wheelY))))
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
 		s.buySelectedShopItem()
@@ -482,8 +485,16 @@ func (s *GameScene) handleShopListInput(cursor image.Point) {
 		return
 	}
 	if index, ok := s.shopListIndexAt(cursor, len(items)); ok {
-		s.shopSelectedIndex = index
+		s.setShopSelectedIndex(index)
 	}
+}
+
+func (s *GameScene) setShopSelectedIndex(index int) {
+	if s.shopSelectedIndex == index {
+		return
+	}
+	s.shopSelectedIndex = index
+	s.playEventSound(soundEventShopListSelect)
 }
 
 func shouldNavigateShopList(key ebiten.Key) bool {
@@ -495,6 +506,7 @@ func shouldNavigateShopList(key ebiten.Key) bool {
 }
 
 func (s *GameScene) drawShopList(screen *ebiten.Image) {
+	t := texts()
 	s.drawStoreImage(screen, s.shop.storeRoll)
 
 	items := s.visibleShopItemIndexes()
@@ -508,19 +520,20 @@ func (s *GameScene) drawShopList(screen *ebiten.Image) {
 	s.drawDynamicShopList(screen, items)
 	s.drawShopItemDetails(screen, itemIndex, item)
 	playerIndex := s.currentShopPlayerIndex()
-	player := PlayerConfig{Name: "Spieler"}
+	player := PlayerConfig{Name: t.GameDefaultPlayerName}
 	if playerIndex >= 0 && playerIndex < len(s.players) {
 		player = s.players[playerIndex]
 	}
 	s.drawShopPlayerPanel(screen, playerIndex, player)
-	drawButton(screen, s.shopBackRect(), "Zurueck >>")
+	drawButton(screen, s.shopBackRect(), t.ShopBack)
 }
 
 func (s *GameScene) drawDynamicShopList(screen *ebiten.Image, indexes []int) {
 	titleRect := s.shopStoreScaledRect(image.Rect(210, 36, 430, 66))
-	title := "- Klasse A -"
+	t := texts()
+	title := t.ShopClassA
 	if s.shopMode == shopModeClassB {
-		title = "- Schnäppchen -"
+		title = t.ShopClassB
 	}
 	drawCenteredText(screen, title, titleRect, colornames.Black)
 
@@ -538,28 +551,37 @@ func (s *GameScene) drawDynamicShopList(screen *ebiten.Image, indexes []int) {
 			continue
 		}
 		r := image.Rect(listRect.Min.X, listRect.Min.Y+row*rowH, listRect.Max.X, listRect.Min.Y+(row+1)*rowH)
+		itemName := localizedItemName(itemIndex)
+		if itemName == "" {
+			itemName = shopItems()[itemIndex].name
+		}
 		if listIndex == s.shopSelectedIndex {
 			drawFilledRect(screen, insetRect(r, maxInt(4, r.Dx()/40)), color.RGBA{R: 0, G: 0, B: 55, A: 255})
-			drawCenteredText(screen, shopItems()[itemIndex].name, r, colornames.White)
+			drawCenteredText(screen, itemName, r, colornames.White)
 			continue
 		}
-		drawCenteredText(screen, shopItems()[itemIndex].name, r, colornames.Black)
+		drawCenteredText(screen, itemName, r, colornames.Black)
 	}
 }
 
 func (s *GameScene) drawShopItemDetails(screen *ebiten.Image, itemIndex int, item shopItem) {
+	t := texts()
 	detailRect := s.shopScaledRect(image.Rect(1085, 52, 1586, 428))
 	drawFrame(screen, detailRect, colornames.Black, color.RGBA{R: 0, G: 38, B: 255, A: 255})
-	drawText(screen, item.name, detailRect.Min.X+26, detailRect.Min.Y+46, colornames.White)
-	drawText(screen, "Anzahl: "+strconv.Itoa(item.stock), detailRect.Min.X+26, detailRect.Min.Y+116, colornames.White)
-	drawText(screen, "Preis: "+strconv.Itoa(s.shopPriceForItem(itemIndex)), detailRect.Min.X+26, detailRect.Min.Y+166, colornames.White)
+	itemName := localizedItemName(itemIndex)
+	if itemName == "" {
+		itemName = item.name
+	}
+	drawText(screen, itemName, detailRect.Min.X+26, detailRect.Min.Y+46, colornames.White)
+	drawText(screen, t.ShopQuantity+": "+strconv.Itoa(item.stock), detailRect.Min.X+26, detailRect.Min.Y+116, colornames.White)
+	drawText(screen, t.ShopPrice+": "+strconv.Itoa(s.shopPriceForItem(itemIndex)), detailRect.Min.X+26, detailRect.Min.Y+166, colornames.White)
 	drawFrame(screen, s.shopDetailIconRect(), colornames.Black, colornames.Red)
 	s.drawShopItemIcon(screen, itemIndex, insetRect(s.shopDetailIconRect(), 4), false)
 	if s.shopMode == shopModeClassB {
-		drawButton(screen, s.shopBuyRect(), "Zuschlagen!")
+		drawButton(screen, s.shopBuyRect(), t.ShopBargainBuy)
 		return
 	}
-	drawButton(screen, s.shopBuyRect(), "Kaufen")
+	drawButton(screen, s.shopBuyRect(), t.ShopBuy)
 }
 
 func (s *GameScene) buySelectedShopItem() {
@@ -569,7 +591,11 @@ func (s *GameScene) buySelectedShopItem() {
 		return
 	}
 	price := s.shopPriceForItem(itemIndex)
-	if price <= 0 || s.credits[playerIndex] < price || s.shopStockForSelected(itemIndex) <= 0 {
+	if price > 0 && s.credits[playerIndex] < price {
+		s.playEventSound(soundEventShopNotEnoughMoney)
+		return
+	}
+	if price <= 0 || s.shopStockForSelected(itemIndex) <= 0 {
 		return
 	}
 	if s.isScrollOMatItem(itemIndex) && s.shopItemCountForPlayer(playerIndex, itemIndex) > 0 {
@@ -775,6 +801,7 @@ func (s *GameScene) shopBackRect() image.Rectangle {
 }
 
 func (s *GameScene) drawShopPlayerPanel(screen *ebiten.Image, playerIndex int, player PlayerConfig) {
+	t := texts()
 	portraitRect := s.shopScaledRect(image.Rect(15, 1032, 184, 1193))
 	nameRect := s.shopScaledRect(image.Rect(200, 1035, 829, 1184))
 	moneyRect := s.shopScaledRect(image.Rect(856, 1035, 1182, 1184))
@@ -798,9 +825,9 @@ func (s *GameScene) drawShopPlayerPanel(screen *ebiten.Image, playerIndex int, p
 	if playerIndex >= 0 && playerIndex < len(s.credits) {
 		money = s.credits[playerIndex]
 	}
-	drawCenteredText(screen, "Geld: $"+strconv.Itoa(money), moneyRect, colornames.Black)
+	drawCenteredText(screen, t.ShopMoney+": $"+strconv.Itoa(money), moneyRect, colornames.Black)
 	if stock, ok := s.selectedShopItemInventoryText(playerIndex); ok {
-		drawCenteredText(screen, "Vorrat: "+stock, statusRect, colornames.Black)
+		drawCenteredText(screen, t.ShopStock+": "+stock, statusRect, colornames.Black)
 	}
 }
 
@@ -912,6 +939,22 @@ func (s *GameScene) drawStoreOverlay(screen, img *ebiten.Image, r image.Rectangl
 		img = trimmed
 	}
 	drawScaledImage(screen, img, s.shopStoreScaledRect(r))
+}
+
+func (s *GameScene) drawShopEntryListHover(screen *ebiten.Image, listRect, titleRect image.Rectangle, title string, c color.Color) {
+	thickness := maxInt(1, int(math.Round(5*float64(s.shopStoreRect().Dx())/640)))
+	drawRectOutline(screen, listRect, c, thickness)
+	drawCenteredText(screen, title, titleRect, c)
+}
+
+func drawRectOutline(screen *ebiten.Image, r image.Rectangle, c color.Color, thickness int) {
+	if r.Empty() || thickness <= 0 {
+		return
+	}
+	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y, r.Max.X, minInt(r.Min.Y+thickness, r.Max.Y)), c)
+	drawFilledRect(screen, image.Rect(r.Min.X, maxInt(r.Max.Y-thickness, r.Min.Y), r.Max.X, r.Max.Y), c)
+	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y, minInt(r.Min.X+thickness, r.Max.X), r.Max.Y), c)
+	drawFilledRect(screen, image.Rect(maxInt(r.Max.X-thickness, r.Min.X), r.Min.Y, r.Max.X, r.Max.Y), c)
 }
 
 func (s *GameScene) drawShopItemIcon(screen *ebiten.Image, itemIndex int, r image.Rectangle, disabled bool) {

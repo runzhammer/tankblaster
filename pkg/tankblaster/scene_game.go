@@ -159,6 +159,8 @@ const (
 	humanCannonStepDegrees    = 1.0
 	xmV12EngineOffDelayFrames = 30
 	xmV12OutOfBoundsDelay     = 1.0
+	xmV12EngineLoopKey        = "xm_v12_engine"
+	xmV12TrackLoopKey         = "xm_v12_track"
 )
 
 type damageCause uint8
@@ -243,19 +245,20 @@ const (
 )
 
 type palmRevengeEvent struct {
-	phase         palmRevengePhase
-	age           int
-	palm          *battlePalm
-	cloud         *battleCloud
-	target        *battleTank
-	cloudStart    engine.Vec
-	cloudAttack   engine.Vec
-	cloudOriginal engine.Vec
-	targetCameraX float64
-	tankBlackened bool
-	damageDone    bool
-	smokeDone     bool
-	smokeAge      int
+	phase              palmRevengePhase
+	age                int
+	palm               *battlePalm
+	cloud              *battleCloud
+	target             *battleTank
+	cloudStart         engine.Vec
+	cloudAttack        engine.Vec
+	cloudOriginal      engine.Vec
+	targetCameraX      float64
+	tankBlackened      bool
+	damageDone         bool
+	smokeDone          bool
+	smokeAge           int
+	lightningSoundDone [2]bool
 }
 
 type cloudAsset struct {
@@ -2400,6 +2403,7 @@ func (s *GameScene) handleBattleHUDButtons(tank *battleTank, strengthStep int) {
 	case cursor.In(s.hudFireButtonRect()):
 		s.fireActiveWeapon()
 	case cursor.In(s.hudIgnitionRect()) && s.playerHasXMV12(tank.playerIndex) && s.dieselForPlayer(tank.playerIndex) > 0:
+		s.playEventSound(soundEventXMV12Ignition)
 		s.xmV12DriveMode = true
 		s.xmV12DriveDirection = 0
 	}
@@ -2492,12 +2496,15 @@ func (s *GameScene) updateXMV12DriveMode() {
 	tank := s.activeTank()
 	if tank == nil || !s.playerHasXMV12(tank.playerIndex) || tank.player.Kind == PlayerComputer {
 		s.clearXMV12IdleVibration(tank)
+		s.stopXMV12LoopSounds()
 		s.xmV12DriveMode = false
 		return
 	}
+	s.updateXMV12LoopSounds(tank)
 	s.handleXMV12HUDInput(tank)
 	if s.xmV12EngineOffDelay > 0 {
 		s.clearXMV12IdleVibration(tank)
+		s.stopXMV12LoopSounds()
 		s.xmV12EngineOffDelay--
 		if s.xmV12EngineOffDelay == 0 {
 			s.xmV12DriveMode = false
@@ -2578,6 +2585,24 @@ func (s *GameScene) clearXMV12IdleVibration(tank *battleTank) {
 	s.xmV12IdleOffset = engine.Vec{}
 }
 
+func (s *GameScene) updateXMV12LoopSounds(tank *battleTank) {
+	if tank == nil || !s.xmV12DriveMode || s.xmV12EngineOffDelay > 0 {
+		s.stopXMV12LoopSounds()
+		return
+	}
+	s.playEventSoundLoop(xmV12EngineLoopKey, soundEventXMV12EngineLoop)
+	if s.xmV12DriveDirection != 0 {
+		s.playEventSoundLoop(xmV12TrackLoopKey, soundEventXMV12TrackLoop)
+		return
+	}
+	s.stopSoundLoop(xmV12TrackLoopKey)
+}
+
+func (s *GameScene) stopXMV12LoopSounds() {
+	s.stopSoundLoop(xmV12EngineLoopKey)
+	s.stopSoundLoop(xmV12TrackLoopKey)
+}
+
 func (s *GameScene) updateXMV12Facing(tank *battleTank, facing int) {
 	if tank == nil || tank.body == nil || !s.playerHasXMV12(tank.playerIndex) || facing == 0 {
 		return
@@ -2611,6 +2636,7 @@ func (s *GameScene) handleXMV12HUDInput(tank *battleTank) {
 		s.xmV12DriveDirection = 1
 	case cursor.In(s.xmV12MotorOffRect()):
 		s.playEventSound(soundEventXMV12MotorOff)
+		s.stopXMV12LoopSounds()
 		s.xmV12DriveDirection = 0
 		s.xmV12EngineOffDelay = xmV12EngineOffDelayFrames
 	}
@@ -2618,6 +2644,7 @@ func (s *GameScene) handleXMV12HUDInput(tank *battleTank) {
 
 func (s *GameScene) endXMV12Turn() {
 	s.clearXMV12IdleVibration(s.activeTank())
+	s.stopXMV12LoopSounds()
 	s.xmV12DriveMode = false
 	s.xmV12DriveDirection = 0
 	s.xmV12EngineOffDelay = 0
@@ -2629,6 +2656,7 @@ func (s *GameScene) destroyTankOutOfBounds(tank *battleTank) {
 		return
 	}
 	s.clearXMV12IdleVibration(tank)
+	s.stopXMV12LoopSounds()
 	tank.power = 0
 	tank.shotStrength = 0
 	tank.zeroPowerShown = true
@@ -3645,7 +3673,7 @@ func (s *GameScene) handleProjectileWorldEdge(p *projectile) (bool, bool) {
 	}
 	p.prev = p.pos
 	p.trail = []engine.Vec{p.pos}
-	s.playEventSound(soundEventProjectileReentry)
+	s.playEventSound(soundEventProjectileReentryExit)
 	s.reentryAnimation = &projectileReentryAnimation{
 		projectile: p,
 		shooter:    p.shooter,
@@ -3662,6 +3690,7 @@ func (s *GameScene) updateProjectileReentryAnimation() bool {
 	}
 	s.reentryAnimation.age++
 	if s.reentryAnimation.age >= s.reentryAnimation.duration {
+		s.playEventSound(soundEventProjectileReentryEnter)
 		s.reentryAnimation = nil
 	}
 	return true
@@ -3784,6 +3813,7 @@ func (s *GameScene) advanceActivePlayer() {
 	s.crumblerCameraFocus = nil
 	s.moskitoCameraFocus = nil
 	s.cloudSearchEffects = nil
+	s.stopXMV12LoopSounds()
 	s.xmV12DriveMode = false
 	s.xmV12DriveDirection = 0
 	s.xmV12EngineOffDelay = 0
@@ -5007,7 +5037,6 @@ func (s *GameScene) startFireballImpact(pos engine.Vec, weapon weaponspkg.Weapon
 	if len(animation.frames) == 0 {
 		return
 	}
-	s.playWeaponImpactSound(weapon)
 	duration := maxInt(animation.totalTicks, s.impactAnimationFramesForWeapon(weapon))
 	damage := weapon.ImpactDamage
 	if damage <= 0 {
@@ -5318,8 +5347,8 @@ func (s *GameScene) updatePalmRevenge() {
 		s.cameraGoalY = 0
 		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.22, 0.8)
 		s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.22, 0.8)
+		s.playPalmRevengeLightningSound(event)
 		if s.palmRevengeLightningVisible(event) && !event.tankBlackened {
-			s.playEventSound(soundEventCloudLightning)
 			s.blackenPalmRevengeTank(event)
 		}
 		if event.age >= 48 && event.age < 66 && !event.smokeDone {
@@ -5388,8 +5417,24 @@ func (s *GameScene) damagePalmRevengeTank(event *palmRevengeEvent) {
 	tank.power = maxInt(0, tank.power-damage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
+		s.playEventSound(soundEventRevengeTankBroken)
 		s.addScore(tank.playerIndex, -3)
 		tank.zeroPowerShown = true
+	}
+}
+
+func (s *GameScene) playPalmRevengeLightningSound(event *palmRevengeEvent) {
+	if event == nil || event.phase != palmRevengeLightning {
+		return
+	}
+	if event.age < 18 && !event.lightningSoundDone[0] {
+		event.lightningSoundDone[0] = true
+		s.playEventSound(soundEventCloudLightning)
+		return
+	}
+	if event.age >= 48 && event.age < 66 && !event.lightningSoundDone[1] {
+		event.lightningSoundDone[1] = true
+		s.playEventSound(soundEventCloudLightning)
 	}
 }
 
@@ -7143,6 +7188,7 @@ func (s *GameScene) drawZeroPowerEffects(screen *ebiten.Image, camera *ebiten.Ge
 }
 
 func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
+	t := texts()
 	screenCfg := core.Config().Screen
 	hud := image.Rect(0, int(s.battlefieldHeight()), int(screenCfg.Width), int(screenCfg.Height))
 	drawFilledRect(screen, hud, color.RGBA{R: 5, G: 7, B: 10, A: 242})
@@ -7153,7 +7199,7 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 		s.drawXMV12HUD(screen, hud, active)
 		return
 	}
-	playerName := "Spieler"
+	playerName := t.GameDefaultPlayerName
 	playerColor := color.RGBA{R: 255, G: 160, B: 28, A: 255}
 	power := 100
 	shotStrength := 20
@@ -7164,15 +7210,15 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 		shotStrength = active.shotStrength
 	}
 
-	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+14, 112, hud.Min.Y+44), "Stärke", shotStrength)
-	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+50, 122, hud.Min.Y+80), "Winkel", int(math.Round(s.cannonDisplayAngleDegreesForTank(active))))
+	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+14, 112, hud.Min.Y+44), t.GameHUDStrength, shotStrength)
+	s.drawHUDStepper(screen, image.Rect(10, hud.Min.Y+50, 122, hud.Min.Y+80), t.GameHUDAngle, int(math.Round(s.cannonDisplayAngleDegreesForTank(active))))
 
 	centerX := int(screenCfg.Width) / 2
 	drawText(screen, playerName, centerX-42, hud.Min.Y+30, playerColor)
-	drawButton(screen, s.hudFireButtonRect(), "Feuer!")
+	drawButton(screen, s.hudFireButtonRect(), t.GameHUDFire)
 	if active != nil && s.playerHasXMV12(active.playerIndex) {
 		s.drawIgnitionButton(screen, s.hudIgnitionRect(), s.mousePressedInRect(s.hudIgnitionRect()))
-		s.drawIgnitionLabel(screen, s.hudIgnitionRect(), "Anlasser")
+		s.drawIgnitionLabel(screen, s.hudIgnitionRect(), t.GameHUDIgnition)
 	}
 
 	windArrow := "->"
@@ -7183,8 +7229,8 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 	if s.projectileReentry && s.reentrySymbol != nil {
 		drawScaledImage(screen, s.reentrySymbol, image.Rect(rightX-60, hud.Min.Y+24, rightX-12, hud.Min.Y+56))
 	}
-	drawText(screen, "Wind: "+strconv.Itoa(s.wind)+" ("+windArrow+")", rightX, hud.Min.Y+30, colornames.White)
-	drawText(screen, "Power: "+strconv.Itoa(power), rightX, hud.Min.Y+55, colornames.White)
+	drawText(screen, t.GameHUDWind+": "+strconv.Itoa(s.wind)+" ("+windArrow+")", rightX, hud.Min.Y+30, colornames.White)
+	drawText(screen, t.GameHUDPower+": "+strconv.Itoa(power), rightX, hud.Min.Y+55, colornames.White)
 
 	for i := 0; i < s.weaponSlotCount(); i++ {
 		s.drawWeaponSlot(screen, i)
@@ -7195,6 +7241,7 @@ func (s *GameScene) drawScoreTable(screen *ebiten.Image) {
 	if !s.showScoreTable {
 		return
 	}
+	t := texts()
 
 	screenCfg := core.Config().Screen
 	tableW := int(math.Min(620, screenCfg.Width-80))
@@ -7213,7 +7260,7 @@ func (s *GameScene) drawScoreTable(screen *ebiten.Image) {
 
 	drawFilledRect(screen, image.Rect(left-14, top-16, right+14, bottom+12), color.RGBA{R: 22, G: 10, B: 38, A: 118})
 
-	title := "Runde " + strconv.Itoa(maxInt(1, s.roundNumber)) + " von " + strconv.Itoa(maxInt(1, s.g.rounds))
+	title := t.GameScoreRound + " " + strconv.Itoa(maxInt(1, s.roundNumber)) + " " + t.GameScoreOf + " " + strconv.Itoa(maxInt(1, s.g.rounds))
 	drawCenteredText(screen, title, image.Rect(left, top, right, top+24), colornames.Yellow)
 
 	headerY := top + 60
@@ -7223,9 +7270,9 @@ func (s *GameScene) drawScoreTable(screen *ebiten.Image) {
 	lineColor := color.RGBA{R: 250, G: 246, B: 230, A: 230}
 	textColor := color.RGBA{R: 250, G: 246, B: 255, A: 255}
 
-	drawText(screen, "Spieler", nameX, headerY, textColor)
-	drawText(screen, "Erfolg", scoreX, headerY, textColor)
-	drawText(screen, "Status", statusX, headerY, textColor)
+	drawText(screen, t.GameScorePlayer, nameX, headerY, textColor)
+	drawText(screen, t.GameScoreSuccess, scoreX, headerY, textColor)
+	drawText(screen, t.GameScoreStatus, statusX, headerY, textColor)
 
 	separatorY := headerY + 24
 	drawFilledRect(screen, image.Rect(left+18, separatorY, right-18, separatorY+2), lineColor)
@@ -7238,9 +7285,9 @@ func (s *GameScene) drawScoreTable(screen *ebiten.Image) {
 			continue
 		}
 		y := separatorY + 32 + i*rowH
-		status := "aktiv"
+		status := t.GameStatusActive
 		if tank.power <= 0 {
-			status = "aus"
+			status = t.GameStatusOut
 		}
 		drawText(screen, tank.player.Name, nameX, y, textColor)
 		drawText(screen, strconv.Itoa(s.scoreForPlayer(tank.playerIndex)), scoreX+28, y, textColor)
@@ -7265,9 +7312,10 @@ func (s *GameScene) drawPlayerNames(screen *ebiten.Image, camera *ebiten.GeoM) {
 }
 
 func (s *GameScene) drawGameDialogs(screen *ebiten.Image) {
+	t := texts()
 	if s.gamePaused {
 		drawFilledRect(screen, image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height)), color.RGBA{A: 70})
-		drawCenteredText(screen, "Pause", image.Rect(0, int(core.Config().Screen.Height)/2-24, int(core.Config().Screen.Width), int(core.Config().Screen.Height)/2+24), colornames.White)
+		drawCenteredText(screen, t.GamePause, image.Rect(0, int(core.Config().Screen.Height)/2-24, int(core.Config().Screen.Width), int(core.Config().Screen.Height)/2+24), colornames.White)
 	}
 	if s.gameHelpOpen {
 		s.drawGameHelpDialog(screen)
@@ -7304,35 +7352,36 @@ func centerDialogRect(w, h int) image.Rectangle {
 }
 
 func (s *GameScene) drawGameHelpDialog(screen *ebiten.Image) {
+	t := texts()
 	r := gameHelpRect()
-	drawDialogWindow(screen, r, "Tank Blaster Hilfe")
+	drawDialogWindow(screen, r, t.GameHelpTitle)
 
 	logo := image.Rect(r.Max.X-88, r.Min.Y+67, r.Max.X-17, r.Max.Y-90)
 	keysBox := image.Rect(r.Min.X+12, r.Min.Y+63, logo.Min.X-10, r.Max.Y-14)
-	drawGroupBox(screen, keysBox, "Tasten")
+	drawGroupBox(screen, keysBox, t.GameHelpKeys)
 
 	lines := []struct {
 		key  string
 		desc string
 	}{
-		{"Enter:", "Feuer!"},
-		{"Tab (+ Shift):", "Nächste (vorige) Waffe wählen"},
-		{"Pfeil links (+ Shift):", "Winkel um 1° (10°) im UZS drehen"},
-		{"Pfeil rechts (+ Shift):", "Winkel um 1° (10°) gegen UZS drehen"},
-		{"Pfeil hoch (+ Shift):", "Kraft um 1 (10) erhöhen"},
-		{"Pfeil runter (+ Shift):", "Kraft um 1 (10) verringern"},
-		{"m:", "Motor anlassen (nur XM-V12 Panzer)"},
-		{"i:", "Winkel invertieren"},
-		{"s:", "Scroll-o-Mat ein-/ausschalten (mit Pfeiltasten scrollen)"},
-		{"+:", "Kraft um 10 erhöhen"},
-		{"-:", "Kraft um 10 verringern"},
-		{"1, 2, ..., 0:", "Info über Spieler 1, 2, ..., 10"},
-		{"Leertaste:", "Punkte-Zwischenstand anzeigen"},
+		{"Enter:", t.GameHelpFire},
+		{"Tab (+ Shift):", t.GameHelpNextWeapon},
+		{"Pfeil links (+ Shift):", t.GameHelpRotateClockwise},
+		{"Pfeil rechts (+ Shift):", t.GameHelpRotateCounterClockwise},
+		{"Pfeil hoch (+ Shift):", t.GameHelpIncreaseStrength},
+		{"Pfeil runter (+ Shift):", t.GameHelpDecreaseStrength},
+		{"m:", t.GameHelpIgnition},
+		{"i:", t.GameHelpInvertAngle},
+		{"s:", t.GameHelpScrollOMat},
+		{"+:", t.GameHelpIncreaseStrengthByTen},
+		{"-:", t.GameHelpDecreaseStrengthByTen},
+		{"1, 2, ..., 0:", t.GameHelpPlayerInfo},
+		{"Leertaste:", t.GameHelpScoreTable},
 		{"", ""},
-		{"Strg Q:", "Spiel beenden (zurück zu Windows)"},
-		{"Strg E:", "Laufende Runde abbrechen"},
-		{"Strg P:", "Pause"},
-		{"Strg N:", "Spielernamen ein-/ausblenden"},
+		{"Strg Q:", t.GameHelpQuit},
+		{"Strg E:", t.GameHelpAbortRound},
+		{"Strg P:", t.GameHelpPause},
+		{"Strg N:", t.GameHelpTogglePlayerNames},
 	}
 	y := keysBox.Min.Y + 28
 	for _, line := range lines {
@@ -7345,7 +7394,7 @@ func (s *GameScene) drawGameHelpDialog(screen *ebiten.Image) {
 
 	drawFilledRect(screen, logo, color.RGBA{R: 0, G: 105, B: 100, A: 255})
 	drawVerticalLogo(screen, logo)
-	drawDialogButton(screen, gameHelpOKRect(), "OK")
+	drawDialogButton(screen, gameHelpOKRect(), t.DialogOK)
 }
 
 func drawVerticalLogo(screen *ebiten.Image, r image.Rectangle) {
@@ -7363,13 +7412,14 @@ func drawVerticalLogo(screen *ebiten.Image, r image.Rectangle) {
 }
 
 func (s *GameScene) drawPlayerInfoDialog(screen *ebiten.Image) {
+	t := texts()
 	r := playerInfoRect()
-	drawDialogWindow(screen, r, "Spieler-Information")
+	drawDialogWindow(screen, r, t.PlayerInfoTitle)
 
 	tank := s.tankByPlayerIndex(s.playerInfoIndex)
 	if tank == nil {
-		drawCenteredTextFace(screen, "Spieler nicht vorhanden", r, dialogTextFace, colornames.Black)
-		drawDialogButton(screen, playerInfoOKRect(), "OK")
+		drawCenteredTextFace(screen, t.PlayerInfoMissing, r, dialogTextFace, colornames.Black)
+		drawDialogButton(screen, playerInfoOKRect(), t.DialogOK)
 		return
 	}
 
@@ -7380,31 +7430,31 @@ func (s *GameScene) drawPlayerInfoDialog(screen *ebiten.Image) {
 	if portrait := s.portraitForPlayer(tank.player); portrait != nil {
 		drawScaledImage(screen, portrait, insetRect(portraitRect, 2))
 	}
-	drawCenteredTextFace(screen, "Panzermodell", image.Rect(left.Min.X+122, left.Min.Y+20, left.Max.X-8, left.Min.Y+38), dialogTextFace, colornames.Black)
+	drawCenteredTextFace(screen, t.PlayerInfoTankModel, image.Rect(left.Min.X+122, left.Min.Y+20, left.Max.X-8, left.Min.Y+38), dialogTextFace, colornames.Black)
 	modelRect := image.Rect(left.Min.X+132, left.Min.Y+42, left.Max.X-18, left.Min.Y+86)
 	drawFilledRect(screen, modelRect, colornames.Black)
 	if tank.body != nil && tank.body.Image != nil {
 		drawScaledImage(screen, tank.body.Image, insetRect(modelRect, 4))
 	}
-	modelName := "Standard"
+	modelName := t.PlayerInfoStandardTank
 	if s.playerHasXMV12(tank.playerIndex) {
 		modelName = "XM-V12"
 	}
 	drawCenteredTextFace(screen, modelName, image.Rect(left.Min.X+126, left.Min.Y+88, left.Max.X-8, left.Min.Y+108), dialogTextFace, colornames.Black)
 
-	status := "aktiv"
+	status := t.GameStatusActive
 	if tank.power <= 0 || tank.zeroPowerGone {
-		status = "ausgeschieden"
+		status = t.GameStatusEliminated
 	}
 	infoY := left.Min.Y + 146
 	infoRows := []struct {
 		label string
 		value string
 	}{
-		{"Status:", status},
-		{"Energie:", strconv.Itoa(tank.power)},
-		{"Geld:", "$" + strconv.Itoa(s.creditForPlayer(tank.playerIndex))},
-		{"Energieschild", strconv.Itoa(s.energyShieldPercentForPlayer(tank.playerIndex)) + "%"},
+		{t.PlayerInfoStatus, status},
+		{t.PlayerInfoEnergy, strconv.Itoa(tank.power)},
+		{t.PlayerInfoMoney, "$" + strconv.Itoa(s.creditForPlayer(tank.playerIndex))},
+		{t.PlayerInfoEnergyShield, strconv.Itoa(s.energyShieldPercentForPlayer(tank.playerIndex)) + "%"},
 	}
 	for _, row := range infoRows {
 		drawTextFace(screen, row.label, dialogTextFace, left.Min.X+10, infoY, colornames.Black)
@@ -7413,11 +7463,11 @@ func (s *GameScene) drawPlayerInfoDialog(screen *ebiten.Image) {
 	}
 
 	arsenalLabelX := r.Min.X + 227
-	drawTextFace(screen, "Waffenarsenal", dialogTextFace, arsenalLabelX, r.Min.Y+56, colornames.Black)
+	drawTextFace(screen, t.PlayerInfoArsenal, dialogTextFace, arsenalLabelX, r.Min.Y+56, colornames.Black)
 	arsenal := image.Rect(arsenalLabelX, r.Min.Y+63, r.Max.X-13, r.Max.Y-62)
 	drawFrame(screen, arsenal, colornames.White, color.RGBA{R: 150, G: 150, B: 150, A: 255})
 	s.drawPlayerArsenal(screen, tank, insetRect(arsenal, 4))
-	drawDialogButton(screen, playerInfoOKRect(), "OK")
+	drawDialogButton(screen, playerInfoOKRect(), t.DialogOK)
 }
 
 func (s *GameScene) portraitForPlayer(player PlayerConfig) *ebiten.Image {
@@ -7441,6 +7491,7 @@ func (s *GameScene) drawPlayerArsenal(screen *ebiten.Image, tank *battleTank, r 
 	if tank == nil {
 		return
 	}
+	t := texts()
 	y := r.Min.Y + 12
 	drawArsenalRow := func(name string, count int) bool {
 		if y > r.Max.Y-8 {
@@ -7451,7 +7502,7 @@ func (s *GameScene) drawPlayerArsenal(screen *ebiten.Image, tank *battleTank, r 
 		y += 16
 		return true
 	}
-	drawArsenalRow("Spurgeschoß", 10000)
+	drawArsenalRow(t.ItemTrainingAmmo, 10000)
 	drawPriorityWeaponSlot := func(slot int) {
 		weaponList := weaponspkg.List()
 		if slot <= 0 || slot >= s.weaponSlotCount() || slot >= len(weaponList) {
@@ -7461,19 +7512,19 @@ func (s *GameScene) drawPlayerArsenal(screen *ebiten.Image, tank *battleTank, r 
 		if count <= 0 {
 			return
 		}
-		drawArsenalRow(weaponList[slot].Name, count)
+		drawArsenalRow(localizedWeaponSlotName(slot, weaponList[slot].Name), count)
 	}
 	drawPriorityWeaponSlot(10)
 	if count := s.mfsBoosterCountForPlayer(tank.playerIndex); count > 0 {
-		drawArsenalRow(mfsBoosterItemName, count)
+		drawArsenalRow(t.ItemMFSBooster, count)
 	}
 	if shield := s.energyShieldPercentForPlayer(tank.playerIndex); shield > 0 {
-		drawArsenalRow(energyShieldItemName, shield)
+		drawArsenalRow(t.ItemEnergyShield, shield)
 	}
 	if s.playerHasXMV12(tank.playerIndex) {
-		drawArsenalRow(xmV12ItemName, 1)
+		drawArsenalRow(t.ItemXMV12Tank, 1)
 		if diesel := s.dieselForPlayer(tank.playerIndex); diesel > 0 {
-			drawArsenalRow(dieselItemName, diesel)
+			drawArsenalRow(t.ItemDiesel, diesel)
 		}
 	}
 
@@ -7486,7 +7537,7 @@ func (s *GameScene) drawPlayerArsenal(screen *ebiten.Image, tank *battleTank, r 
 		if count <= 0 {
 			continue
 		}
-		if !drawArsenalRow(weaponList[slot].Name, count) {
+		if !drawArsenalRow(localizedWeaponSlotName(slot, weaponList[slot].Name), count) {
 			break
 		}
 	}
@@ -7528,7 +7579,8 @@ func (s *GameScene) drawRoundTransitionBanner(screen *ebiten.Image) {
 
 	played := maxInt(0, minInt(s.roundNumber, maxInt(1, s.g.rounds)))
 	remaining := maxInt(0, maxInt(1, s.g.rounds)-played)
-	textValue := strconv.Itoa(played) + " gespielt, noch " + strconv.Itoa(remaining) + " Runden."
+	t := texts()
+	textValue := strconv.Itoa(played) + " " + t.RoundTransitionPlayed + " " + strconv.Itoa(remaining) + " " + t.RoundTransitionRemainingRounds
 	drawCenteredText(screen, textValue, r, colornames.White)
 }
 
@@ -7607,7 +7659,7 @@ func (s *GameScene) drawXMV12HUD(screen *ebiten.Image, hud image.Rectangle, tank
 	drawButton(screen, s.xmV12RightButtonRect(), ">")
 
 	s.drawIgnitionButton(screen, s.xmV12MotorOffRect(), s.mousePressedInRect(s.xmV12MotorOffRect()))
-	s.drawIgnitionLabel(screen, s.xmV12MotorOffRect(), "Motor aus")
+	s.drawIgnitionLabel(screen, s.xmV12MotorOffRect(), texts().XMV12MotorOff)
 }
 
 func (s *GameScene) drawFuelNeedle(screen *ebiten.Image, r image.Rectangle, ratio float64) {
@@ -7979,6 +8031,7 @@ func (s *GameScene) endRoundIfOnlyOneTankRemains() bool {
 	if len(s.tanks) <= 1 || s.livingTankCount() > 1 {
 		return false
 	}
+	s.playEventSound(soundEventRoundEnd)
 	s.creditRoundScores()
 	s.roundTransitionDelay = secondsToFrames(roundTransitionSeconds)
 	return true
@@ -8023,10 +8076,12 @@ func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behav
 
 func (s *GameScene) behaviorRotateOnButton(source *engine.Sprite) bool {
 	if shouldAdjustCannon(ebiten.KeyArrowLeft) {
+		s.playEventSound(soundEventCannonRotateLeft)
 		source.Rot -= engine.DegToRad(s.humanCannonStep())
 		return true
 	}
 	if shouldAdjustCannon(ebiten.KeyArrowRight) {
+		s.playEventSound(soundEventCannonRotateRight)
 		source.Rot += engine.DegToRad(s.humanCannonStep())
 		return true
 	}
@@ -8043,6 +8098,11 @@ func (s *GameScene) humanCannonStep() float64 {
 func (s *GameScene) adjustTankCannon(tank *battleTank, degrees float64) {
 	if tank == nil || tank.cannon == nil {
 		return
+	}
+	if degrees < 0 {
+		s.playEventSound(soundEventCannonRotateLeft)
+	} else if degrees > 0 {
+		s.playEventSound(soundEventCannonRotateRight)
 	}
 	tank.cannon.Rot += engine.DegToRad(degrees)
 	s.wrapCannonRotationToTank(tank.cannon, tank.body)

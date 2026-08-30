@@ -200,11 +200,17 @@ func (g *GameLoop) SetNewScene(factory func(*GameLoop) (scene core.Scene, err er
 	if err != nil {
 		return err
 	}
+	if g.sounds != nil {
+		g.sounds.StopAllLoops()
+	}
 	return g.SetScene(scene)
 }
 
 func (g *GameLoop) OnMuted(muted bool) {
 	g.muted = muted
+	if muted && g.sounds != nil {
+		g.sounds.StopAllLoops()
+	}
 	// if muted {
 	// 	g.bgm.SetVolume(0)
 	// } else {
@@ -213,6 +219,9 @@ func (g *GameLoop) OnMuted(muted bool) {
 }
 
 func (g *GameLoop) Close() error {
+	if g.sounds != nil {
+		g.sounds.StopAllLoops()
+	}
 	// return g.bgm.Close()
 	return nil
 }

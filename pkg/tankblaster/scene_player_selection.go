@@ -90,6 +90,8 @@ type playerSelectionScene struct {
 	message        string
 	optionsOpen    bool
 	helpOpen       bool
+	languageOpen   bool
+	languageDraft  languageID
 	optionsDraft   gameOptions
 
 	baseImage         *ebiten.Image
@@ -102,6 +104,7 @@ type playerSelectionScene struct {
 
 func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 	baseImage := mustImageFromPNG(r.PlayerSelectionBase)
+	game.playSound(tankBlasterSounds.Events[soundEventPlayerSelectionStart])
 	s := &playerSelectionScene{
 		g:              game,
 		rounds:         game.rounds,
@@ -132,9 +135,9 @@ func (s *playerSelectionScene) Update() error {
 		s.openHelpDialog()
 		return nil
 	}
-	if s.optionsOpen || s.helpOpen {
+	if s.optionsOpen || s.helpOpen || s.languageOpen {
 		s.handleDialogKeyboard()
-		if !s.optionsOpen && !s.helpOpen {
+		if !s.optionsOpen && !s.helpOpen && !s.languageOpen {
 			s.pressedDialogButton = ""
 			return nil
 		}
@@ -145,7 +148,9 @@ func (s *playerSelectionScene) Update() error {
 				s.pressedDialogButton = button
 				return nil
 			}
-			if s.optionsOpen {
+			if s.languageOpen {
+				s.handleLanguageDialogClick(x, y)
+			} else if s.optionsOpen {
 				s.handleOptionsDialogClick(x, y)
 			} else {
 				s.handleHelpDialogClick(x, y)
@@ -204,6 +209,7 @@ func (s *playerSelectionScene) Draw(screen *ebiten.Image) {
 	for i := range s.slots {
 		s.drawSlot(target, i)
 	}
+	s.drawFooter(target)
 	s.drawStartState(target)
 	if s.openPaletteFor >= 0 {
 		s.drawPalette(target, s.openPaletteFor)
@@ -213,6 +219,9 @@ func (s *playerSelectionScene) Draw(screen *ebiten.Image) {
 	}
 	if s.helpOpen {
 		s.drawHelpDialog(target)
+	}
+	if s.languageOpen {
+		s.drawLanguageDialog(target)
 	}
 	if s.canvas != nil {
 		drawScaledImage(screen, s.canvas, screen.Bounds())
@@ -234,8 +243,17 @@ func (s *playerSelectionScene) toSelectionCoords(x, y int) (int, int) {
 
 func (s *playerSelectionScene) handleDialogKeyboard() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if s.languageOpen {
+			s.languageOpen = false
+			return
+		}
 		s.optionsOpen = false
 		s.helpOpen = false
+	}
+	if s.languageOpen && (inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter)) {
+		currentLanguage = s.languageDraft
+		s.languageOpen = false
+		return
 	}
 	if s.helpOpen && (inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter)) {
 		s.helpOpen = false
@@ -250,6 +268,7 @@ func (s *playerSelectionScene) handleSelectionShortcuts() (bool, error) {
 	case inpututil.IsKeyJustPressed(ebiten.KeyO):
 		s.optionsOpen = true
 		s.helpOpen = false
+		s.languageOpen = false
 		s.optionsDraft = s.g.options
 		s.focusedName = -1
 		s.openPaletteFor = -1
@@ -331,6 +350,7 @@ func (s *playerSelectionScene) handleOptionsClick(x, y int) bool {
 	}
 	s.optionsOpen = true
 	s.helpOpen = false
+	s.languageOpen = false
 	s.optionsDraft = s.g.options
 	s.focusedName = -1
 	s.openPaletteFor = -1
@@ -340,6 +360,7 @@ func (s *playerSelectionScene) handleOptionsClick(x, y int) bool {
 func (s *playerSelectionScene) openHelpDialog() {
 	s.helpOpen = true
 	s.optionsOpen = false
+	s.languageOpen = false
 	s.focusedName = -1
 	s.openPaletteFor = -1
 }
@@ -354,6 +375,13 @@ func (s *playerSelectionScene) handleHelpDialogClick(x, y int) {
 
 func (s *playerSelectionScene) dialogButtonAt(x, y int) string {
 	p := image.Pt(x, y)
+	if s.languageOpen {
+		r := languageDialogRect()
+		if p.In(image.Rect(r.Min.X+88, r.Min.Y+120, r.Min.X+162, r.Min.Y+141)) {
+			return "language_ok"
+		}
+		return ""
+	}
 	if s.optionsOpen {
 		r := optionsDialogRect()
 		switch {
@@ -389,6 +417,12 @@ func (s *playerSelectionScene) releaseDialogButton(x, y int) {
 		s.optionsOpen = false
 	case "options_cancel":
 		s.optionsOpen = false
+	case "options_language":
+		s.languageDraft = currentLanguage
+		s.languageOpen = true
+	case "language_ok":
+		currentLanguage = s.languageDraft
+		s.languageOpen = false
 	case "selection_help_ok":
 		s.helpOpen = false
 	}
@@ -404,6 +438,11 @@ func (s *playerSelectionScene) handleOptionsDialogClick(x, y int) {
 	}
 	if p.In(image.Rect(r.Max.X-88, r.Min.Y+86, r.Max.X-16, r.Min.Y+107)) {
 		s.optionsOpen = false
+		return
+	}
+	if p.In(image.Rect(r.Max.X-88, r.Min.Y+166, r.Max.X-16, r.Min.Y+187)) {
+		s.languageDraft = currentLanguage
+		s.languageOpen = true
 		return
 	}
 	if p.In(image.Rect(r.Min.X+120, r.Min.Y+236, r.Min.X+143, r.Min.Y+258)) {
@@ -437,6 +476,20 @@ func (s *playerSelectionScene) handleOptionsDialogClick(x, y int) {
 	}
 	if p.In(image.Rect(r.Min.X+314, r.Min.Y+235, r.Min.X+500, r.Min.Y+249)) {
 		s.optionsDraft.quickRoundStart = !s.optionsDraft.quickRoundStart
+	}
+}
+
+func (s *playerSelectionScene) handleLanguageDialogClick(x, y int) {
+	p := image.Pt(x, y)
+	r := languageDialogRect()
+	switch {
+	case p.In(image.Rect(r.Min.X+74, r.Min.Y+61, r.Min.X+145, r.Min.Y+76)):
+		s.languageDraft = languageGerman
+	case p.In(image.Rect(r.Min.X+74, r.Min.Y+94, r.Min.X+145, r.Min.Y+109)):
+		s.languageDraft = languageEnglish
+	case p.In(image.Rect(r.Min.X+88, r.Min.Y+120, r.Min.X+162, r.Min.Y+141)):
+		currentLanguage = s.languageDraft
+		s.languageOpen = false
 	}
 }
 
@@ -546,7 +599,7 @@ func (s *playerSelectionScene) startGame() error {
 		})
 	}
 	if len(players) < 2 {
-		s.message = "Mindestens zwei Spieler auswaehlen"
+		s.message = texts().PlayerSelectionMinimumPlayers
 		return nil
 	}
 
@@ -556,8 +609,9 @@ func (s *playerSelectionScene) startGame() error {
 }
 
 func (s *playerSelectionScene) drawRounds(screen *ebiten.Image) {
+	t := texts()
 	drawFilledRect(screen, image.Rect(205, 76, 432, 99), colornames.White)
-	drawText(screen, "Anzahl Runden: "+strconv.Itoa(s.rounds), 218, 93, colornames.Black)
+	drawText(screen, t.PlayerSelectionRounds+": "+strconv.Itoa(s.rounds), 218, 93, colornames.Black)
 	drawButton(screen, image.Rect(434, 72, 466, 103), "-")
 	drawButton(screen, image.Rect(474, 72, 506, 103), "+")
 }
@@ -583,12 +637,13 @@ func (s *playerSelectionScene) selectedPlayerCount() int {
 }
 
 func (s *playerSelectionScene) drawHeader(screen *ebiten.Image) {
-	drawText(screen, "TANK BLASTER", 106, 62, color.RGBA{R: 0, G: 170, B: 180, A: 255})
-	drawText(screen, "TANK BLASTER", 109, 65, colornames.Black)
-	drawText(screen, "TANK BLASTER", 106, 59, colornames.White)
+	t := texts()
+	drawText(screen, t.PlayerSelectionTitle, 106, 62, color.RGBA{R: 0, G: 170, B: 180, A: 255})
+	drawText(screen, t.PlayerSelectionTitle, 109, 65, colornames.Black)
+	drawText(screen, t.PlayerSelectionTitle, 106, 59, colornames.White)
 
 	drawFrame(screen, image.Rect(105, 70, 513, 106), colornames.White, colornames.Black)
-	drawText(screen, "Anzahl Runden: "+strconv.Itoa(s.rounds), 218, 93, colornames.Black)
+	drawText(screen, t.PlayerSelectionRounds+": "+strconv.Itoa(s.rounds), 218, 93, colornames.Black)
 	drawButton(screen, image.Rect(434, 73, 466, 102), "-")
 	drawButton(screen, image.Rect(474, 73, 506, 102), "+")
 
@@ -597,6 +652,7 @@ func (s *playerSelectionScene) drawHeader(screen *ebiten.Image) {
 }
 
 func (s *playerSelectionScene) drawSlot(screen *ebiten.Image, index int) {
+	t := texts()
 	slot := s.slots[index]
 	r := slotRect(index)
 	titleRect := image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+38)
@@ -604,17 +660,17 @@ func (s *playerSelectionScene) drawSlot(screen *ebiten.Image, index int) {
 
 	bodyColor := color.RGBA{R: 190, G: 190, B: 190, A: 255}
 	titleColor := color.RGBA{R: 224, G: 224, B: 224, A: 255}
-	titleText := "Keiner"
+	titleText := t.PlayerSelectionSlotNone
 	textColor := colornames.Black
 	if slot.Kind == PlayerHuman {
 		bodyColor = colornames.White
 		titleColor = color.RGBA{R: 224, G: 224, B: 255, A: 255}
-		titleText = "Mensch"
+		titleText = t.PlayerSelectionSlotHuman
 		textColor = color.RGBA{R: 40, G: 55, B: 255, A: 255}
 	} else if slot.Kind == PlayerComputer {
 		bodyColor = colornames.White
 		titleColor = color.RGBA{R: 255, G: 224, B: 224, A: 255}
-		titleText = "Computer"
+		titleText = t.PlayerSelectionSlotComputer
 		textColor = color.RGBA{R: 255, G: 45, B: 45, A: 255}
 	}
 
@@ -677,25 +733,27 @@ func nameInputRectForSlot(index int, kind PlayerKind) image.Rectangle {
 }
 
 func (s *playerSelectionScene) drawFooter(screen *ebiten.Image) {
+	t := texts()
 	drawFilledRect(screen, image.Rect(372, 676, 586, 695), colornames.Yellow)
-	drawCenteredText(screen, "Druecken Sie F1 fuer Hilfe", image.Rect(372, 676, 586, 695), colornames.Black)
-	drawButton(screen, image.Rect(624, 673, 756, 706), "Optionen")
-	drawButton(screen, image.Rect(780, 673, 922, 706), "Start >>")
+	drawCenteredText(screen, t.PlayerSelectionHelpHint, image.Rect(372, 676, 586, 695), colornames.Black)
+	drawButton(screen, image.Rect(624, 673, 756, 706), t.PlayerSelectionOptionsButton)
+	drawButton(screen, image.Rect(780, 673, 922, 706), t.PlayerSelectionStartButton)
 }
 
 func (s *playerSelectionScene) drawOptionsDialog(screen *ebiten.Image) {
+	t := texts()
 	r := optionsDialogRect()
-	drawDialogWindow(screen, r, "Tank Blaster Optionen")
+	drawDialogWindow(screen, r, t.OptionsTitle)
 
-	drawGroupBox(screen, image.Rect(r.Min.X+16, r.Min.Y+53, r.Min.X+285, r.Min.Y+153), "Geschoss Wiedereintritt")
-	reentryLabels := []string{"aus", "immer an", "Zufall"}
+	drawGroupBox(screen, image.Rect(r.Min.X+16, r.Min.Y+53, r.Min.X+285, r.Min.Y+153), t.OptionsProjectileReentry)
+	reentryLabels := []string{t.OptionsProjectileReentryOff, t.OptionsProjectileReentryAlways, t.OptionsProjectileReentryRandom}
 	for i, label := range reentryLabels {
 		y := r.Min.Y + 81 + i*24
 		drawRadio(screen, r.Min.X+37, y, s.optionsDraft.projectileReentry == i)
 		drawTextFace(screen, label, dialogTextFace, r.Min.X+52, y+4, colornames.Black)
 	}
 
-	drawGroupBox(screen, image.Rect(r.Min.X+16, r.Min.Y+174, r.Min.X+285, r.Min.Y+266), "Aggressivität der Wolke")
+	drawGroupBox(screen, image.Rect(r.Min.X+16, r.Min.Y+174, r.Min.X+285, r.Min.Y+266), t.OptionsCloudAggression)
 	drawSlider(screen, image.Rect(r.Min.X+31, r.Min.Y+192, r.Min.X+271, r.Min.Y+214), s.optionsDraft.cloudAggression)
 	drawTextFace(screen, "0", dialogTextFace, r.Min.X+31, r.Min.Y+230, colornames.Black)
 	drawTextFace(screen, "50", dialogTextFace, r.Min.X+143, r.Min.Y+230, colornames.Black)
@@ -703,8 +761,8 @@ func (s *playerSelectionScene) drawOptionsDialog(screen *ebiten.Image) {
 	drawDialogButton(screen, image.Rect(r.Min.X+120, r.Min.Y+236, r.Min.X+143, r.Min.Y+258), "<")
 	drawDialogButton(screen, image.Rect(r.Min.X+150, r.Min.Y+236, r.Min.X+173, r.Min.Y+258), ">")
 
-	drawGroupBox(screen, image.Rect(r.Min.X+301, r.Min.Y+53, r.Min.X+432, r.Min.Y+185), "Anzahl Bäume")
-	palmLabels := []string{"0", "1", "2", "Zufall"}
+	drawGroupBox(screen, image.Rect(r.Min.X+301, r.Min.Y+53, r.Min.X+432, r.Min.Y+185), t.OptionsPalmCount)
+	palmLabels := []string{"0", "1", "2", t.OptionsProjectileReentryRandom}
 	palmValues := []int{0, 1, 2, -1}
 	for i, label := range palmLabels {
 		y := r.Min.Y + 88 + i*24
@@ -712,17 +770,21 @@ func (s *playerSelectionScene) drawOptionsDialog(screen *ebiten.Image) {
 		drawTextFace(screen, label, dialogTextFace, r.Min.X+343, y+4, colornames.Black)
 	}
 
-	drawGroupBox(screen, image.Rect(r.Min.X+301, r.Min.Y+208, r.Min.X+518, r.Min.Y+266), "Rundenstart")
+	drawGroupBox(screen, image.Rect(r.Min.X+301, r.Min.Y+208, r.Min.X+518, r.Min.Y+266), t.OptionsRoundStart)
 	drawCheckbox(screen, r.Min.X+321, r.Min.Y+242, s.optionsDraft.quickRoundStart)
-	drawTextFace(screen, "schneller Rundenstart", dialogTextFace, r.Min.X+338, r.Min.Y+247, colornames.Black)
+	drawTextFace(screen, t.OptionsQuickRoundStart, dialogTextFace, r.Min.X+338, r.Min.Y+247, colornames.Black)
 
-	drawDialogButton(screen, image.Rect(r.Max.X-88, r.Min.Y+56, r.Max.X-16, r.Min.Y+77), "OK")
-	drawDialogButton(screen, image.Rect(r.Max.X-88, r.Min.Y+86, r.Max.X-16, r.Min.Y+107), "Abbrechen")
-	drawDialogButton(screen, image.Rect(r.Max.X-88, r.Min.Y+166, r.Max.X-16, r.Min.Y+187), "Sprache...")
+	drawDialogButton(screen, image.Rect(r.Max.X-88, r.Min.Y+56, r.Max.X-16, r.Min.Y+77), t.DialogOK)
+	drawDialogButton(screen, image.Rect(r.Max.X-88, r.Min.Y+86, r.Max.X-16, r.Min.Y+107), t.DialogCancel)
+	drawDialogButton(screen, image.Rect(r.Max.X-88, r.Min.Y+166, r.Max.X-16, r.Min.Y+187), t.OptionsLanguageButton)
 }
 
 func optionsDialogRect() image.Rectangle {
 	return image.Rect(0, 0, 530, 284).Add(image.Pt((960-530)/2, (721-284)/2))
+}
+
+func languageDialogRect() image.Rectangle {
+	return image.Rect(0, 0, 248, 161).Add(image.Pt((960-248)/2, (721-161)/2))
 }
 
 func helpDialogRect() image.Rectangle {
@@ -730,8 +792,9 @@ func helpDialogRect() image.Rectangle {
 }
 
 func (s *playerSelectionScene) drawHelpDialog(screen *ebiten.Image) {
+	t := texts()
 	r := helpDialogRect()
-	drawDialogWindow(screen, r, "Tank Blaster Hilfe")
+	drawDialogWindow(screen, r, t.PlayerSelectionHelpTitle)
 
 	leftCard := image.Rect(r.Min.X+14, r.Min.Y+49, r.Min.X+113, r.Min.Y+201)
 	humanCard := image.Rect(r.Min.X+90, r.Min.Y+81, r.Min.X+190, r.Min.Y+235)
@@ -740,27 +803,56 @@ func (s *playerSelectionScene) drawHelpDialog(screen *ebiten.Image) {
 
 	drawFrame(screen, leftCard, color.RGBA{R: 190, G: 190, B: 190, A: 255}, colornames.Black)
 	drawFilledRect(screen, image.Rect(leftCard.Min.X, leftCard.Min.Y, leftCard.Max.X, leftCard.Min.Y+24), color.RGBA{R: 220, G: 220, B: 220, A: 255})
-	drawCenteredTextFace(screen, "None", image.Rect(leftCard.Min.X, leftCard.Min.Y, leftCard.Max.X, leftCard.Min.Y+24), dialogTextFace, colornames.Black)
+	drawCenteredTextFace(screen, t.PlayerSelectionHelpSlotNone, image.Rect(leftCard.Min.X, leftCard.Min.Y, leftCard.Max.X, leftCard.Min.Y+24), dialogTextFace, colornames.Black)
 
-	drawHelpPlayerCard(screen, humanCard, s.humanPortrait, "Human", "Player 1", color.RGBA{R: 35, G: 65, B: 255, A: 255})
-	drawHelpPlayerCard(screen, computerCard, s.computerPortraitFor(computerplayers.DoedelID), "Computer", "D. Dödel", color.RGBA{R: 255, G: 45, B: 45, A: 255})
+	drawHelpPlayerCard(screen, humanCard, s.humanPortrait, t.PlayerSelectionHelpHuman, t.PlayerSelectionHelpPlayerName, color.RGBA{R: 35, G: 65, B: 255, A: 255})
+	drawHelpPlayerCard(screen, computerCard, s.computerPortraitFor(computerplayers.DoedelID), t.PlayerSelectionSlotComputer, "D. Dödel", color.RGBA{R: 255, G: 45, B: 45, A: 255})
 
-	drawHelpArrow(screen, r.Min.X+145, r.Min.Y+58, humanCard.Min.X+58, humanCard.Min.Y, "Spielertyp ändern")
-	drawHelpArrow(screen, r.Min.X+296, r.Min.Y+58, computerCard.Max.X-15, computerCard.Min.Y+10, "Farbe ändern")
-	drawHelpArrow(screen, r.Min.X+105, r.Min.Y+281, humanCard.Min.X+50, humanCard.Max.Y-14, "Name ändern")
-	drawHelpArrow(screen, r.Min.X+260, r.Min.Y+264, computerCard.Min.X+85, computerCard.Max.Y-18, "Computertyp ändern")
+	drawHelpArrow(screen, r.Min.X+145, r.Min.Y+58, humanCard.Min.X+58, humanCard.Min.Y, t.PlayerSelectionHelpPlayerType)
+	drawHelpArrow(screen, r.Min.X+296, r.Min.Y+58, computerCard.Max.X-15, computerCard.Min.Y+10, t.PlayerSelectionHelpColor)
+	drawHelpArrow(screen, r.Min.X+105, r.Min.Y+281, humanCard.Min.X+50, humanCard.Max.Y-14, t.PlayerSelectionHelpName)
+	drawHelpArrow(screen, r.Min.X+260, r.Min.Y+264, computerCard.Min.X+85, computerCard.Max.Y-18, t.PlayerSelectionHelpComputerType)
 
-	drawGroupBox(screen, keysBox, "Tasten")
+	drawGroupBox(screen, keysBox, t.PlayerSelectionHelpKeys)
 	helpKeys := []string{
-		"+      Rundenzahl erhöhen",
-		"-      Rundenzahl verringern",
-		"O      Optionen einstellen",
-		"ESC    Spiel starten",
+		t.PlayerSelectionHelpKeyIncreaseRounds,
+		t.PlayerSelectionHelpKeyDecreaseRounds,
+		t.PlayerSelectionHelpKeyOptions,
+		t.PlayerSelectionHelpKeyStart,
 	}
 	for i, line := range helpKeys {
 		drawTextFace(screen, line, dialogTextFace, keysBox.Min.X+16, keysBox.Min.Y+31+i*24, colornames.Black)
 	}
-	drawDialogButton(screen, image.Rect(r.Max.X-75, r.Max.Y-63, r.Max.X-12, r.Max.Y-39), "OK")
+	drawDialogButton(screen, image.Rect(r.Max.X-75, r.Max.Y-63, r.Max.X-12, r.Max.Y-39), t.DialogOK)
+}
+
+func (s *playerSelectionScene) drawLanguageDialog(screen *ebiten.Image) {
+	t := texts()
+	r := languageDialogRect()
+	drawDialogWindow(screen, r, t.LanguageTitle)
+	drawGermanFlag(screen, image.Rect(r.Min.X+22, r.Min.Y+53, r.Min.X+54, r.Min.Y+72))
+	drawBritishFlag(screen, image.Rect(r.Min.X+22, r.Min.Y+86, r.Min.X+54, r.Min.Y+105))
+	drawRadio(screen, r.Min.X+82, r.Min.Y+62, s.languageDraft == languageGerman)
+	drawTextFace(screen, t.LanguageGerman, dialogTextFace, r.Min.X+94, r.Min.Y+66, colornames.Black)
+	drawRadio(screen, r.Min.X+82, r.Min.Y+95, s.languageDraft == languageEnglish)
+	drawTextFace(screen, t.LanguageEnglish, dialogTextFace, r.Min.X+94, r.Min.Y+99, colornames.Black)
+	drawDialogButton(screen, image.Rect(r.Min.X+88, r.Min.Y+120, r.Min.X+162, r.Min.Y+141), t.DialogOK)
+}
+
+func drawGermanFlag(screen *ebiten.Image, r image.Rectangle) {
+	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+r.Dy()/3), colornames.Black)
+	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y+r.Dy()/3, r.Max.X, r.Min.Y+(r.Dy()*2)/3), colornames.Red)
+	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y+(r.Dy()*2)/3, r.Max.X, r.Max.Y), colornames.Yellow)
+}
+
+func drawBritishFlag(screen *ebiten.Image, r image.Rectangle) {
+	drawFilledRect(screen, r, color.RGBA{R: 15, G: 45, B: 160, A: 255})
+	ebitenutil.DrawLine(screen, float64(r.Min.X), float64(r.Min.Y), float64(r.Max.X), float64(r.Max.Y), colornames.White)
+	ebitenutil.DrawLine(screen, float64(r.Min.X), float64(r.Max.Y), float64(r.Max.X), float64(r.Min.Y), colornames.White)
+	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y+r.Dy()/2-2, r.Max.X, r.Min.Y+r.Dy()/2+2), colornames.White)
+	drawFilledRect(screen, image.Rect(r.Min.X+r.Dx()/2-2, r.Min.Y, r.Min.X+r.Dx()/2+2, r.Max.Y), colornames.White)
+	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y+r.Dy()/2-1, r.Max.X, r.Min.Y+r.Dy()/2+1), colornames.Red)
+	drawFilledRect(screen, image.Rect(r.Min.X+r.Dx()/2-1, r.Min.Y, r.Min.X+r.Dx()/2+1, r.Max.Y), colornames.Red)
 }
 
 func drawHelpPlayerCard(screen *ebiten.Image, r image.Rectangle, portrait *ebiten.Image, title, name string, titleColor color.Color) {
