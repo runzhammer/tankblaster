@@ -101,4 +101,4 @@ debug:
   zero_power_animations: []
   game:
     rounds: 10
-    players: *computer_players
+    players: *human_players

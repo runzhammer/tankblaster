@@ -5354,7 +5354,7 @@ func (s *GameScene) updatePalmRevenge() {
 		if event.age >= 48 && event.age < 66 && !event.smokeDone {
 			s.startPalmRevengeSmoke(event)
 		}
-		if event.age >= 66 && !event.damageDone {
+		if event.age >= 140 && !event.damageDone {
 			s.damagePalmRevengeTank(event)
 		}
 		if event.smokeDone {

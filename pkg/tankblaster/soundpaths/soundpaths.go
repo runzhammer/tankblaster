@@ -80,12 +80,12 @@ const (
 	TankDestroyed          = None
 	PalmHit                = SoundPock
 	PalmIgnite             = SoundBurning
-	PalmCrumble            = SoundBroeselklirr
+	PalmCrumble            = SoundKlirr
 	PalmEyes               = SoundPock
 	PalmRevenge            = SoundBaumschrei
 	CloudSearch            = None
 	CloudLightning         = SoundBlitz
-	RevengeTankBroken      = SoundScream2
+	RevengeTankBroken      = SoundHahaha
 	WaterFill              = None
 	WaterBlubber           = SoundBlubber
 	WaterBlotch            = SoundBlotsch
@@ -115,7 +115,7 @@ const (
 	ZeroPowerDust               = SoundDampf
 	ZeroPowerExplosion          = SoundExplosion1
 	ZeroPowerMushroom           = SoundExplosion3
-	ZeroPowerSmoke              = SoundDampf
+	ZeroPowerSmoke              = None
 	ZeroPowerGrenadeImpact      = SoundExplosion1
 	ZeroPowerLargeGrenadeImpact = SoundExplosion2
 	ZeroPowerAtomImpact         = SoundAtom
