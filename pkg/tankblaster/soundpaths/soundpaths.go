@@ -114,7 +114,7 @@ const (
 const (
 	ZeroPowerDust               = SoundDampf
 	ZeroPowerExplosion          = SoundExplosion1
-	ZeroPowerMushroom           = SoundNukeall
+	ZeroPowerMushroom           = SoundExplosion3
 	ZeroPowerSmoke              = SoundDampf
 	ZeroPowerGrenadeImpact      = SoundExplosion1
 	ZeroPowerLargeGrenadeImpact = SoundExplosion2

@@ -1,3 +1,67 @@
+player_sets:
+  human_players: &human_players
+    - kind: human
+      name: "Spieler 1"
+      color:
+        r: 11
+        g: 31
+        b: 255
+        a: 255
+
+    - kind: human
+      name: "Spieler 2"
+      color:
+        r: 230
+        g: 70
+        b: 20
+        a: 255
+
+  computer_players: &computer_players
+    - kind: computer
+      name: "F. Merz"
+      computer_id: 0
+      color:
+        r: 230
+        g: 20
+        b: 70
+        a: 255
+
+    - kind: computer
+      name: "A. Merkel"
+      computer_id: 1
+      color:
+        r: 200
+        g: 90
+        b: 45
+        a: 255
+
+    - kind: computer
+      name: "Spongebob"
+      computer_id: 2
+      color:
+        r: 230
+        g: 34
+        b: 45
+        a: 255
+
+    - kind: computer
+      name: "Batman"
+      computer_id: 3
+      color:
+        r: 10
+        g: 84
+        b: 45
+        a: 255
+
+    - kind: computer
+      name: "Gevatter T."
+      computer_id: 4
+      color:
+        r: 110
+        g: 184
+        b: 43
+        a: 255
+
 window:
   width: 1024
   height: 768
@@ -23,7 +87,7 @@ gameplay:
 debug:
   enabled: true
   start_scene: game # game / shop
-  start_shop: true
+  start_shop: false
   # Optional im Debug-Modus: leere/fehlende Liste erlaubt alle Todesanimationen.
   # Erlaubte Namen:
   # - dust
@@ -37,58 +101,4 @@ debug:
   zero_power_animations: []
   game:
     rounds: 10
-    players:
-      - kind: human
-        name: "Spieler 1"
-        color:
-          r: 11
-          g: 31
-          b: 255
-          a: 255
-      - kind: human
-        name: "Spieler 2"
-        color:
-          r: 230
-          g: 70
-          b: 20
-          a: 255
-      # - kind: computer
-      #   name: "F. Merz"
-      #   computer_id: 0
-      #   color:
-      #     r: 230
-      #     g: 20
-      #     b: 70
-      #     a: 255
-      # - kind: computer
-      #   name: "A. Merkel"
-      #   computer_id: 1
-      #   color:
-      #     r: 200
-      #     g: 90
-      #     b: 45
-      #     a: 255
-      # - kind: computer
-      #   name: "Spongebob"
-      #   computer_id: 2
-      #   color:
-      #     r: 230
-      #     g: 34
-      #     b: 45
-      #     a: 255
-      # - kind: computer
-      #   name: "Batman"
-      #   computer_id: 3
-      #   color:
-      #     r: 10
-      #     g: 84
-      #     b: 45
-      #     a: 255
-      # - kind: computer
-      #   name: "Gevatter T."
-      #   computer_id: 4
-      #   color:
-      #     r: 110
-      #     g: 184
-      #     b: 43
-      #     a: 255
+    players: *computer_players

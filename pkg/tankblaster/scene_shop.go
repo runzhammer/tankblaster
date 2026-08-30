@@ -576,7 +576,7 @@ func (s *GameScene) drawShopItemDetails(screen *ebiten.Image, itemIndex int, ite
 	drawText(screen, t.ShopQuantity+": "+strconv.Itoa(item.stock), detailRect.Min.X+26, detailRect.Min.Y+116, colornames.White)
 	drawText(screen, t.ShopPrice+": "+strconv.Itoa(s.shopPriceForItem(itemIndex)), detailRect.Min.X+26, detailRect.Min.Y+166, colornames.White)
 	drawFrame(screen, s.shopDetailIconRect(), colornames.Black, colornames.Red)
-	s.drawShopItemIcon(screen, itemIndex, insetRect(s.shopDetailIconRect(), 4), false)
+	s.drawShopItemIcon(screen, itemIndex, s.shopDetailIconRect(), false)
 	if s.shopMode == shopModeClassB {
 		drawButton(screen, s.shopBuyRect(), t.ShopBargainBuy)
 		return
@@ -816,9 +816,27 @@ func (s *GameScene) drawShopPlayerPanel(screen *ebiten.Image, playerIndex int, p
 	if player.Kind == PlayerComputer {
 		portrait = s.shop.computer
 	}
+
 	innerPortrait := insetRect(portraitRect, 8)
-	drawScaledImage(screen, portrait, innerPortrait)
-	drawPaintSwatch(screen, image.Rect(portraitRect.Max.X-30, portraitRect.Min.Y+10, portraitRect.Max.X-10, portraitRect.Min.Y+32), player.Color)
+
+	cropRect := image.Rect(50, 25, 270, 310)
+	cropRect = cropRect.Intersect(portrait.Bounds())
+
+	if !cropRect.Empty() {
+		croppedPortrait := portrait.SubImage(cropRect).(*ebiten.Image)
+		drawScaledImage(screen, croppedPortrait, innerPortrait)
+	}
+
+	drawPaintSwatch(
+		screen,
+		image.Rect(
+			portraitRect.Max.X-30,
+			portraitRect.Min.Y+10,
+			portraitRect.Max.X-10,
+			portraitRect.Min.Y+32,
+		),
+		player.Color,
+	)
 
 	drawCenteredText(screen, player.Name, nameRect, colornames.White)
 	money := 0
