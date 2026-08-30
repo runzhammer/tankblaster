@@ -1,204 +1,225 @@
 package resources
 
-import _ "embed"
+import (
+	"embed"
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
 //go:embed config.yaml
 var GameConfig []byte
 
-//go:embed tank.png
+//go:embed sounds/*.wav
+var Sounds embed.FS
+
+//go:embed images/tank.png
 var TankSprite []byte
 
 //go:embed tank.yaml
 var TankSpec []byte
 
-//go:embed tank_small.png
+//go:embed images/tank_small.png
 var TankSmallSprite []byte
 
 //go:embed tank_small.yaml
 var TankSmallSpec []byte
 
-//go:embed xm-v12-tank.png
+//go:embed images/xm-v12-tank.png
 var XMV12TankSprite []byte
 
-//go:embed tankanzeige.png
+//go:embed images/tankanzeige.png
 var FuelGaugePNG []byte
 
-//go:embed slopemeter.png
+//go:embed images/slopemeter.png
 var SlopeMeterPNG []byte
 
-//go:embed button-ignition.png
+//go:embed images/button-ignition.png
 var ButtonIgnitionPNG []byte
 
-//go:embed cannon.png
+//go:embed images/cannon.png
 var CannonSprite []byte
 
 //go:embed cannon.yaml
 var CannonSpec []byte
 
-//go:embed background.png
+//go:embed images/background.png
 var BackgroundSprite []byte
 
 //go:embed background.yaml
 var BackgroundSpec []byte
 
-//go:embed ground.png
+//go:embed images/ground.png
 var GroundSprite []byte
 
 //go:embed ground.yaml
 var GroundSpec []byte
 
-//go:embed player_selection_base.png
+//go:embed images/player_selection_base.png
 var PlayerSelectionBase []byte
 
-//go:embed player_human.png
+//go:embed images/player_human.png
 var PlayerHuman []byte
 
-//go:embed player_computer_doedel.png
+//go:embed images/player_computer_doedel.png
 var PlayerComputerDoedel []byte
 
-//go:embed player_computer_frederik.png
+//go:embed images/player_computer_frederik.png
 var PlayerComputerFrederik []byte
 
-//go:embed player_computer_mister_x.png
+//go:embed images/player_computer_mister_x.png
 var PlayerComputerMisterX []byte
 
-//go:embed player_computer_dr_nuke.png
+//go:embed images/player_computer_dr_nuke.png
 var PlayerComputerDrNuke []byte
 
-//go:embed player_computer_harald.png
+//go:embed images/player_computer_harald.png
 var PlayerComputerHarald []byte
 
-//go:embed klecks.png
+//go:embed images/klecks.png
 var PaintSplotchPNG []byte
 
-//go:embed zero_power_dust_explosion.png
+//go:embed images/zero_power_dust_explosion.png
 var ZeroPowerDustExplosionPNG []byte
 
-//go:embed zero_power_explosion.png
+//go:embed images/zero_power_explosion.png
 var ZeroPowerExplosionPNG []byte
 
-//go:embed zero_power_mushroom_explosion.png
+//go:embed images/zero_power_mushroom_explosion.png
 var ZeroPowerMushroomExplosionPNG []byte
 
-//go:embed zero_power_player_smoke.png
+//go:embed images/zero_power_player_smoke.png
 var ZeroPowerPlayerSmokePNG []byte
 
 //go:embed fonts/DejaVuSansMono.ttf
 var DejaVuSansMono []byte
 
-//go:embed store_background.png
+//go:embed images/store_background.png
 var StoreBackground []byte
 
-//go:embed store_main_left.png
+//go:embed images/store_main_left.png
 var StoreMainLeft []byte
 
-//go:embed store_main_right.png
+//go:embed images/store_main_right.png
 var StoreMainRight []byte
 
-//go:embed store_roll.png
+//go:embed images/store_roll.png
 var StoreRoll []byte
 
-//go:embed store_icons.png
+//go:embed images/store_icons.png
 var StoreIcons []byte
 
-//go:embed weaponbar_active.png
+//go:embed images/weaponbar_active.png
 var WeaponbarActive []byte
 
-//go:embed weaponbar_onstock.png
+//go:embed images/weaponbar_onstock.png
 var WeaponbarOnStock []byte
 
-//go:embed weaponbar_outofstock.png
+//go:embed images/weaponbar_outofstock.png
 var WeaponbarOutOfStock []byte
 
-//go:embed symbol_reentry.png
+//go:embed images/symbol_reentry.png
 var SymbolReentry []byte
 
-//go:embed earth_reentry.png
+//go:embed images/earth_reentry.png
 var EarthReentry []byte
 
-//go:embed palm.png
+//go:embed images/palm.png
 var Palm []byte
 
-//go:embed palm_leaves.png
+//go:embed images/palm_leaves.png
 var PalmLeavesPNG []byte
 
-//go:embed palm_eyes_open.png
+//go:embed images/palm_eyes_open.png
 var PalmEyesOpenPNG []byte
 
-//go:embed palm_scream.png
+//go:embed images/palm_scream.png
 var PalmScreamPNG []byte
 
-//go:embed palm_grin.png
+//go:embed images/palm_grin.png
 var PalmGrinPNG []byte
 
-//go:embed moskitos.png
+//go:embed images/moskitos.png
 var MoskitosPNG []byte
 
-//go:embed fragezeichen.png
+//go:embed images/fragezeichen.png
 var FragezeichenPNG []byte
 
-//go:embed blinkboje.png
+//go:embed images/blinkboje.png
 var BlinkBojePNG []byte
 
-//go:embed bullet_bomb.png
+//go:embed images/bullet_bomb.png
 var BulletBombPNG []byte
 
-//go:embed lasersmoke.png
+//go:embed images/lasersmoke.png
 var LaserSmokePNG []byte
 
-//go:embed fireball_impact.png
+//go:embed images/fireball_impact.png
 var FireballImpactPNG []byte
 
-//go:embed palm_fire.png
+//go:embed images/palm_fire.png
 var PalmFirePNG []byte
 
-//go:embed palm_skeleton.png
+//go:embed images/palm_skeleton.png
 var PalmSkeletonPNG []byte
 
-//go:embed palm_smoke.png
+//go:embed images/palm_smoke.png
 var PalmSmokePNG []byte
 
-//go:embed palm_crumble.png
+//go:embed images/palm_crumble.png
 var PalmCrumblePNG []byte
 
-//go:embed water_texture.png
+//go:embed images/water_texture.png
 var WaterTexturePNG []byte
 
-//go:embed water_blubber.png
+//go:embed images/water_blubber.png
 var WaterBlubberPNG []byte
 
-//go:embed water_blotch.png
+//go:embed images/water_blotch.png
 var WaterBlotchPNG []byte
 
-//go:embed cloud_lightning.png
+//go:embed images/cloud_lightning.png
 var CloudLightning []byte
 
-//go:embed cloud_aerger.png
+//go:embed images/cloud_aerger.png
 var CloudAngryPNG []byte
 
-//go:embed cloud_searching.png
+//go:embed images/cloud_searching.png
 var CloudSearchingPNG []byte
 
-//go:embed cloud_aerger2grinse.png
+//go:embed images/cloud_aerger2grinse.png
 var CloudAngryToGrinPNG []byte
 
-//go:embed cloud_grinse.png
+//go:embed images/cloud_grinse.png
 var CloudGrinPNG []byte
 
-//go:embed lightning.png
+//go:embed images/lightning.png
 var LightningPNG []byte
 
-//go:embed cloud_1.png
+//go:embed images/cloud_1.png
 var Cloud1 []byte
 
-//go:embed cloud_2.png
+//go:embed images/cloud_2.png
 var Cloud2 []byte
 
-//go:embed cloud_3.png
+//go:embed images/cloud_3.png
 var Cloud3 []byte
 
-//go:embed cloud_4.png
+//go:embed images/cloud_4.png
 var Cloud4 []byte
 
-//go:embed cloud_5.png
+//go:embed images/cloud_5.png
 var Cloud5 []byte
+
+func SoundBytes(path string) ([]byte, error) {
+	name := strings.TrimSpace(path)
+	if name == "" {
+		return nil, nil
+	}
+	name = filepath.ToSlash(name)
+	name = strings.TrimPrefix(name, "resources/")
+	if !strings.HasPrefix(name, "sounds/") {
+		return nil, fmt.Errorf("sound path must be under resources/sounds: %s", path)
+	}
+	return Sounds.ReadFile(name)
+}

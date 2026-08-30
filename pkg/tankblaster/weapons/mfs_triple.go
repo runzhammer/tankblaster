@@ -1,7 +1,7 @@
 package weapons
 
 func MFSTriple() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "MFS 3-fach",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -12,5 +12,5 @@ func MFSTriple() Weapon {
 		ImpactScale:            largeGrenadeImpactScale,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		TripleShot:             true,
-	}
+	})
 }

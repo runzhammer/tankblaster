@@ -1,7 +1,7 @@
 package weapons
 
 func SurpriseEgg() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Überraschungsei",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -9,5 +9,5 @@ func SurpriseEgg() Weapon {
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		SurpriseEgg:            true,
-	}
+	})
 }

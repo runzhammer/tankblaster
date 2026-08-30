@@ -1,7 +1,7 @@
 package weapons
 
 func Training() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Spurgeschoß",
 		Color:                  whiteProjectileColor(),
 		Damage:                 0,
@@ -9,5 +9,5 @@ func Training() Weapon {
 		RoundProjectile:        true,
 		ShowTrail:              true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
-	}
+	})
 }

@@ -6,7 +6,7 @@ const (
 )
 
 func AtomBomb() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Atombombe",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -17,5 +17,5 @@ func AtomBomb() Weapon {
 		ImpactAnimationSeconds: atomBombImpactAnimationSeconds,
 		ImpactCycles:           1,
 		ImpactGradientOutward:  true,
-	}
+	})
 }

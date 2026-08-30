@@ -1,7 +1,7 @@
 package weapons
 
 func Shockwave() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Schockwelle",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -10,5 +10,5 @@ func Shockwave() Weapon {
 		ImpactScale:            plasmaImpactScale,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		Shockwave:              true,
-	}
+	})
 }

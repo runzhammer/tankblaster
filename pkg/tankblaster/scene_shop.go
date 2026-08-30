@@ -411,6 +411,7 @@ func (s *GameScene) affordableComputerShopChoices(playerIndex int, mode shopMode
 }
 
 func (s *GameScene) advanceShopPlayer() {
+	s.playEventSound(soundEventShopNextPlayer)
 	s.shopPlayerCursor++
 	s.shopHoverClass = 0
 	s.shopMode = shopModeEntry
@@ -583,6 +584,7 @@ func (s *GameScene) buySelectedShopItem() {
 	if s.isDieselItem(itemIndex) && (!s.playerHasXMV12(playerIndex) || s.dieselForPlayer(playerIndex) >= xmV12MaxDiesel) {
 		return
 	}
+	s.playEventSound(soundEventShopBuy)
 	s.credits[playerIndex] -= price
 	defer s.ensureDebugHumanCredits()
 	quantity := shopItems()[itemIndex].stock

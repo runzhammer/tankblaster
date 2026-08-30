@@ -1,7 +1,7 @@
 package weapons
 
 func AirStrike() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Luftschlag",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -9,5 +9,5 @@ func AirStrike() Weapon {
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		AirStrike:              true,
-	}
+	})
 }

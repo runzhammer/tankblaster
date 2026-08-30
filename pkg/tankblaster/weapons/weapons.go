@@ -1,16 +1,23 @@
 package weapons
 
-import "image/color"
+import (
+	"image/color"
+
+	"github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
+)
 
 const (
 	DirectHitDamage               = 100
 	DefaultImpactAnimationSeconds = 0.2
+	DefaultSound                  = soundpaths.Default
 )
 
 type Weapon struct {
 	Name                   string
 	Color                  color.RGBA
 	Damage                 int
+	FireSound              string
+	ImpactSound            string
 	Unlocked               bool
 	ShowTrail              bool
 	RoundProjectile        bool
@@ -76,7 +83,7 @@ func List() []Weapon {
 }
 
 func FutureWeapon(name string) Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   name,
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -85,7 +92,7 @@ func FutureWeapon(name string) Weapon {
 		DamagesTerrain:         true,
 		ProjectileScale:        grenadeScale,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
-	}
+	})
 }
 
 func UtilityItem(name string) Weapon {
@@ -94,6 +101,12 @@ func UtilityItem(name string) Weapon {
 		Unlocked: true,
 		Utility:  true,
 	}
+}
+
+func withDefaultSounds(weapon Weapon) Weapon {
+	weapon.FireSound = DefaultSound
+	weapon.ImpactSound = DefaultSound
+	return weapon
 }
 
 func ProjectileRadius(weapon Weapon, baseRadius float64) float64 {

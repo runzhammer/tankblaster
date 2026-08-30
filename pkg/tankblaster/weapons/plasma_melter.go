@@ -6,7 +6,7 @@ const (
 )
 
 func PlasmaMelter() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Plasmaschmelzer",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -17,5 +17,5 @@ func PlasmaMelter() Weapon {
 		ImpactAnimationSeconds: plasmaImpactAnimationSeconds,
 		ImpactCycles:           1,
 		ImpactAnimationStyle:   ImpactAnimationPlasma,
-	}
+	})
 }

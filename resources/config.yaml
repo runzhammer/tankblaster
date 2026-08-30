@@ -22,7 +22,7 @@ gameplay:
     max_speed: 0.13
 debug:
   enabled: true
-  start_scene: game
+  start_scene: game # game / shop
   start_shop: false
   # Optional im Debug-Modus: leere/fehlende Liste erlaubt alle Todesanimationen.
   # Erlaubte Namen:

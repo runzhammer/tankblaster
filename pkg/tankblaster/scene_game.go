@@ -890,6 +890,7 @@ func (s *GameScene) ensureDebugHumanCredits() {
 }
 
 func (s *GameScene) startRound() {
+	s.playEventSound(soundEventRoundStart)
 	s.phase = phaseBattle
 	s.layers = engine.NewLayers(numLayers)
 	s.spawnIndex = 0
@@ -1270,6 +1271,7 @@ func (s *GameScene) ignitePalm(palm *battlePalm) {
 	if palm == nil || palm.state != palmStateAlive {
 		return
 	}
+	s.playEventSound(soundEventPalmIgnite)
 	palm.state = palmStateBurning
 	palm.age = 0
 }
@@ -1278,6 +1280,7 @@ func (s *GameScene) crumblePalm(palm *battlePalm) {
 	if palm == nil || palm.state == palmStateCrumbling {
 		return
 	}
+	s.playEventSound(soundEventPalmCrumble)
 	if palm.sprite != nil && s.layers[layerPalms] != nil {
 		s.layers[layerPalms].Remove(palm.sprite)
 	}
@@ -1307,6 +1310,7 @@ func (s *GameScene) spawnPalmLeafFall(palm *battlePalm) {
 	if palm == nil || palm.sprite == nil || len(s.palmLeafImages) == 0 {
 		return
 	}
+	s.playEventSound(soundEventPalmHit)
 	bounds := palm.sprite.Bounds()
 	leafCount := 18
 	for i := 0; i < leafCount; i++ {
@@ -1327,6 +1331,7 @@ func (s *GameScene) startPalmEyes(palm *battlePalm) {
 	if palm == nil || palm.state != palmStateAlive || len(s.palmEyesAnimation.frames) == 0 {
 		return
 	}
+	s.playEventSound(soundEventPalmEyes)
 	palm.eyesOn = true
 	palm.eyeAge = 0
 }
@@ -1406,6 +1411,7 @@ func (s *GameScene) scheduleCloudSearchForProjectile(p *projectile) {
 		animation: s.cloudSearchingAnimation,
 	}
 	s.cloudSearchEffects = append(s.cloudSearchEffects, effect)
+	s.playEventSound(soundEventCloudSearch)
 	s.delayTurnAdvance(delay + effect.duration + secondsToFrames(0.25))
 }
 
@@ -1443,6 +1449,7 @@ func (s *GameScene) startLightningCloudRevenge(cloud *battleCloud, palm *battleP
 	if cloud == nil || cloud.sprite == nil || cloud.sprite.Pos == nil || cloud.sprite.Size == nil || target == nil || target.body == nil {
 		return
 	}
+	s.playEventSound(soundEventPalmRevenge)
 	if palm != nil {
 		palm.eyesOn = false
 		palm.screaming = true
@@ -2354,6 +2361,7 @@ func (s *GameScene) handleBattleInput() {
 		s.toggleScrollOMat(tank)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyM) && s.playerHasXMV12(tank.playerIndex) && s.dieselForPlayer(tank.playerIndex) > 0 {
+		s.playEventSound(soundEventXMV12Ignition)
 		s.xmV12DriveMode = true
 		s.xmV12DriveDirection = 0
 		return
@@ -2363,7 +2371,7 @@ func (s *GameScene) handleBattleInput() {
 		x, y := ebiten.CursorPosition()
 		for i := 0; i < s.weaponSlotCount(); i++ {
 			if image.Pt(x, y).In(s.weaponSlotRect(i)) && s.canSelectWeaponSlot(tank, i) {
-				tank.selectedWeapon = i
+				s.setSelectedWeapon(tank, i)
 				break
 			}
 		}
@@ -2602,6 +2610,7 @@ func (s *GameScene) handleXMV12HUDInput(tank *battleTank) {
 	case cursor.In(s.xmV12RightButtonRect()):
 		s.xmV12DriveDirection = 1
 	case cursor.In(s.xmV12MotorOffRect()):
+		s.playEventSound(soundEventXMV12MotorOff)
 		s.xmV12DriveDirection = 0
 		s.xmV12EngineOffDelay = xmV12EngineOffDelayFrames
 	}
@@ -2848,7 +2857,7 @@ func (s *GameScene) selectNextWeapon(tank *battleTank) {
 	for step := 1; step <= s.weaponSlotCount(); step++ {
 		slot := (tank.selectedWeapon + step) % s.weaponSlotCount()
 		if s.canSelectWeaponSlot(tank, slot) {
-			tank.selectedWeapon = slot
+			s.setSelectedWeapon(tank, slot)
 			return
 		}
 	}
@@ -2862,10 +2871,18 @@ func (s *GameScene) selectPreviousWeapon(tank *battleTank) {
 	for step := 1; step <= count; step++ {
 		slot := (tank.selectedWeapon - step + count) % count
 		if s.canSelectWeaponSlot(tank, slot) {
-			tank.selectedWeapon = slot
+			s.setSelectedWeapon(tank, slot)
 			return
 		}
 	}
+}
+
+func (s *GameScene) setSelectedWeapon(tank *battleTank, slot int) {
+	if tank == nil || tank.selectedWeapon == slot {
+		return
+	}
+	tank.selectedWeapon = slot
+	s.playEventSound(soundEventWeaponSelect)
 }
 
 func (s *GameScene) invertCannonAngle(tank *battleTank) {
@@ -2962,6 +2979,7 @@ func (s *GameScene) fireActiveWeapon() {
 		s.lastComputerShot = s.computerShotRecordFor(tank)
 	}
 	tank.computerPlan = nil
+	s.playWeaponFireSound(weapon)
 	if weapon.Laser {
 		s.fireLaserWeapon(tank, *muzzle, tank.cannon.Rot, weapon, classBDud)
 		return
@@ -3325,6 +3343,7 @@ func (s *GameScene) fireLaserWeapon(shooter *battleTank, muzzle engine.Vec, angl
 		effect.finished = false
 		effect.smokeFrom = hit.pos
 		effect.duration = int(math.Ceil(math.Max(0, maxDistance-hit.dist)/laserDrillSpeed)) + laserHoldFrames
+		s.playEventSound(soundEventLaserSmoke)
 		effect.smokes = append(effect.smokes, laserSmoke{pos: hit.pos})
 		s.reportComputerShot(hit.pos, -1, false)
 		delay = maxInt(delay, effect.duration)
@@ -3439,6 +3458,7 @@ func (s *GameScene) updateLaserEffect(effect *laserEffect) {
 		}
 	}
 	if tipInTerrain && len(effect.smokes) < laserMaxSmokeCount && effect.tip.Sub(effect.smokeFrom).Len() >= laserSmokeSpacing {
+		s.playEventSound(soundEventLaserSmoke)
 		effect.smokes = append(effect.smokes, laserSmoke{pos: effect.tip})
 		effect.smokeFrom = effect.tip
 	}
@@ -3625,6 +3645,7 @@ func (s *GameScene) handleProjectileWorldEdge(p *projectile) (bool, bool) {
 	}
 	p.prev = p.pos
 	p.trail = []engine.Vec{p.pos}
+	s.playEventSound(soundEventProjectileReentry)
 	s.reentryAnimation = &projectileReentryAnimation{
 		projectile: p,
 		shooter:    p.shooter,
@@ -3817,6 +3838,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
 	}
+	s.playWeaponImpactSound(weapon)
 
 	if weapon.AirStrike {
 		s.reportComputerShot(p.pos, -1, false)
@@ -3976,11 +3998,14 @@ func (s *GameScene) startZeroPowerImpactAtTank(tank *battleTank, weapon weaponsp
 	center := s.zeroPowerTankImpactCenter(tank)
 	previous := s.lastDamageSource
 	s.lastDamageSource = tank
-	s.startTerrainImpact(center, weapon, true)
+	silentWeapon := weapon
+	silentWeapon.ImpactSound = ""
+	s.startTerrainImpact(center, silentWeapon, true)
 	s.lastDamageSource = previous
 }
 
 func (s *GameScene) startTerrainImpact(pos engine.Vec, weapon weaponspkg.Weapon, damage bool) {
+	s.playWeaponImpactSound(weapon)
 	radius := impactRadiusForWeapon(weapon)
 	duration := s.impactAnimationFramesForWeapon(weapon)
 	impactPos := pos
@@ -4109,6 +4134,7 @@ func (s *GameScene) startWaterFill(pos engine.Vec) {
 		s.delayTurnAdvance(s.impactPauseFrames())
 		return
 	}
+	s.playEventSound(soundEventWaterFill)
 	s.waterFills = append(s.waterFills, fill)
 	s.delayTurnAdvance(fill.duration + s.impactPauseFrames())
 }
@@ -4201,6 +4227,7 @@ func (s *GameScene) projectileHitsWaterSurface(p *projectile, radius float64) (e
 }
 
 func (s *GameScene) startMoleImpact(pos engine.Vec) {
+	s.playEventSound(soundEventMoleImpact)
 	lines := make([]moleStarLine, moleStarLineCount)
 	for i := range lines {
 		angle := -math.Pi + float64(i)*2*math.Pi/float64(len(lines)) + (s.rng.Float64()-0.5)*0.08
@@ -4218,6 +4245,7 @@ func (s *GameScene) startMoleImpact(pos engine.Vec) {
 }
 
 func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig) {
+	s.playEventSound(soundEventCrumblerImpact)
 	crumbs := make([]smallCrumb, cfg.count)
 	for i := range crumbs {
 		fan := 0.0
@@ -4250,6 +4278,7 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 		s.delayTurnAdvance(s.impactPauseFrames())
 		return
 	}
+	s.playEventSound(soundEventWaterBlotch)
 	effect := &waterSurfaceImpact{
 		pos:       pos,
 		duration:  s.waterBlotchAnimation.totalTicks,
@@ -4262,6 +4291,7 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 }
 
 func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
+	s.playEventSound(soundEventAirStrikeBeacon)
 	bombs := make([]airStrikeBomb, airStrikeBombCount)
 	startY := -s.skyExtraHeight() - 80
 	lastDelay := airStrikeWaitFrames
@@ -4352,6 +4382,7 @@ func (s *GameScene) airStrikeBombHitsTank(pos engine.Vec) *battleTank {
 }
 
 func (s *GameScene) applyAirStrikeBombImpact(pos engine.Vec) {
+	s.playEventSound(soundEventAirStrikeBomb)
 	weapon := weaponspkg.LargeGrenade()
 	radius := impactRadiusForWeapon(weapon) * airStrikeImpactScale
 	duration := s.impactAnimationFramesForWeapon(weapon)
@@ -4377,6 +4408,7 @@ func (s *GameScene) applyAirStrikeBombImpact(pos engine.Vec) {
 }
 
 func (s *GameScene) startShockwaveImpact(pos engine.Vec, weapon weaponspkg.Weapon) {
+	s.playEventSound(soundEventShockwave)
 	radius := impactRadiusForWeapon(weapon)
 	duration := shockwavePulseFrames * shockwavePulseCount
 	effect := &shockwaveImpact{
@@ -4440,6 +4472,7 @@ func (s *GameScene) startMoskitoImpact(pos engine.Vec, shooter *battleTank) {
 		s.delayTurnAdvance(s.impactPauseFrames())
 		return
 	}
+	s.playEventSound(soundEventMosquitos)
 	s.moskitoEffects = append(s.moskitoEffects, &moskitoEffect{
 		pos:     ground,
 		ground:  ground,
@@ -4950,6 +4983,7 @@ func (s *GameScene) startWaterBlubberForTank(tank *battleTank, fill *waterFill) 
 	if tank == nil || tank.body == nil || len(s.waterBlubberAnimation.frames) == 0 {
 		return
 	}
+	s.playEventSound(soundEventWaterBlubber)
 	center := tank.body.Bounds().Center()
 	start := center
 	end := engine.V(center.X, fill.topY)
@@ -4973,6 +5007,7 @@ func (s *GameScene) startFireballImpact(pos engine.Vec, weapon weaponspkg.Weapon
 	if len(animation.frames) == 0 {
 		return
 	}
+	s.playWeaponImpactSound(weapon)
 	duration := maxInt(animation.totalTicks, s.impactAnimationFramesForWeapon(weapon))
 	damage := weapon.ImpactDamage
 	if damage <= 0 {
@@ -4996,6 +5031,7 @@ func (s *GameScene) startDudImpact(pos engine.Vec) {
 	if len(animation.frames) == 0 {
 		return
 	}
+	s.playEventSound(soundEventDudImpact)
 	duration := maxInt(1, animation.totalTicks)
 	s.animatedImpacts = append(s.animatedImpacts, animatedImpact{
 		pos:       pos,
@@ -5283,6 +5319,7 @@ func (s *GameScene) updatePalmRevenge() {
 		s.cameraX = approach(s.cameraX, s.cameraGoal, 0.22, 0.8)
 		s.cameraY = approach(s.cameraY, s.cameraGoalY, 0.22, 0.8)
 		if s.palmRevengeLightningVisible(event) && !event.tankBlackened {
+			s.playEventSound(soundEventCloudLightning)
 			s.blackenPalmRevengeTank(event)
 		}
 		if event.age >= 48 && event.age < 66 && !event.smokeDone {
@@ -5798,6 +5835,8 @@ func (s *GameScene) damageTank(tank *battleTank, damage int, attacker *battleTan
 	if previousPower > 0 && tank.power == 0 {
 		s.awardZeroPowerScore(tank, attacker, cause)
 		s.startZeroPowerAnimation(tank)
+	} else if previousPower > tank.power {
+		s.playEventSound(soundEventTankHit)
 	}
 }
 
@@ -5890,6 +5929,7 @@ func (s *GameScene) startZeroPowerAnimation(tank *battleTank) {
 		return
 	}
 	choice := choices[s.rng.Intn(len(choices))]
+	s.playZeroPowerSound(zeroPowerSound(choice.name))
 	delay := maxInt(0, s.zeroPowerStartDelay)
 	effect := zeroPowerAnimation{
 		tank:  tank,
