@@ -435,10 +435,10 @@ func (s *GameScene) drawShop(screen *ebiten.Image) {
 	switch s.shopHoverClass {
 	case 1:
 		s.drawStoreOverlay(screen, s.shop.storeMainLeft, shopMainLeftOverlayRect)
-		s.drawShopEntryListHover(screen, s.shopClassARect(), s.shopStoreScaledRect(image.Rect(92, 68, 264, 88)), t.ShopClassA, colornames.Red)
+		s.drawShopEntryListHover(screen, s.shopClassARect(), s.shopStoreScaledRect(image.Rect(92, 115, 264, 88)), t.ShopClassA, colornames.Red)
 	case 2:
 		s.drawStoreOverlay(screen, s.shop.storeMainRight, shopMainRightOverlayRect)
-		s.drawShopEntryListHover(screen, s.shopClassBRect(), s.shopStoreScaledRect(image.Rect(358, 60, 570, 82)), t.ShopClassB, color.RGBA{R: 0, G: 45, B: 255, A: 255})
+		s.drawShopEntryListHover(screen, s.shopClassBRect(), s.shopStoreScaledRect(image.Rect(358, 90, 570, 82)), t.ShopClassB, color.RGBA{R: 0, G: 45, B: 255, A: 255})
 	}
 
 	playerIndex := s.currentShopPlayerIndex()
@@ -942,19 +942,7 @@ func (s *GameScene) drawStoreOverlay(screen, img *ebiten.Image, r image.Rectangl
 }
 
 func (s *GameScene) drawShopEntryListHover(screen *ebiten.Image, listRect, titleRect image.Rectangle, title string, c color.Color) {
-	thickness := maxInt(1, int(math.Round(5*float64(s.shopStoreRect().Dx())/640)))
-	drawRectOutline(screen, listRect, c, thickness)
 	drawCenteredText(screen, title, titleRect, c)
-}
-
-func drawRectOutline(screen *ebiten.Image, r image.Rectangle, c color.Color, thickness int) {
-	if r.Empty() || thickness <= 0 {
-		return
-	}
-	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y, r.Max.X, minInt(r.Min.Y+thickness, r.Max.Y)), c)
-	drawFilledRect(screen, image.Rect(r.Min.X, maxInt(r.Max.Y-thickness, r.Min.Y), r.Max.X, r.Max.Y), c)
-	drawFilledRect(screen, image.Rect(r.Min.X, r.Min.Y, minInt(r.Min.X+thickness, r.Max.X), r.Max.Y), c)
-	drawFilledRect(screen, image.Rect(maxInt(r.Max.X-thickness, r.Min.X), r.Min.Y, r.Max.X, r.Max.Y), c)
 }
 
 func (s *GameScene) drawShopItemIcon(screen *ebiten.Image, itemIndex int, r image.Rectangle, disabled bool) {

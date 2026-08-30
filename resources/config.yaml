@@ -23,7 +23,7 @@ gameplay:
 debug:
   enabled: true
   start_scene: game # game / shop
-  start_shop: false
+  start_shop: true
   # Optional im Debug-Modus: leere/fehlende Liste erlaubt alle Todesanimationen.
   # Erlaubte Namen:
   # - dust
