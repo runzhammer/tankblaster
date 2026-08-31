@@ -1,11 +1,20 @@
 package tankblaster
 
 import (
+	"image"
+
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/runzhammer/gamedemo/pkg/core"
 )
 
 func Begin() bool {
-	return len(ebiten.AppendTouchIDs(nil)) > 0
+	for _, id := range ebiten.AppendTouchIDs(nil) {
+		x, y := ebiten.TouchPosition(id)
+		if imagePointInGameViewport(x, y) {
+			return true
+		}
+	}
+	return false
 }
 
 func MoveLeft() bool {
@@ -17,9 +26,10 @@ func MoveRight() bool {
 }
 
 func RotateLeft() bool {
+	viewport := core.GameViewport()
 	for _, id := range ebiten.AppendTouchIDs(nil) {
-		x, _ := ebiten.TouchPosition(id)
-		if x < ScreenWidth/2 {
+		x, y := ebiten.TouchPosition(id)
+		if imagePointInGameViewport(x, y) && x < viewport.Min.X+ScreenWidth/2 {
 			return true
 		}
 	}
@@ -27,11 +37,16 @@ func RotateLeft() bool {
 }
 
 func RotateRight() bool {
+	viewport := core.GameViewport()
 	for _, id := range ebiten.AppendTouchIDs(nil) {
-		x, _ := ebiten.TouchPosition(id)
-		if x > ScreenWidth/2 {
+		x, y := ebiten.TouchPosition(id)
+		if imagePointInGameViewport(x, y) && x > viewport.Min.X+ScreenWidth/2 {
 			return true
 		}
 	}
 	return false
+}
+
+func imagePointInGameViewport(x, y int) bool {
+	return image.Pt(x, y).In(core.GameViewport())
 }

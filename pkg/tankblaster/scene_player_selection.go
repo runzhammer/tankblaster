@@ -141,8 +141,8 @@ func (s *playerSelectionScene) Update() error {
 			s.pressedDialogButton = ""
 			return nil
 		}
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			x, y := ebiten.CursorPosition()
+		if primaryPointerJustPressed() {
+			x, y := primaryPointerPosition()
 			x, y = s.toSelectionCoords(x, y)
 			if button := s.dialogButtonAt(x, y); button != "" {
 				s.pressedDialogButton = button
@@ -156,8 +156,8 @@ func (s *playerSelectionScene) Update() error {
 				s.handleHelpDialogClick(x, y)
 			}
 		}
-		if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
-			x, y := ebiten.CursorPosition()
+		if primaryPointerJustReleased() {
+			x, y := primaryPointerPosition()
 			x, y = s.toSelectionCoords(x, y)
 			s.releaseDialogButton(x, y)
 		}
@@ -170,11 +170,11 @@ func (s *playerSelectionScene) Update() error {
 
 	s.handleKeyboard()
 
-	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if !primaryPointerJustPressed() {
 		return nil
 	}
 
-	x, y := ebiten.CursorPosition()
+	x, y := primaryPointerPosition()
 	x, y = s.toSelectionCoords(x, y)
 	if s.handleOptionsClick(x, y) {
 		return nil
@@ -975,10 +975,10 @@ func drawDialogButton(screen *ebiten.Image, r image.Rectangle, label string) {
 }
 
 func buttonPressed(screen *ebiten.Image, r image.Rectangle) bool {
-	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+	if !primaryPointerPressed() {
 		return false
 	}
-	x, y := ebiten.CursorPosition()
+	x, y := primaryPointerPosition()
 	return buttonCursorPoint(screen, x, y).In(r)
 }
 

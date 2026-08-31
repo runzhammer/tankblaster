@@ -1,6 +1,7 @@
 # Binaries for programs and plugins
 bin/**
 build/**
+tmp_tools/
 *.exe
 *.exe~
 *.dll
@@ -15,3 +16,11 @@ build/**
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+# Android / Gradle
+android/.gradle/
+android/local.properties
+android/app/build/
+android/app/libs/*.aar
+android/app/libs/*-sources.jar
+dist/
