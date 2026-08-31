@@ -8,7 +8,7 @@ import (
 
 const (
 	DoedelName   = "D. Dödel"
-	FrederikName = "Frederik"
+	FrederikName = "Frederic"
 	MisterXName  = "Mister X"
 	DrNukeName   = "Dr. Nuke"
 	HaraldName   = "Harald"
