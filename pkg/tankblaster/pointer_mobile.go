@@ -68,5 +68,11 @@ func primaryPointerPressedInRect(r image.Rectangle) bool {
 
 func gamePointerPosition(x, y int) (int, int) {
 	viewport := core.GameViewport()
-	return x - viewport.Min.X, y - viewport.Min.Y
+	if viewport.Empty() {
+		return x, y
+	}
+	cfg := core.Config().Screen
+	gx := float64(x-viewport.Min.X) * cfg.Width / float64(viewport.Dx())
+	gy := float64(y-viewport.Min.Y) * cfg.Height / float64(viewport.Dy())
+	return int(gx + 0.5), int(gy + 0.5)
 }

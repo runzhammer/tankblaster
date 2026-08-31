@@ -7,6 +7,9 @@ BUILD_TYPE="${1:-debug}"
 ANDROID_HOME="${ANDROID_HOME:-/home/reznor/Android/Sdk}"
 ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
 JAVA_HOME="${JAVA_HOME:-/home/reznor/.local/share/tankblaster-android/jdk-21.0.12.1+1}"
+if [ ! -x "$JAVA_HOME/bin/java" ]; then
+	JAVA_HOME="/home/reznor/.local/share/tankblaster-android/jdk-21.0.12.1+1"
+fi
 GOBIN="$(go env GOBIN)"
 GOPATH="$(go env GOPATH)"
 GO_CGO_LDFLAGS="$(go env CGO_LDFLAGS)"

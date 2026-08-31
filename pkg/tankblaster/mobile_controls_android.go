@@ -129,16 +129,19 @@ func (s *GameScene) mobileControlButtonsForViewport(viewport image.Rectangle) []
 	if sideW < 72 {
 		return nil
 	}
-	gap := 10
-	buttonH := 58
+	gap := 8
+	leftY := 36
+	rightY := 76
+	buttonH := minInt(58, (screenH-leftY-gap*7)/6)
+	if buttonH < 42 {
+		buttonH = 42
+	}
 	buttonW := sideW - gap*2
 	if buttonW > 150 {
 		buttonW = 150
 	}
 	leftX := viewport.Min.X - gap - buttonW
 	rightX := viewport.Max.X + gap
-	leftY := 76
-	rightY := 112
 	step := buttonH + gap
 
 	if s.xmV12DriveMode {
