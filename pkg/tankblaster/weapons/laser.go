@@ -1,7 +1,7 @@
 package weapons
 
 func Laser() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Laser",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -10,5 +10,5 @@ func Laser() Weapon {
 		ProjectileScale:        grenadeScale,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		Laser:                  true,
-	}
+	})
 }

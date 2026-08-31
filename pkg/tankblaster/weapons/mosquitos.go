@@ -1,7 +1,7 @@
 package weapons
 
 func Mosquitos() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Moskitos",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -10,5 +10,5 @@ func Mosquitos() Weapon {
 		ProjectileScale:        grenadeScale,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		Mosquitos:              true,
-	}
+	})
 }

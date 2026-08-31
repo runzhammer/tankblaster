@@ -5,7 +5,7 @@ const (
 )
 
 func SplitterBomb() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Splitterbombe",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -15,7 +15,7 @@ func SplitterBomb() Weapon {
 		ProjectileScale:        grenadeScale,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		SplitterBomb:           true,
-	}
+	})
 }
 
 func SplitterBombFragment() Weapon {

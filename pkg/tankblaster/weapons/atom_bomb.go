@@ -1,12 +1,14 @@
 package weapons
 
+import "github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
+
 const (
 	atomBombImpactScale            = 4.0
 	atomBombImpactAnimationSeconds = 0.8
 )
 
 func AtomBomb() Weapon {
-	return Weapon{
+	weapon := withDefaultSounds(Weapon{
 		Name:                   "Atombombe",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -17,5 +19,7 @@ func AtomBomb() Weapon {
 		ImpactAnimationSeconds: atomBombImpactAnimationSeconds,
 		ImpactCycles:           1,
 		ImpactGradientOutward:  true,
-	}
+	})
+	weapon.ImpactSound = soundpaths.SoundAtom
+	return weapon
 }

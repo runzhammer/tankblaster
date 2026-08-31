@@ -6,7 +6,7 @@ const (
 )
 
 func LargeGrenade() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Große Granate",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -16,5 +16,5 @@ func LargeGrenade() Weapon {
 		ProjectileScale:        largeGrenadeScale,
 		ImpactScale:            largeGrenadeImpactScale,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
-	}
+	})
 }

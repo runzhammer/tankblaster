@@ -1,7 +1,7 @@
 package weapons
 
 func SmallCrumblers() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Brösler, klein",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -9,5 +9,5 @@ func SmallCrumblers() Weapon {
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		SmallCrumblers:         true,
-	}
+	})
 }

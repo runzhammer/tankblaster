@@ -6,7 +6,7 @@ const (
 )
 
 func Fireball() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Feuerkugel",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -15,5 +15,5 @@ func Fireball() Weapon {
 		ImpactAnimationSeconds: fireballImpactAnimationSeconds,
 		ImpactAnimationStyle:   ImpactAnimationFireball,
 		ImpactDamage:           fireballImpactDamage,
-	}
+	})
 }

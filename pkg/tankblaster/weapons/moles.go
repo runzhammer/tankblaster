@@ -1,7 +1,7 @@
 package weapons
 
 func Moles() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Maulwürfe",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -9,5 +9,5 @@ func Moles() Weapon {
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		Moles:                  true,
-	}
+	})
 }

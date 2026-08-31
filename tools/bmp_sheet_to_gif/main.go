@@ -76,18 +76,18 @@ func main() {
 
 func defaultZeroPowerSpecs() []sheetSpec {
 	return []sheetSpec{
-		{source: "original_assets/BITMAP/IDB_DUSTEXPLO.bmp", target: "resources/zero_power_dust_explosion.png", frameWidth: 20, delay: 6, colorMode: colorModeAsset},
-		{source: "original_assets/BITMAP/IDB_EXPLOSION.bmp", target: "resources/zero_power_explosion.png", frameWidth: 67, frameHeight: 64, delay: 6, colorMode: colorModeBMP},
-		{source: "original_assets/BITMAP/IDB_EXPLOSION_PILZ.bmp", target: "resources/zero_power_mushroom_explosion.png", frameWidth: 51, frameHeight: 57, delay: 6, colorMode: colorModeAsset},
-		{source: "original_assets/BITMAP/IDB_PLAYER_RAUCHEN.bmp", target: "resources/zero_power_player_smoke.png", frameWidth: 21, delay: 6, colorMode: colorModeBMP},
-		{source: "original_assets/BITMAP/IDB_FIREBALL.bmp", target: "resources/fireball_impact.png", frameWidth: 36, delay: 8, colorMode: colorModeBMP},
-		{source: "original_assets/BITMAP/IDB_PALME_FEUER.bmp", target: "resources/palm_fire.png", frameWidth: 86, delay: 8, colorMode: colorModeAsset},
-		{source: "original_assets/BITMAP/IDB_PALME_GERIPPE.bmp", target: "resources/palm_skeleton.png", frameWidth: 121, delay: 8, colorMode: colorModeBMP},
-		{source: "original_assets/BITMAP/IDB_PALME_RAUCH.bmp", target: "resources/palm_smoke.png", frameWidth: 73, delay: 8, colorMode: colorModeBMP},
-		{source: "original_assets/BITMAP/IDB_PALME_BROESEL.bmp", target: "resources/palm_crumble.png", frameWidth: 121, frameHeight: 152, delay: 8, colorMode: colorModeAsset},
-		{source: "original_assets/BITMAP/IDB_WATERTEXTURE.bmp", target: "resources/water_texture.png", frameWidth: 64, delay: 8, colorMode: colorModeAsset, opaque: true, opaqueBackground: color.RGBA{R: 6, G: 48, B: 164, A: 255}},
-		{source: "original_assets/BITMAP/IDB_WATER_BLUBBER.bmp", target: "resources/water_blubber.png", frameWidth: 19, delay: 8, colorMode: colorModeBMP},
-		{source: "original_assets/BITMAP/IDB_WATER_BLOTSCH.bmp", target: "resources/water_blotch.png", frameWidth: 22, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_DUSTEXPLO.bmp", target: "resources/images/zero_power_dust_explosion.png", frameWidth: 20, delay: 6, colorMode: colorModeAsset},
+		{source: "original_assets/BITMAP/IDB_EXPLOSION.bmp", target: "resources/images/zero_power_explosion.png", frameWidth: 67, frameHeight: 64, delay: 6, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_EXPLOSION_PILZ.bmp", target: "resources/images/zero_power_mushroom_explosion.png", frameWidth: 51, frameHeight: 57, delay: 6, colorMode: colorModeAsset},
+		{source: "original_assets/BITMAP/IDB_PLAYER_RAUCHEN.bmp", target: "resources/images/zero_power_player_smoke.png", frameWidth: 21, delay: 6, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_FIREBALL.bmp", target: "resources/images/fireball_impact.png", frameWidth: 36, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_PALME_FEUER.bmp", target: "resources/images/palm_fire.png", frameWidth: 86, delay: 8, colorMode: colorModeAsset},
+		{source: "original_assets/BITMAP/IDB_PALME_GERIPPE.bmp", target: "resources/images/palm_skeleton.png", frameWidth: 121, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_PALME_RAUCH.bmp", target: "resources/images/palm_smoke.png", frameWidth: 73, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_PALME_BROESEL.bmp", target: "resources/images/palm_crumble.png", frameWidth: 121, frameHeight: 152, delay: 8, colorMode: colorModeAsset},
+		{source: "original_assets/BITMAP/IDB_WATERTEXTURE.bmp", target: "resources/images/water_texture.png", frameWidth: 64, delay: 8, colorMode: colorModeAsset, opaque: true, opaqueBackground: color.RGBA{R: 6, G: 48, B: 164, A: 255}},
+		{source: "original_assets/BITMAP/IDB_WATER_BLUBBER.bmp", target: "resources/images/water_blubber.png", frameWidth: 19, delay: 8, colorMode: colorModeBMP},
+		{source: "original_assets/BITMAP/IDB_WATER_BLOTSCH.bmp", target: "resources/images/water_blotch.png", frameWidth: 22, delay: 8, colorMode: colorModeBMP},
 	}
 }
 

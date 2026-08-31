@@ -48,6 +48,8 @@ type PlayerConfig struct {
 type GameLoop struct {
 	core.GameSceneLoop
 	context core.Context
+	sounds  *soundPlayer
+	muted   bool
 
 	redScore  int
 	blueScore int
@@ -79,6 +81,7 @@ func NewGame() (core.Game, error) {
 	game := &GameLoop{
 		rounds:  10,
 		options: defaultGameOptions(),
+		sounds:  newSoundPlayer(),
 	}
 
 	if core.Config().Debug.Enabled {
@@ -197,10 +200,17 @@ func (g *GameLoop) SetNewScene(factory func(*GameLoop) (scene core.Scene, err er
 	if err != nil {
 		return err
 	}
+	if g.sounds != nil {
+		g.sounds.StopAllLoops()
+	}
 	return g.SetScene(scene)
 }
 
 func (g *GameLoop) OnMuted(muted bool) {
+	g.muted = muted
+	if muted && g.sounds != nil {
+		g.sounds.StopAllLoops()
+	}
 	// if muted {
 	// 	g.bgm.SetVolume(0)
 	// } else {
@@ -209,6 +219,9 @@ func (g *GameLoop) OnMuted(muted bool) {
 }
 
 func (g *GameLoop) Close() error {
+	if g.sounds != nil {
+		g.sounds.StopAllLoops()
+	}
 	// return g.bgm.Close()
 	return nil
 }

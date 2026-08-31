@@ -5,7 +5,7 @@ const (
 )
 
 func Grenade() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Granate",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -15,5 +15,5 @@ func Grenade() Weapon {
 		DamagesTerrain:         true,
 		ProjectileScale:        grenadeScale,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
-	}
+	})
 }

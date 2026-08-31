@@ -1,7 +1,7 @@
 package weapons
 
 func Water() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Wasser",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -9,5 +9,5 @@ func Water() Weapon {
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		FillsWater:             true,
-	}
+	})
 }

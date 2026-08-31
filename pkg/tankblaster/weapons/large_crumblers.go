@@ -1,7 +1,7 @@
 package weapons
 
 func LargeCrumblers() Weapon {
-	return Weapon{
+	return withDefaultSounds(Weapon{
 		Name:                   "Brösler, groß",
 		Color:                  whiteProjectileColor(),
 		Damage:                 DirectHitDamage,
@@ -9,5 +9,5 @@ func LargeCrumblers() Weapon {
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
 		LargeCrumblers:         true,
-	}
+	})
 }
