@@ -74,6 +74,8 @@ const (
 	RoundStart             = None
 	RoundEnd               = None
 	WeaponSelect           = None
+	CannonPowerUp          = SoundDrehenUp
+	CannonPowerDown        = SoundDrehenDown
 	CannonRotateLeft       = SoundDrehenLeft
 	CannonRotateRight      = SoundDrehenRight
 	TankHit                = None
@@ -92,11 +94,15 @@ const (
 	DudImpact              = SoundSchnaeppchen
 	MoleImpact             = SoundMole
 	CrumblerImpact         = SoundBroesler
+	SplitterBombSplit      = SoundClusterexplo
 	AirStrikeBeacon        = SoundBeep
-	AirStrikeBomb          = SoundJet
+	AirStrikeBomb          = SoundExplosion2
+	AirStrikeJet           = SoundJet
 	Shockwave              = SoundShockwave
 	Mosquitos              = SoundMoskitos
-	LaserSmoke             = SoundLaser
+	MosquitoScream         = SoundScream
+	Laser                  = SoundLaser
+	LaserSmoke             = None
 	XMV12Ignition          = SoundAnlassen
 	XMV12EngineLoop        = SoundMotor
 	XMV12TrackLoop         = SoundKette
@@ -120,4 +126,5 @@ const (
 	ZeroPowerLargeGrenadeImpact = SoundExplosion2
 	ZeroPowerAtomImpact         = SoundAtom
 	ZeroPowerScatterProjectiles = SoundClusterblast
+	ZeroPowerScatterImpact      = SoundColorblop
 )

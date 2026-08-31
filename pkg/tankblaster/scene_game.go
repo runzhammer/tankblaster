@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"math"
 	"math/rand"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/engine"
 	"github.com/runzhammer/gamedemo/pkg/models"
 	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
+	"github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
 	weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
 	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/colornames"
@@ -74,7 +76,7 @@ const (
 	zeroPowerDissolveFrames    = 12
 	creditsPerScorePoint       = 500
 	debugShopStartingCredits   = 20000
-	roundTransitionSeconds     = 5
+	roundTransitionSeconds     = 10.0 / 3.0
 	computerAdjustSpeedFactor  = 1.6
 	additionalVisibleSkyHeight = 500.0
 	palmRevengeAggroMin        = 20.0
@@ -90,8 +92,8 @@ const (
 	plasmaImpactVisualYOffset = 38
 	plasmaRingSpacing         = 2
 	plasmaRingThickness       = 1
-	plasmaBuildProgress       = 2.5 / 6.5
-	plasmaGreenProgress       = 5.0 / 6.5
+	plasmaBuildProgress       = 2.0 / 6.5
+	plasmaGreenProgress       = 2.5 / 6.5
 	moleTunnelFrames          = 44
 	moleStarFrames            = 28
 	moleTunnelDepth           = 76.0
@@ -161,6 +163,22 @@ const (
 	xmV12OutOfBoundsDelay     = 1.0
 	xmV12EngineLoopKey        = "xm_v12_engine"
 	xmV12TrackLoopKey         = "xm_v12_track"
+	moskitosLoopKey           = "moskitos"
+	fireballBurningLoopKey    = "fireball_burning"
+	moleBroeslerLoopKey       = "mole_broesler"
+	crumblerBroeslerLoopKey   = "crumbler_broesler"
+	laserLoopKey              = "laser"
+	airStrikeJetLoopKey       = "air_strike_jet"
+	abortRoundFlashFrames     = 300
+	abortRoundFlashWhiteFrame = 180
+)
+
+type gameConfirmDialog uint8
+
+const (
+	gameConfirmNone gameConfirmDialog = iota
+	gameConfirmAbortRound
+	gameConfirmQuit
 )
 
 type damageCause uint8
@@ -352,6 +370,7 @@ type animatedImpact struct {
 	animation spriteAnimation
 	damage    int
 	applied   bool
+	loopKey   string
 }
 
 type waterFill struct {
@@ -481,11 +500,14 @@ type shockwaveImpact struct {
 }
 
 type airStrikeImpact struct {
-	pos        engine.Vec
-	age        int
-	duration   int
-	bojeHidden bool
-	bombs      []airStrikeBomb
+	pos             engine.Vec
+	age             int
+	duration        int
+	bojeHidden      bool
+	beepsPlayed     int
+	lastBeaconCycle int
+	jetStarted      bool
+	bombs           []airStrikeBomb
 }
 
 type airStrikeBomb struct {
@@ -603,6 +625,7 @@ type GameScene struct {
 	palmSmokeAnimation      spriteAnimation
 	palmCrumbleAnimation    spriteAnimation
 	palmEyesAnimation       spriteAnimation
+	palmEyesCloseAnimation  spriteAnimation
 	palmScreamImage         *ebiten.Image
 	palmGrinImage           *ebiten.Image
 	palmLeafImages          []*ebiten.Image
@@ -611,6 +634,7 @@ type GameScene struct {
 	cloudGrinImage          *ebiten.Image
 	cloudGrinAnimation      spriteAnimation
 	lightningImage          *ebiten.Image
+	questionIconImage       *ebiten.Image
 	reentrySymbol           *ebiten.Image
 	reentryEarth            *ebiten.Image
 	fuelGaugeImage          *ebiten.Image
@@ -680,6 +704,9 @@ type GameScene struct {
 	playerInfoOpen       bool
 	playerInfoIndex      int
 	pressedDialogButton  string
+	confirmDialog        gameConfirmDialog
+	abortRoundFlashAge   int
+	abortRoundFlashing   bool
 	gamePaused           bool
 	lastDamageSource     *battleTank
 	shopPlayerOrder      []int
@@ -789,7 +816,12 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.palmEyesAnimation = palmEyesAnimation
+	s.palmEyesAnimation = fitAnimationDuration(palmEyesAnimation, secondsToFrames(0.5))
+	palmEyesCloseAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.PalmEyesClosePNG, frameWidth: 30, delay: 3})
+	if err != nil {
+		return nil, err
+	}
+	s.palmEyesCloseAnimation = fitAnimationDuration(palmEyesCloseAnimation, secondsToFrames(1))
 	s.palmScreamImage = mustImageFromPNG(r.PalmScreamPNG)
 	s.palmGrinImage = mustImageFromPNG(r.PalmGrinPNG)
 	s.cloudAngryImage = mustImageFromPNG(r.CloudAngryPNG)
@@ -800,6 +832,7 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	s.cloudSearchingAnimation = cloudSearchingAnimation
 	s.cloudGrinImage = mustImageFromPNG(r.CloudGrinPNG)
 	s.lightningImage = mustImageFromPNG(r.LightningPNG)
+	s.questionIconImage = mustImageFromPNG(r.FragezeichenDialogPNG)
 	cloudGrinAnimation, err := loadSpriteAnimation(zeroPowerAnimationSheet{data: r.CloudAngryToGrinPNG, frameWidth: 54, delay: 6})
 	if err != nil {
 		return nil, err
@@ -916,6 +949,9 @@ func (s *GameScene) startRound() {
 	s.roundSeriesComplete = false
 	s.lastDamageSource = nil
 	s.lastComputerShot = computerShotRecord{}
+	s.confirmDialog = gameConfirmNone
+	s.abortRoundFlashAge = 0
+	s.abortRoundFlashing = false
 	s.shopPlayerOrder = nil
 	s.shopPlayerCursor = 0
 	s.shopHoverClass = 0
@@ -959,6 +995,7 @@ func (s *GameScene) startRound() {
 	s.moskitoEffects = nil
 	s.shockwaveImpacts = nil
 	s.airStrikeImpacts = nil
+	s.stopBattleEffectLoops()
 
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
@@ -1538,33 +1575,27 @@ func (s *GameScene) updatePalmGrin(palm *battlePalm) {
 }
 
 func (s *GameScene) palmEyesTotalTicks() int {
-	openTicks := maxInt(1, len(s.palmEyesAnimation.frames)) * 3
-	return openTicks + secondsToFrames(0.4) + openTicks + secondsToFrames(0.1)
+	return s.palmEyesAnimation.totalTicks + secondsToFrames(1) + s.palmEyesCloseAnimation.totalTicks
 }
 
 func (s *GameScene) palmEyesFrame(age int) *ebiten.Image {
-	frames := s.palmEyesAnimation.frames
-	if len(frames) == 0 {
+	openFrames := s.palmEyesAnimation.frames
+	if len(openFrames) == 0 {
 		return nil
 	}
-	frameTicks := 4
-	openTicks := len(frames) * frameTicks
-	holdTicks := secondsToFrames(0.4)
+	openTicks := s.palmEyesAnimation.totalTicks
 	if age < openTicks {
-		return frames[minInt(len(frames)-1, age/frameTicks)]
+		return s.palmEyesAnimation.frameAt(age)
 	}
 	age -= openTicks
-	if age < holdTicks {
-		return frames[len(frames)-1]
+	if age < secondsToFrames(1) {
+		return openFrames[len(openFrames)-1]
 	}
-	age -= holdTicks
-	if age < openTicks {
-		return frames[maxInt(0, len(frames)-1-age/frameTicks)]
+	age -= secondsToFrames(1)
+	if len(s.palmEyesCloseAnimation.frames) > 0 && age < s.palmEyesCloseAnimation.totalTicks {
+		return s.palmEyesCloseAnimation.frameAt(age)
 	}
-	if age < openTicks+secondsToFrames(0.1) {
-		return frames[0]
-	}
-	return nil
+	return openFrames[0]
 }
 
 func (s *GameScene) palmEffectDelayFrames(palm *battlePalm) int {
@@ -1572,6 +1603,9 @@ func (s *GameScene) palmEffectDelayFrames(palm *battlePalm) int {
 		return s.palmHitPauseFrames()
 	}
 	pause := secondsToFrames(0.5)
+	if palm.eyesOn {
+		return maxInt(1, s.palmEyesTotalTicks()-palm.eyeAge) + pause
+	}
 	switch palm.state {
 	case palmStateBurning:
 		return maxInt(1, s.palmFireAnimation.totalTicks-palm.age) + s.palmSmokeAnimation.totalTicks + pause
@@ -1776,6 +1810,10 @@ func (s *GameScene) Update() error {
 		if err := s.handleGameDialogInput(); err != nil {
 			return err
 		}
+		if s.abortRoundFlashing {
+			s.updateAbortRoundFlash()
+			return nil
+		}
 		if s.gameHelpOpen || s.playerInfoOpen || s.gamePaused {
 			return nil
 		}
@@ -1819,6 +1857,7 @@ func (s *GameScene) Update() error {
 		s.updatePalmLeafFalls()
 		s.updatePalmRevenge()
 		s.updateZeroPowerEffects()
+		s.syncBattleEffectLoops()
 		if s.roundTransitionDelay > 0 || s.roundSeriesComplete {
 			s.updateRoundTransition()
 			return nil
@@ -2140,6 +2179,7 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 	s.drawLaserEffects(screen, &camera)
 	s.drawGameHUD(screen)
 	s.drawPalmRevengeScreenFlash(screen)
+	s.drawAbortRoundFlash(screen)
 	s.drawDebugScrollBar(screen)
 	s.drawPlayerNames(screen, &camera)
 	s.drawScoreTable(screen)
@@ -2190,11 +2230,18 @@ func (s *GameScene) handleCameraScrollControls() {
 }
 
 func (s *GameScene) handleGameDialogInput() error {
+	if s.abortRoundFlashing {
+		return nil
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyF1) {
 		s.gameHelpOpen = true
 		s.playerInfoOpen = false
+		s.confirmDialog = gameConfirmNone
 		s.pressedDialogButton = ""
 		return nil
+	}
+	if s.confirmDialog != gameConfirmNone {
+		return s.handleConfirmDialogInput()
 	}
 	if s.gameHelpOpen || s.playerInfoOpen {
 		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
@@ -2239,6 +2286,12 @@ func (s *GameScene) handleGameDialogInput() error {
 	}
 	if controlPressed() {
 		switch {
+		case inpututil.IsKeyJustPressed(ebiten.KeyQ):
+			s.openConfirmDialog(gameConfirmQuit)
+			return nil
+		case inpututil.IsKeyJustPressed(ebiten.KeyE):
+			s.openConfirmDialog(gameConfirmAbortRound)
+			return nil
 		case inpututil.IsKeyJustPressed(ebiten.KeyP):
 			s.gamePaused = !s.gamePaused
 			return nil
@@ -2248,6 +2301,96 @@ func (s *GameScene) handleGameDialogInput() error {
 		}
 	}
 	return nil
+}
+
+func (s *GameScene) openConfirmDialog(kind gameConfirmDialog) {
+	s.confirmDialog = kind
+	s.gameHelpOpen = false
+	s.playerInfoOpen = false
+	s.pressedDialogButton = ""
+}
+
+func (s *GameScene) handleConfirmDialogInput() error {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
+		s.closeConfirmDialog()
+		return nil
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) || inpututil.IsKeyJustPressed(ebiten.KeyY) || inpututil.IsKeyJustPressed(ebiten.KeyJ) {
+		return s.confirmDialogYes()
+	}
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		x, y := ebiten.CursorPosition()
+		switch {
+		case image.Pt(x, y).In(confirmDialogYesRect()):
+			s.pressedDialogButton = "confirm_yes"
+		case image.Pt(x, y).In(confirmDialogNoRect()):
+			s.pressedDialogButton = "confirm_no"
+		}
+		return nil
+	}
+	if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+		x, y := ebiten.CursorPosition()
+		p := image.Pt(x, y)
+		button := s.pressedDialogButton
+		s.pressedDialogButton = ""
+		switch {
+		case button == "confirm_yes" && p.In(confirmDialogYesRect()):
+			return s.confirmDialogYes()
+		case button == "confirm_no" && p.In(confirmDialogNoRect()):
+			s.closeConfirmDialog()
+		}
+	}
+	return nil
+}
+
+func (s *GameScene) confirmDialogYes() error {
+	switch s.confirmDialog {
+	case gameConfirmQuit:
+		s.stopBattleEffectLoops()
+		return RegularTermination
+	case gameConfirmAbortRound:
+		s.closeConfirmDialog()
+		s.startAbortRoundFlash()
+	}
+	return nil
+}
+
+func (s *GameScene) closeConfirmDialog() {
+	s.confirmDialog = gameConfirmNone
+	s.pressedDialogButton = ""
+}
+
+func (s *GameScene) startAbortRoundFlash() {
+	s.stopBattleEffectLoops()
+	s.playSound(soundpaths.SoundNukeall)
+	s.abortRoundFlashing = true
+	s.abortRoundFlashAge = 0
+	s.projectile = nil
+	s.projectiles = nil
+	s.turnAdvanceDelay = 0
+}
+
+func (s *GameScene) updateAbortRoundFlash() {
+	if !s.abortRoundFlashing {
+		return
+	}
+	s.abortRoundFlashAge++
+	if s.abortRoundFlashAge < abortRoundFlashFrames {
+		return
+	}
+	s.abortRoundFlashing = false
+	s.abortRoundFlashAge = 0
+	s.abortCurrentRound()
+}
+
+func (s *GameScene) abortCurrentRound() {
+	if s.roundNumber >= maxInt(1, s.g.rounds) {
+		s.roundSeriesComplete = true
+		s.roundTransitionDelay = 0
+		return
+	}
+	s.roundNumber++
+	s.beginShop()
 }
 
 func (s *GameScene) openPlayerInfo(index int) {
@@ -2338,10 +2481,10 @@ func (s *GameScene) handleBattleInput() {
 		strengthStep = 10
 	}
 	if shouldAdjustStrength(ebiten.KeyArrowUp) {
-		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+strengthStep)
+		s.adjustShotStrength(tank, strengthStep)
 	}
 	if shouldAdjustStrength(ebiten.KeyArrowDown) {
-		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-strengthStep)
+		s.adjustShotStrength(tank, -strengthStep)
 	}
 	s.handleBattleHUDButtons(tank, strengthStep)
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
@@ -2352,10 +2495,10 @@ func (s *GameScene) handleBattleInput() {
 		}
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEqual) || inpututil.IsKeyJustPressed(ebiten.KeyKPAdd) {
-		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+10)
+		s.adjustShotStrength(tank, 10)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyMinus) || inpututil.IsKeyJustPressed(ebiten.KeyKPSubtract) {
-		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-10)
+		s.adjustShotStrength(tank, -10)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyI) {
 		s.invertCannonAngle(tank)
@@ -2393,9 +2536,9 @@ func (s *GameScene) handleBattleHUDButtons(tank *battleTank, strengthStep int) {
 	cursor := image.Pt(x, y)
 	switch {
 	case cursor.In(s.hudStrengthMinusRect()):
-		tank.shotStrength = maxInt(s.minShotStrength(), tank.shotStrength-strengthStep)
+		s.adjustShotStrength(tank, -strengthStep)
 	case cursor.In(s.hudStrengthPlusRect()):
-		tank.shotStrength = minInt(s.maxShotStrength(), tank.shotStrength+strengthStep)
+		s.adjustShotStrength(tank, strengthStep)
 	case cursor.In(s.hudAngleMinusRect()):
 		s.adjustTankCannon(tank, -s.humanCannonStep())
 	case cursor.In(s.hudAnglePlusRect()):
@@ -2407,6 +2550,22 @@ func (s *GameScene) handleBattleHUDButtons(tank *battleTank, strengthStep int) {
 		s.xmV12DriveMode = true
 		s.xmV12DriveDirection = 0
 	}
+}
+
+func (s *GameScene) adjustShotStrength(tank *battleTank, delta int) {
+	if tank == nil || delta == 0 {
+		return
+	}
+	previous := tank.shotStrength
+	tank.shotStrength = maxInt(s.minShotStrength(), minInt(s.maxShotStrength(), tank.shotStrength+delta))
+	if tank.shotStrength == previous {
+		return
+	}
+	if delta > 0 {
+		s.playEventSound(soundEventCannonPowerUp)
+		return
+	}
+	s.playEventSound(soundEventCannonPowerDown)
 }
 
 func (s *GameScene) hudMouseAction() bool {
@@ -2463,11 +2622,11 @@ func (s *GameScene) updateComputerTurnPlan(tank *battleTank) {
 		}
 		plan.adjustProgress -= adjustInterval
 		if tank.shotStrength < plan.targetStrength {
-			tank.shotStrength++
+			s.adjustShotStrength(tank, 1)
 			return
 		}
 		if tank.shotStrength > plan.targetStrength {
-			tank.shotStrength--
+			s.adjustShotStrength(tank, -1)
 			return
 		}
 	case computerTurnAdjustAngle:
@@ -2601,6 +2760,31 @@ func (s *GameScene) updateXMV12LoopSounds(tank *battleTank) {
 func (s *GameScene) stopXMV12LoopSounds() {
 	s.stopSoundLoop(xmV12EngineLoopKey)
 	s.stopSoundLoop(xmV12TrackLoopKey)
+}
+
+func (s *GameScene) syncBattleEffectLoops() {
+	if len(s.laserEffects) == 0 {
+		s.stopSoundLoop(laserLoopKey)
+	}
+	if len(s.moskitoEffects) == 0 {
+		s.stopSoundLoop(moskitosLoopKey)
+	}
+	if len(s.moleImpacts) == 0 {
+		s.stopSoundLoop(moleBroeslerLoopKey)
+	}
+	if len(s.smallCrumblerImpacts) == 0 {
+		s.stopSoundLoop(crumblerBroeslerLoopKey)
+	}
+}
+
+func (s *GameScene) stopBattleEffectLoops() {
+	s.stopXMV12LoopSounds()
+	s.stopSoundLoop(moskitosLoopKey)
+	s.stopSoundLoop(fireballBurningLoopKey)
+	s.stopSoundLoop(moleBroeslerLoopKey)
+	s.stopSoundLoop(crumblerBroeslerLoopKey)
+	s.stopSoundLoop(laserLoopKey)
+	s.stopSoundLoop(airStrikeJetLoopKey)
 }
 
 func (s *GameScene) updateXMV12Facing(tank *battleTank, facing int) {
@@ -3115,6 +3299,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	p.velocity.X += windAcceleration
 	p.velocity.Y += gravity
 	if s.shouldSplitProjectile(p, previousVelocityY) {
+		s.playEventSound(soundEventSplitterBombSplit)
 		return false, s.splitProjectile(p, gravity, windAcceleration)
 	}
 	p.pos = *p.pos.Add(p.velocity)
@@ -3306,6 +3491,7 @@ type laserHit struct {
 }
 
 func (s *GameScene) fireLaserWeapon(shooter *battleTank, muzzle engine.Vec, angle float64, weapon weaponspkg.Weapon, classBDud bool) {
+	s.playEventSoundLoop(laserLoopKey, soundEventLaser)
 	dir := engine.V(1, 0).Rotated(angle)
 	dir = normalizedVec(dir)
 	maxDistance := s.laserMaxDistanceToWorld(muzzle, dir)
@@ -3483,6 +3669,7 @@ func (s *GameScene) updateLaserEffect(effect *laserEffect) {
 		if s.laserSegmentTouchesTerrain(previous, effect.tip) {
 			area := s.ground.ClearLine(previous.X, previous.Y, effect.tip.X, effect.tip.Y, laserLineThickness)
 			s.accumulateLaserEditArea(effect, area)
+			s.refillWaterBelowArea(area)
 		}
 	}
 	if tipInTerrain && len(effect.smokes) < laserMaxSmokeCount && effect.tip.Sub(effect.smokeFrom).Len() >= laserSmokeSpacing {
@@ -3537,6 +3724,7 @@ func (s *GameScene) finishLaserDrillingIfNeeded(effect *laserEffect) {
 	}
 	effect.settled = true
 	if falls := s.ground.SettleArea(effect.editArea); len(falls) > 0 {
+		s.refillWaterBelowArea(effect.editArea)
 		s.sandFalls = append(s.sandFalls, sandFallAnimation{
 			pixels:   falls,
 			duration: sandFallFrames,
@@ -3764,7 +3952,7 @@ func (s *GameScene) projectilesActive() bool {
 }
 
 func (s *GameScene) turnAdvanceBlocked() bool {
-	return len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0 || len(s.shockwaveImpacts) > 0 || len(s.airStrikeImpacts) > 0 || len(s.laserEffects) > 0
+	return len(s.waterBlubbers) > 0 || len(s.smallCrumblerImpacts) > 0 || len(s.moskitoEffects) > 0 || len(s.shockwaveImpacts) > 0 || len(s.airStrikeImpacts) > 0 || len(s.laserEffects) > 0
 }
 
 func (s *GameScene) activePlayerCanAdjustShot() bool {
@@ -3868,8 +4056,6 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
 	}
-	s.playWeaponImpactSound(weapon)
-
 	if weapon.AirStrike {
 		s.reportComputerShot(p.pos, -1, false)
 		s.startAirStrikeImpact(p.pos)
@@ -3927,6 +4113,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 
 	radius := impactRadiusForWeapon(weapon)
 	duration := s.impactAnimationFramesForWeapon(weapon)
+	s.playWeaponImpactSound(weapon)
 	s.zeroPowerStartDelay = (duration * 2) / 3
 	defer func() {
 		s.zeroPowerStartDelay = 0
@@ -3942,7 +4129,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		damageApplied = make(map[int]bool)
 	} else {
 		s.damageTanksInImpactRadius(p.pos, radius)
-		falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
+		falls := s.applyCraterAndRefillWater(p.pos.X, p.pos.Y, radius)
 		if len(falls) > 0 {
 			s.sandFalls = append(s.sandFalls, sandFallAnimation{
 				pixels:   falls,
@@ -4051,7 +4238,7 @@ func (s *GameScene) startTerrainImpact(pos engine.Vec, weapon weaponspkg.Weapon,
 		if damage {
 			s.damageTanksInImpactRadius(pos, radius)
 		}
-		falls := s.ground.ApplyCrater(pos.X, pos.Y, radius)
+		falls := s.applyCraterAndRefillWater(pos.X, pos.Y, radius)
 		if len(falls) > 0 {
 			s.sandFalls = append(s.sandFalls, sandFallAnimation{
 				pixels:   falls,
@@ -4075,6 +4262,82 @@ func (s *GameScene) startTerrainImpact(pos engine.Vec, weapon weaponspkg.Weapon,
 	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
 		s.turnAdvanceDelay = minimumDelay
 	}
+}
+
+func (s *GameScene) applyCraterAndRefillWater(x, y, radius float64) []models.SandFallPixel {
+	falls := s.ground.ApplyCrater(x, y, radius)
+	area := image.Rect(
+		int(math.Floor(x-radius))-1,
+		int(math.Floor(y-radius))-1,
+		int(math.Ceil(x+radius))+1,
+		int(math.Ceil(y+radius))+1,
+	)
+	s.refillWaterBelowArea(area)
+	return falls
+}
+
+func (s *GameScene) applyRingCraterAndRefillWater(x, y, radius, spacing, thickness float64) []models.SandFallPixel {
+	falls := s.ground.ApplyRingCrater(x, y, radius, spacing, thickness)
+	area := image.Rect(
+		int(math.Floor(x-radius))-1,
+		int(math.Floor(y-radius))-1,
+		int(math.Ceil(x+radius))+1,
+		int(math.Ceil(y+radius))+1,
+	)
+	s.refillWaterBelowArea(area)
+	return falls
+}
+
+func (s *GameScene) refillWaterBelowArea(area image.Rectangle) {
+	if area.Empty() || len(s.waterFills) == 0 {
+		return
+	}
+	for i := range s.waterFills {
+		fill := &s.waterFills[i]
+		if area.Max.X < fill.leftX-1 || area.Min.X > fill.rightX+1 {
+			continue
+		}
+		if s.rebuildWaterFillSurface(fill) {
+			fill.cacheAge = -1
+			fill.image = nil
+		}
+	}
+}
+
+func (s *GameScene) rebuildWaterFillSurface(fill *waterFill) bool {
+	if fill == nil || len(fill.surfaceY) == 0 {
+		return false
+	}
+	left := fill.leftX
+	right := fill.rightX
+	for left > 0 && s.ground.SurfaceY(float64(left-1)) > fill.topY {
+		left--
+	}
+	maxX := maxInt(0, int(math.Round(s.worldWidth)))
+	for right < maxX && s.ground.SurfaceY(float64(right+1)) > fill.topY {
+		right++
+	}
+
+	nextSurface := make([]float64, right-left+1)
+	for x := left; x <= right; x++ {
+		nextSurface[x-left] = s.ground.SurfaceY(float64(x))
+	}
+	changed := left != fill.leftX || right != fill.rightX || len(nextSurface) != len(fill.surfaceY)
+	if !changed {
+		for i, y := range nextSurface {
+			if y != fill.surfaceY[i] {
+				changed = true
+				break
+			}
+		}
+	}
+	if !changed {
+		return false
+	}
+	fill.leftX = left
+	fill.rightX = right
+	fill.surfaceY = nextSurface
+	return true
 }
 
 func (s *GameScene) zeroPowerTankImpactCenter(tank *battleTank) engine.Vec {
@@ -4134,10 +4397,11 @@ func (s *GameScene) onZeroPowerScatterGroundImpact(p *projectile) {
 	if p == nil {
 		return
 	}
+	s.playZeroPowerSound(zeroPowerSoundScatterImpact)
 	const radius = 100.0
 	duration := s.impactAnimationFramesForWeapon(weaponspkg.Grenade())
 	s.damageTanksInZeroPowerScatterRadius(p.pos, radius, p.shooter)
-	falls := s.ground.ApplyCrater(p.pos.X, p.pos.Y, radius)
+	falls := s.applyCraterAndRefillWater(p.pos.X, p.pos.Y, radius)
 	if len(falls) > 0 {
 		s.sandFalls = append(s.sandFalls, sandFallAnimation{
 			pixels:   falls,
@@ -4257,7 +4521,6 @@ func (s *GameScene) projectileHitsWaterSurface(p *projectile, radius float64) (e
 }
 
 func (s *GameScene) startMoleImpact(pos engine.Vec) {
-	s.playEventSound(soundEventMoleImpact)
 	lines := make([]moleStarLine, moleStarLineCount)
 	for i := range lines {
 		angle := -math.Pi + float64(i)*2*math.Pi/float64(len(lines)) + (s.rng.Float64()-0.5)*0.08
@@ -4270,12 +4533,13 @@ func (s *GameScene) startMoleImpact(pos engine.Vec) {
 		starLines:  lines,
 	}
 	impact.editArea = s.ground.ClearCircle(pos.X, pos.Y, moleTunnelWidth/2)
+	s.refillWaterBelowArea(impact.editArea)
 	s.moleImpacts = append(s.moleImpacts, impact)
 	s.delayTurnAdvance(moleTunnelFrames + moleStarFrames + s.impactPauseFrames())
 }
 
 func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig) {
-	s.playEventSound(soundEventCrumblerImpact)
+	s.playEventSoundLoop(crumblerBroeslerLoopKey, soundEventCrumblerImpact)
 	crumbs := make([]smallCrumb, cfg.count)
 	for i := range crumbs {
 		fan := 0.0
@@ -4299,6 +4563,7 @@ func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig)
 		cfg:    cfg,
 	}
 	impact.editArea = s.ground.ClearRects(s.smallCrumblerAreas(impact))
+	s.refillWaterBelowArea(impact.editArea)
 	s.smallCrumblerImpacts = append(s.smallCrumblerImpacts, impact)
 	s.crumblerCameraFocus = &impact.start
 }
@@ -4321,7 +4586,6 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 }
 
 func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
-	s.playEventSound(soundEventAirStrikeBeacon)
 	bombs := make([]airStrikeBomb, airStrikeBombCount)
 	startY := -s.skyExtraHeight() - 80
 	lastDelay := airStrikeWaitFrames
@@ -4372,6 +4636,7 @@ func (s *GameScene) updateAirStrikeImpacts() {
 }
 
 func (s *GameScene) updateAirStrikeImpact(impact *airStrikeImpact) {
+	s.updateAirStrikeBeaconSound(impact)
 	for i := range impact.bombs {
 		bomb := &impact.bombs[i]
 		if bomb.impacted || impact.age < bomb.delay {
@@ -4397,6 +4662,23 @@ func (s *GameScene) updateAirStrikeImpact(impact *airStrikeImpact) {
 	}
 }
 
+func (s *GameScene) updateAirStrikeBeaconSound(impact *airStrikeImpact) {
+	if impact == nil || impact.bojeHidden || s.blinkBojeAnimation.totalTicks <= 0 {
+		return
+	}
+	cycle := impact.age / s.blinkBojeAnimation.totalTicks
+	if cycle <= impact.lastBeaconCycle || impact.beepsPlayed >= 10 {
+		return
+	}
+	impact.lastBeaconCycle = cycle
+	impact.beepsPlayed++
+	s.playEventSound(soundEventAirStrikeBeacon)
+	if impact.beepsPlayed >= 5 && !impact.jetStarted {
+		impact.jetStarted = true
+		s.playEventSound(soundEventAirStrikeJet)
+	}
+}
+
 func (s *GameScene) airStrikeBombHitsTank(pos engine.Vec) *battleTank {
 	radius := 4.0
 	bounds := engine.R(pos.X-radius, pos.Y-radius, pos.X+radius, pos.Y+radius)
@@ -4419,7 +4701,7 @@ func (s *GameScene) applyAirStrikeBombImpact(pos engine.Vec) {
 	s.zeroPowerStartDelay = (duration * 2) / 3
 	s.damageTanksInImpactRadius(pos, radius)
 	s.zeroPowerStartDelay = 0
-	if falls := s.ground.ApplyCrater(pos.X, pos.Y, radius); len(falls) > 0 {
+	if falls := s.applyCraterAndRefillWater(pos.X, pos.Y, radius); len(falls) > 0 {
 		s.sandFalls = append(s.sandFalls, sandFallAnimation{
 			pixels:   falls,
 			duration: sandFallFrames,
@@ -4502,7 +4784,7 @@ func (s *GameScene) startMoskitoImpact(pos engine.Vec, shooter *battleTank) {
 		s.delayTurnAdvance(s.impactPauseFrames())
 		return
 	}
-	s.playEventSound(soundEventMosquitos)
+	s.playEventSoundLoop(moskitosLoopKey, soundEventMosquitos)
 	s.moskitoEffects = append(s.moskitoEffects, &moskitoEffect{
 		pos:     ground,
 		ground:  ground,
@@ -4528,6 +4810,9 @@ func (s *GameScene) updateMoskitoEffects() {
 		active = append(active, effect)
 	}
 	s.moskitoEffects = active
+	if len(s.moskitoEffects) == 0 {
+		s.stopSoundLoop(moskitosLoopKey)
+	}
 }
 
 func (s *GameScene) updateMoskitoEffect(effect *moskitoEffect) {
@@ -4596,7 +4881,11 @@ func (s *GameScene) updateMoskitoEffect(effect *moskitoEffect) {
 		}
 		effect.age++
 		if effect.age >= mosquitoAttachedFrames {
+			previousPower := effect.target.power
 			s.damageTankAsTerrain(effect.target, 100, effect.shooter, damageCauseDirect)
+			if previousPower > 0 && effect.target.power == 0 {
+				s.playEventSound(soundEventMosquitoScream)
+			}
 			effect.finished = true
 			s.delayTurnAdvance(s.tankHitPauseFrames())
 		}
@@ -4709,15 +4998,19 @@ func (s *GameScene) updateMoleImpacts() {
 		if impact.phase == molePhaseTunnel && impact.age >= moleTunnelFrames {
 			impact.phase = molePhaseStar
 			impact.age = 0
+			s.playEventSoundLoop(moleBroeslerLoopKey, soundEventCrumblerImpact)
 		}
 		if impact.phase == molePhaseStar && impact.age >= moleStarFrames {
 			if falls := s.ground.SettleArea(impact.editArea); len(falls) > 0 {
+				s.refillWaterBelowArea(impact.editArea)
 				s.sandFalls = append(s.sandFalls, sandFallAnimation{
 					pixels:   falls,
 					duration: sandFallFrames,
 				})
 			}
 			s.dropUnsupportedTanks()
+			s.stopSoundLoop(moleBroeslerLoopKey)
+			s.playEventSound(soundEventMoleImpact)
 			continue
 		}
 		active = append(active, impact)
@@ -4732,6 +5025,7 @@ func (s *GameScene) updateMoleTunnel(impact *moleImpact) {
 	impact.pos = next
 	impact.tunnelPath = append(impact.tunnelPath, next)
 	area := s.ground.ClearCircle(next.X, next.Y, moleTunnelWidth/2)
+	s.refillWaterBelowArea(area)
 	impact.editArea = unionRect(impact.editArea, area)
 }
 
@@ -4740,6 +5034,7 @@ func (s *GameScene) updateMoleStar(impact *moleImpact) {
 	for _, line := range impact.starLines {
 		end := impact.pos.Add(engine.V(line.length*progress, 0).Rotated(line.angle))
 		area := s.ground.ClearLine(impact.pos.X, impact.pos.Y, end.X, end.Y, moleStarLineThickness)
+		s.refillWaterBelowArea(area)
 		impact.editArea = unionRect(impact.editArea, area)
 	}
 }
@@ -4758,6 +5053,7 @@ func (s *GameScene) updateSmallCrumblerImpacts() {
 			if impact.freezeAge >= impact.cfg.freezeFrames {
 				delay := s.impactPauseFrames()
 				if falls := s.ground.SettleArea(impact.editArea); len(falls) > 0 {
+					s.refillWaterBelowArea(impact.editArea)
 					s.sandFalls = append(s.sandFalls, sandFallAnimation{
 						pixels:   falls,
 						duration: sandFallFrames,
@@ -4765,6 +5061,8 @@ func (s *GameScene) updateSmallCrumblerImpacts() {
 					delay += sandFallFrames
 				}
 				s.dropUnsupportedTanks()
+				s.stopSoundLoop(crumblerBroeslerLoopKey)
+				s.playEventSound(soundEventMoleImpact)
 				s.delayTurnAdvance(delay)
 				continue
 			}
@@ -4804,6 +5102,7 @@ func (s *GameScene) updateSmallCrumblerImpacts() {
 		}
 
 		if area := s.ground.ClearRects(s.smallCrumblerAreas(impact)); !area.Empty() {
+			s.refillWaterBelowArea(area)
 			impact.editArea = unionRect(impact.editArea, area)
 		}
 		if reachedEnd {
@@ -4995,6 +5294,7 @@ func (s *GameScene) drownTank(tank *battleTank, fill *waterFill) {
 		s.awardZeroPowerScore(tank, s.lastDamageSource, damageCauseDirect)
 	}
 	s.startWaterBlubberForTank(tank, fill)
+	s.delayTurnAdvance(s.tankHitPauseFrames())
 }
 
 func (s *GameScene) removeTankSprites(tank *battleTank) {
@@ -5037,6 +5337,7 @@ func (s *GameScene) startFireballImpact(pos engine.Vec, weapon weaponspkg.Weapon
 	if len(animation.frames) == 0 {
 		return
 	}
+	s.playEventSoundLoop(fireballBurningLoopKey, soundEventPalmIgnite)
 	duration := maxInt(animation.totalTicks, s.impactAnimationFramesForWeapon(weapon))
 	damage := weapon.ImpactDamage
 	if damage <= 0 {
@@ -5047,6 +5348,7 @@ func (s *GameScene) startFireballImpact(pos engine.Vec, weapon weaponspkg.Weapon
 		duration:  duration,
 		animation: animation,
 		damage:    damage,
+		loopKey:   fireballBurningLoopKey,
 	}
 	s.animatedImpacts = append(s.animatedImpacts, effect)
 	s.damageTanksInRectFixed(s.animationWorldRect(pos, animation), damage)
@@ -5126,7 +5428,7 @@ func (s *GameScene) updateImpacts() {
 			s.damageTanksTouchedByPlasmaImpact(&impact, progress)
 			if !impact.terrainApplied {
 				if progress >= plasmaGreenProgress {
-					falls := s.ground.ApplyRingCrater(impact.pos.X, impact.pos.Y, impact.radius, plasmaRingSpacing, plasmaRingThickness)
+					falls := s.applyRingCraterAndRefillWater(impact.pos.X, impact.pos.Y, impact.radius, plasmaRingSpacing, plasmaRingThickness)
 					if len(falls) > 0 {
 						s.sandFalls = append(s.sandFalls, sandFallAnimation{
 							pixels:   falls,
@@ -5183,6 +5485,8 @@ func (s *GameScene) updateAnimatedImpacts() {
 		impact.age++
 		if impact.age < impact.duration {
 			active = append(active, impact)
+		} else if impact.loopKey != "" {
+			s.stopSoundLoop(impact.loopKey)
 		}
 	}
 	s.animatedImpacts = active
@@ -5212,6 +5516,9 @@ func (s *GameScene) updateWaterBlubbers() {
 		}
 	}
 	s.waterBlubbers = active
+	if len(s.waterBlubbers) == 0 && s.turnAdvanceDelay <= 0 {
+		s.delayTurnAdvance(s.impactPauseFrames())
+	}
 }
 
 func (s *GameScene) updateWaterBlotches() {
@@ -7066,6 +7373,38 @@ func (s *GameScene) drawPalmRevengeScreenFlash(screen *ebiten.Image) {
 	drawFilledRect(screen, screen.Bounds(), color.RGBA{R: 255, G: 255, B: 255, A: alpha})
 }
 
+func (s *GameScene) drawAbortRoundFlash(screen *ebiten.Image) {
+	if !s.abortRoundFlashing {
+		return
+	}
+	battlefield := image.Rect(0, 0, int(core.Config().Screen.Width), int(s.battlefieldHeight()))
+	s.drawAbortRoundFlashOverlay(screen, battlefield)
+}
+
+func (s *GameScene) drawAbortRoundFlashOverlay(screen *ebiten.Image, r image.Rectangle) {
+	if screen == nil || r.Empty() {
+		return
+	}
+	age := maxInt(0, minInt(s.abortRoundFlashAge, abortRoundFlashFrames))
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(float64(r.Dx()), float64(r.Dy()))
+	op.GeoM.Translate(float64(r.Min.X), float64(r.Min.Y))
+	if age <= abortRoundFlashWhiteFrame {
+		progress := float64(age) / float64(maxInt(1, abortRoundFlashWhiteFrame))
+		if progress <= 0 {
+			return
+		}
+		v := float32(progress)
+		op.ColorScale.Scale(v, v, v, v)
+		screen.DrawImage(solidWhiteImage, op)
+		return
+	}
+	progress := float64(age-abortRoundFlashWhiteFrame) / float64(maxInt(1, abortRoundFlashFrames-abortRoundFlashWhiteFrame))
+	value := float32(1 - progress)
+	op.ColorScale.Scale(value, value, value, 1)
+	screen.DrawImage(solidWhiteImage, op)
+}
+
 func (s *GameScene) palmRevengeScreenFlashAlpha(age int) uint8 {
 	localAge, ok := lightningVisibleLocalAge(age)
 	if !ok {
@@ -7317,6 +7656,10 @@ func (s *GameScene) drawGameDialogs(screen *ebiten.Image) {
 		drawFilledRect(screen, image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height)), color.RGBA{A: 70})
 		drawCenteredText(screen, t.GamePause, image.Rect(0, int(core.Config().Screen.Height)/2-24, int(core.Config().Screen.Width), int(core.Config().Screen.Height)/2+24), colornames.White)
 	}
+	if s.confirmDialog != gameConfirmNone {
+		s.drawConfirmDialog(screen)
+		return
+	}
 	if s.gameHelpOpen {
 		s.drawGameHelpDialog(screen)
 	}
@@ -7344,6 +7687,20 @@ func playerInfoRect() image.Rectangle {
 func playerInfoOKRect() image.Rectangle {
 	r := playerInfoRect()
 	return image.Rect(r.Max.X-86, r.Max.Y-47, r.Max.X-15, r.Max.Y-23)
+}
+
+func confirmDialogRect() image.Rectangle {
+	return centerDialogRect(350, 136)
+}
+
+func confirmDialogYesRect() image.Rectangle {
+	r := confirmDialogRect()
+	return image.Rect(r.Max.X-166, r.Max.Y-44, r.Max.X-96, r.Max.Y-20)
+}
+
+func confirmDialogNoRect() image.Rectangle {
+	r := confirmDialogRect()
+	return image.Rect(r.Max.X-84, r.Max.Y-44, r.Max.X-14, r.Max.Y-20)
 }
 
 func centerDialogRect(w, h int) image.Rectangle {
@@ -7395,6 +7752,29 @@ func (s *GameScene) drawGameHelpDialog(screen *ebiten.Image) {
 	drawFilledRect(screen, logo, color.RGBA{R: 0, G: 105, B: 100, A: 255})
 	drawVerticalLogo(screen, logo)
 	drawDialogButton(screen, gameHelpOKRect(), t.DialogOK)
+}
+
+func (s *GameScene) drawConfirmDialog(screen *ebiten.Image) {
+	title := ""
+	switch s.confirmDialog {
+	case gameConfirmAbortRound:
+		title = "Laufende Runde abbrechen"
+	case gameConfirmQuit:
+		title = "Tank Blaster sofort beenden?"
+	default:
+		return
+	}
+	r := confirmDialogRect()
+	iconRect := image.Rect(r.Min.X+38, r.Min.Y+48, r.Min.X+70, r.Min.Y+80)
+	textRect := image.Rect(iconRect.Max.X+14, r.Min.Y+50, r.Max.X-20, r.Min.Y+78)
+	drawFilledRect(screen, image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height)), color.RGBA{A: 70})
+	drawDialogWindow(screen, r, title)
+	if s.questionIconImage != nil {
+		drawScaledImage(screen, s.questionIconImage, iconRect)
+	}
+	drawTextFace(screen, title, dialogTextFace, textRect.Min.X, textRect.Min.Y+19, colornames.Black)
+	drawDialogButton(screen, confirmDialogYesRect(), "Ja")
+	drawDialogButton(screen, confirmDialogNoRect(), "Nein")
 }
 
 func drawVerticalLogo(screen *ebiten.Image, r image.Rectangle) {
@@ -7548,15 +7928,23 @@ func (s *GameScene) scoreTableTanks() []*battleTank {
 		return nil
 	}
 	rows := make([]*battleTank, 0, len(s.tanks))
-	if s.activePlayerIndex >= 0 && s.activePlayerIndex < len(s.tanks) {
-		rows = append(rows, s.tanks[s.activePlayerIndex])
-	}
-	for index, tank := range s.tanks {
-		if index == s.activePlayerIndex {
-			continue
-		}
+	for _, tank := range s.tanks {
 		rows = append(rows, tank)
 	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i] == nil {
+			return false
+		}
+		if rows[j] == nil {
+			return true
+		}
+		leftScore := s.scoreForPlayer(rows[i].playerIndex)
+		rightScore := s.scoreForPlayer(rows[j].playerIndex)
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		return rows[i].playerIndex < rows[j].playerIndex
+	})
 	return rows
 }
 

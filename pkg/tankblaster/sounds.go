@@ -9,6 +9,8 @@ const (
 	soundEventRoundStart             soundEvent = "round_start"
 	soundEventRoundEnd               soundEvent = "round_end"
 	soundEventWeaponSelect           soundEvent = "weapon_select"
+	soundEventCannonPowerUp          soundEvent = "cannon_power_up"
+	soundEventCannonPowerDown        soundEvent = "cannon_power_down"
 	soundEventCannonRotateLeft       soundEvent = "cannon_rotate_left"
 	soundEventCannonRotateRight      soundEvent = "cannon_rotate_right"
 	soundEventTankHit                soundEvent = "tank_hit"
@@ -27,10 +29,14 @@ const (
 	soundEventDudImpact              soundEvent = "dud_impact"
 	soundEventMoleImpact             soundEvent = "mole_impact"
 	soundEventCrumblerImpact         soundEvent = "crumbler_impact"
+	soundEventSplitterBombSplit      soundEvent = "splitter_bomb_split"
 	soundEventAirStrikeBeacon        soundEvent = "air_strike_beacon"
 	soundEventAirStrikeBomb          soundEvent = "air_strike_bomb"
+	soundEventAirStrikeJet           soundEvent = "air_strike_jet"
 	soundEventShockwave              soundEvent = "shockwave"
 	soundEventMosquitos              soundEvent = "mosquitos"
+	soundEventMosquitoScream         soundEvent = "mosquito_scream"
+	soundEventLaser                  soundEvent = "laser"
 	soundEventLaserSmoke             soundEvent = "laser_smoke"
 	soundEventXMV12Ignition          soundEvent = "xm_v12_ignition"
 	soundEventXMV12EngineLoop        soundEvent = "xm_v12_engine_loop"
@@ -57,11 +63,27 @@ const (
 	zeroPowerSoundLargeGrenadeImpact zeroPowerSound = "large_grenade_impact"
 	zeroPowerSoundAtomImpact         zeroPowerSound = "atom_impact"
 	zeroPowerSoundScatterProjectiles zeroPowerSound = "scatter_projectiles"
+	zeroPowerSoundScatterImpact      zeroPowerSound = "scatter_impact"
 )
 
 type audioConfig struct {
 	Events    map[soundEvent]string
 	ZeroPower map[zeroPowerSound]string
+	Options   map[string]soundOptions
+}
+
+type soundOptions struct {
+	Loop               bool
+	DurationSeconds    float64
+	PlaybackSpeed      float64
+	RepeatEverySeconds float64
+	MaxRepeats         int
+	Volume             float64
+	StartOffsetSeconds float64
+	TrimSilenceForLoop bool
+	KeepSilenceForLoop bool
+	SilenceThreshold   int16
+	AlternatePaths     []string
 }
 
 var tankBlasterSounds = audioConfig{
@@ -70,6 +92,8 @@ var tankBlasterSounds = audioConfig{
 		soundEventRoundStart:             soundpaths.RoundStart,
 		soundEventRoundEnd:               soundpaths.RoundEnd,
 		soundEventWeaponSelect:           soundpaths.WeaponSelect,
+		soundEventCannonPowerUp:          soundpaths.CannonPowerUp,
+		soundEventCannonPowerDown:        soundpaths.CannonPowerDown,
 		soundEventCannonRotateLeft:       soundpaths.CannonRotateLeft,
 		soundEventCannonRotateRight:      soundpaths.CannonRotateRight,
 		soundEventTankHit:                soundpaths.TankHit,
@@ -88,10 +112,14 @@ var tankBlasterSounds = audioConfig{
 		soundEventDudImpact:              soundpaths.DudImpact,
 		soundEventMoleImpact:             soundpaths.MoleImpact,
 		soundEventCrumblerImpact:         soundpaths.CrumblerImpact,
+		soundEventSplitterBombSplit:      soundpaths.SplitterBombSplit,
 		soundEventAirStrikeBeacon:        soundpaths.AirStrikeBeacon,
 		soundEventAirStrikeBomb:          soundpaths.AirStrikeBomb,
+		soundEventAirStrikeJet:           soundpaths.AirStrikeJet,
 		soundEventShockwave:              soundpaths.Shockwave,
 		soundEventMosquitos:              soundpaths.Mosquitos,
+		soundEventMosquitoScream:         soundpaths.MosquitoScream,
+		soundEventLaser:                  soundpaths.Laser,
 		soundEventLaserSmoke:             soundpaths.LaserSmoke,
 		soundEventXMV12Ignition:          soundpaths.XMV12Ignition,
 		soundEventXMV12EngineLoop:        soundpaths.XMV12EngineLoop,
@@ -115,5 +143,11 @@ var tankBlasterSounds = audioConfig{
 		zeroPowerSoundLargeGrenadeImpact: soundpaths.ZeroPowerLargeGrenadeImpact,
 		zeroPowerSoundAtomImpact:         soundpaths.ZeroPowerAtomImpact,
 		zeroPowerSoundScatterProjectiles: soundpaths.ZeroPowerScatterProjectiles,
+		zeroPowerSoundScatterImpact:      soundpaths.ZeroPowerScatterImpact,
+	},
+	Options: map[string]soundOptions{
+		soundpaths.WeaponImpactDefault: {
+			AlternatePaths: []string{soundpaths.SoundIncinerator2},
+		},
 	},
 }

@@ -139,6 +139,9 @@ var PalmLeavesPNG []byte
 //go:embed images/palm_eyes_open.png
 var PalmEyesOpenPNG []byte
 
+//go:embed images/palm_eyes_close.png
+var PalmEyesClosePNG []byte
+
 //go:embed images/palm_scream.png
 var PalmScreamPNG []byte
 
@@ -150,6 +153,9 @@ var MoskitosPNG []byte
 
 //go:embed images/fragezeichen.png
 var FragezeichenPNG []byte
+
+//go:embed images/fragezeichen-dialog.png
+var FragezeichenDialogPNG []byte
 
 //go:embed images/blinkboje.png
 var BlinkBojePNG []byte
