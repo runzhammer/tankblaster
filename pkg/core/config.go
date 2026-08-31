@@ -49,6 +49,9 @@ type FileSettings struct {
 			Players []DebugPlayerSettings `yaml:"players"`
 		} `yaml:"game"`
 	} `yaml:"debug"`
+	Online struct {
+		ServerURL string `yaml:"server_url"`
+	} `yaml:"online"`
 }
 
 type DebugPlayerSettings struct {
@@ -105,6 +108,9 @@ type Settings struct {
 			Rounds  int
 			Players []DebugPlayerSettings
 		}
+	}
+	Online struct {
+		ServerURL string
 	}
 }
 
@@ -211,6 +217,10 @@ func init() {
 		s.Debug.Game.Rounds = 10
 	}
 	s.Debug.Game.Players = fs.Debug.Game.Players
+	s.Online.ServerURL = fs.Online.ServerURL
+	if s.Online.ServerURL == "" {
+		s.Online.ServerURL = "ws://127.0.0.1:8765/game"
+	}
 	GameSettings = &s
 }
 

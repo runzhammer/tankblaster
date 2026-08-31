@@ -15,6 +15,7 @@ type localizedStrings struct {
 	PlayerSelectionSlotComputer          string
 	PlayerSelectionHelpHint              string
 	PlayerSelectionOptionsButton         string
+	PlayerSelectionOnlineButton          string
 	PlayerSelectionStartButton           string
 	PlayerSelectionMinimumPlayers        string
 	PlayerSelectionHelpTitle             string
@@ -43,6 +44,30 @@ type localizedStrings struct {
 	LanguageTitle                        string
 	LanguageGerman                       string
 	LanguageEnglish                      string
+	OnlineTitle                          string
+	OnlineDisplayName                    string
+	OnlineQuickMatch                     string
+	OnlineCreatePublicSession            string
+	OnlineCreatePrivateSession           string
+	OnlineOpenSessions                   string
+	OnlineJoinSession                    string
+	OnlineLeaderboard                    string
+	OnlineReady                          string
+	OnlineLeave                          string
+	OnlineBack                           string
+	OnlineJoinPrompt                     string
+	OnlineConnecting                     string
+	OnlineConnected                      string
+	OnlineQueued                         string
+	OnlineSessionCreated                 string
+	OnlineSessionJoined                  string
+	OnlineInviteLink                     string
+	OnlineCopiedCode                     string
+	OnlineCopiedInviteLink               string
+	OnlineClipboardUnavailable           string
+	OnlineNoSessions                     string
+	OnlineNoLeaderboard                  string
+	OnlineMatchStarted                   string
 	GameDefaultPlayerName                string
 	GameHUDStrength                      string
 	GameHUDAngle                         string

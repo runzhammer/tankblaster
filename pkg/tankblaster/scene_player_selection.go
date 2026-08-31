@@ -43,9 +43,10 @@ var defaultPlayerColors = []color.RGBA{
 }
 
 var (
-	uiTextFace     font.Face = loadUIFont(15)
-	dialogTextFace font.Face = loadUIFont(11)
-	paintSplotch   *ebiten.Image
+	uiTextFace      font.Face = loadUIFont(15)
+	dialogTextFace  font.Face = loadUIFont(11)
+	overlayTextFace font.Face = loadUIFont(24)
+	paintSplotch    *ebiten.Image
 )
 
 func loadUIFont(size float64) font.Face {
@@ -83,6 +84,7 @@ type playerSelectionScene struct {
 	g *GameLoop
 
 	rounds         int
+	tick           int
 	slots          [maxPlayerSlots]playerSelectionSlot
 	focusedName    int
 	openPaletteFor int
@@ -103,6 +105,7 @@ type playerSelectionScene struct {
 }
 
 func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
+	setPlayerNameInputActive(false)
 	baseImage := mustImageFromPNG(r.PlayerSelectionBase)
 	game.playSound(tankBlasterSounds.Events[soundEventPlayerSelectionStart])
 	s := &playerSelectionScene{
@@ -131,6 +134,8 @@ func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 }
 
 func (s *playerSelectionScene) Update() error {
+	defer s.syncPlayerNameInputActive()
+	s.tick++
 	if inpututil.IsKeyJustPressed(ebiten.KeyF1) {
 		s.openHelpDialog()
 		return nil
@@ -185,6 +190,9 @@ func (s *playerSelectionScene) Update() error {
 	if s.handleStartClick(x, y) {
 		return s.startGame()
 	}
+	if s.handleOnlineClick(x, y) {
+		return s.g.SetNewScene(NewOnlineScene)
+	}
 	if s.handlePaletteClick(x, y) {
 		return nil
 	}
@@ -213,6 +221,9 @@ func (s *playerSelectionScene) Draw(screen *ebiten.Image) {
 	s.drawStartState(target)
 	if s.openPaletteFor >= 0 {
 		s.drawPalette(target, s.openPaletteFor)
+	}
+	if showPlayerNameInputOverlay() {
+		s.drawFocusedNameOverlay(target)
 	}
 	if s.optionsOpen {
 		s.drawOptionsDialog(target)
@@ -292,10 +303,16 @@ func (s *playerSelectionScene) handleSelectionShortcuts() (bool, error) {
 
 func (s *playerSelectionScene) handleKeyboard() {
 	if s.focusedName < 0 || s.focusedName >= len(s.slots) {
+		drainPlayerNameInputCommands()
 		return
 	}
 	slot := &s.slots[s.focusedName]
 	if slot.Kind == PlayerNone {
+		drainPlayerNameInputCommands()
+		return
+	}
+
+	if s.handleQueuedPlayerNameInput(slot) {
 		return
 	}
 
@@ -320,6 +337,43 @@ func (s *playerSelectionScene) handleKeyboard() {
 	}
 }
 
+func (s *playerSelectionScene) handleQueuedPlayerNameInput(slot *playerSelectionSlot) bool {
+	commands := drainPlayerNameInputCommands()
+	if len(commands) == 0 {
+		return false
+	}
+	for _, command := range commands {
+		switch {
+		case command.finish:
+			s.focusedName = -1
+		case command.backspace:
+			name := []rune(slot.Name)
+			if len(name) > 0 {
+				slot.Name = string(name[:len(name)-1])
+			}
+		case command.replace:
+			name := []rune(command.text)
+			if len(name) > 16 {
+				name = name[:16]
+			}
+			slot.Name = string(name)
+		case command.text != "":
+			name := []rune(slot.Name)
+			for _, r := range []rune(command.text) {
+				if len(name) < 16 {
+					name = append(name, r)
+				}
+			}
+			slot.Name = string(name)
+		}
+	}
+	return true
+}
+
+func (s *playerSelectionScene) syncPlayerNameInputActive() {
+	setPlayerNameInputActive(s.focusedName >= 0)
+}
+
 func (s *playerSelectionScene) handleRoundsClick(x, y int) bool {
 	minus := image.Rect(434, 72, 466, 103)
 	plus := image.Rect(474, 72, 506, 103)
@@ -342,6 +396,10 @@ func (s *playerSelectionScene) handleRoundsClick(x, y int) bool {
 
 func (s *playerSelectionScene) handleStartClick(x, y int) bool {
 	return image.Pt(x, y).In(image.Rect(780, 673, 922, 707))
+}
+
+func (s *playerSelectionScene) handleOnlineClick(x, y int) bool {
+	return image.Pt(x, y).In(image.Rect(205, 673, 348, 706))
 }
 
 func (s *playerSelectionScene) handleOptionsClick(x, y int) bool {
@@ -527,6 +585,8 @@ func (s *playerSelectionScene) handleSlotClick(x, y int) bool {
 			return true
 		case s.slots[i].Kind != PlayerNone && p.In(nameRect):
 			s.focusedName = i
+			s.slots[i].Name = ""
+			SetPlayerNameText("")
 			s.openPaletteFor = -1
 			return true
 		case s.slots[i].Kind == PlayerComputer && p.In(portraitRect):
@@ -710,6 +770,25 @@ func (s *playerSelectionScene) computerPortraitFor(id computerplayers.ID) *ebite
 	return s.computerPortraits[computerplayers.DoedelID]
 }
 
+func (s *playerSelectionScene) drawFocusedNameOverlay(screen *ebiten.Image) {
+	if s.focusedName < 0 || s.focusedName >= len(s.slots) {
+		return
+	}
+	slot := s.slots[s.focusedName]
+	if slot.Kind == PlayerNone {
+		return
+	}
+	r := image.Rect(184, 116, 840, 194)
+	drawFrame(screen, r, color.RGBA{R: 255, G: 252, B: 218, A: 255}, colornames.Black)
+	drawFrame(screen, insetRect(r, 5), colornames.White, color.RGBA{R: 80, G: 80, B: 80, A: 255})
+	drawTextFace(screen, texts().OnlineDisplayName, uiTextFace, r.Min.X+20, r.Min.Y+27, colornames.Black)
+	drawTextFace(screen, slot.Name, overlayTextFace, r.Min.X+20, r.Min.Y+64, colornames.Black)
+	if s.tick%60 < 30 {
+		cursorX := r.Min.X + 22 + text.BoundString(overlayTextFace, slot.Name).Dx()
+		drawFilledRect(screen, image.Rect(cursorX, r.Min.Y+40, cursorX+3, r.Min.Y+68), colornames.Black)
+	}
+}
+
 func portraitRectForSlot(index int, kind PlayerKind) image.Rectangle {
 	r := slotRect(index)
 	if kind == PlayerHuman || kind == PlayerComputer {
@@ -736,6 +815,7 @@ func (s *playerSelectionScene) drawFooter(screen *ebiten.Image) {
 	t := texts()
 	drawFilledRect(screen, image.Rect(372, 676, 586, 695), colornames.Yellow)
 	drawCenteredText(screen, t.PlayerSelectionHelpHint, image.Rect(372, 676, 586, 695), colornames.Black)
+	drawButton(screen, image.Rect(205, 673, 348, 706), t.PlayerSelectionOnlineButton)
 	drawButton(screen, image.Rect(624, 673, 756, 706), t.PlayerSelectionOptionsButton)
 	drawButton(screen, image.Rect(780, 673, 922, 706), t.PlayerSelectionStartButton)
 }

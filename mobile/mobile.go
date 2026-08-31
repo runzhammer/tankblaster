@@ -16,6 +16,34 @@ func init() {
 // Dummy forces gomobile to compile this package.
 func Dummy() {}
 
+func PlayerNameInputActive() bool {
+	return tankblaster.PlayerNameInputActive()
+}
+
+func CommitPlayerNameText(value string) {
+	tankblaster.CommitPlayerNameText(value)
+}
+
+func SetPlayerNameText(value string) {
+	tankblaster.SetPlayerNameText(value)
+}
+
+func DeletePlayerNameText() {
+	tankblaster.DeletePlayerNameText()
+}
+
+func FinishPlayerNameInput() {
+	tankblaster.FinishPlayerNameInput()
+}
+
+func PendingClipboardText() string {
+	return tankblaster.PendingClipboardText()
+}
+
+func ClearPendingClipboardText(value string) {
+	tankblaster.ClearPendingClipboardText(value)
+}
+
 type lazyGame struct {
 	game ebiten.Game
 	err  error

@@ -196,6 +196,7 @@ func debugStartSceneFactory(scene string) func(*GameLoop) (core.Scene, error) {
 }
 
 func (g *GameLoop) SetNewScene(factory func(*GameLoop) (scene core.Scene, err error)) error {
+	setPlayerNameInputActive(false)
 	scene, err := factory(g)
 	if err != nil {
 		return err

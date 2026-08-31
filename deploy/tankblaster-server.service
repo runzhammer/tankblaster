@@ -1,0 +1,15 @@
+[Unit]
+Description=Tank Blaster multiplayer server
+After=network.target
+
+[Service]
+Type=simple
+User=tankblaster
+Group=tankblaster
+WorkingDirectory=/opt/tankblaster
+ExecStart=/opt/tankblaster/tankblaster-server -config /etc/tankblaster/server.yaml
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
