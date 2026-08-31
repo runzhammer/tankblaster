@@ -31,11 +31,16 @@ import (
 
 var _ core.Scene = (*GameScene)(nil)
 
-var solidWhiteImage = func() *ebiten.Image {
-	img := ebiten.NewImage(1, 1)
-	img.Fill(colornames.White)
-	return img
-}()
+var solidWhiteImage *ebiten.Image
+
+func getSolidWhiteImage() *ebiten.Image {
+	if solidWhiteImage == nil {
+		img := ebiten.NewImage(1, 1)
+		img.Fill(colornames.White)
+		solidWhiteImage = img
+	}
+	return solidWhiteImage
+}
 
 type Phase uint8
 
@@ -718,6 +723,7 @@ type GameScene struct {
 	shopClassBStock      []int
 	shopClassBItems      []int
 	shopComputerPlan     *shopComputerPlan
+	shopTouchScroll      shopTouchScrollState
 	scrollBarDragging    bool
 	zeroPowerStartDelay  int
 	lastComputerShot     computerShotRecord
@@ -2205,15 +2211,15 @@ func (s *GameScene) handleCameraScrollControls() {
 	if !s.scrollBarAvailable() {
 		return
 	}
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		x, y := ebiten.CursorPosition()
+	if primaryPointerJustPressed() {
+		x, y := primaryPointerPosition()
 		s.scrollBarDragging = image.Pt(x, y).In(debugScrollBarRect())
 	}
-	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+	if !primaryPointerPressed() {
 		s.scrollBarDragging = false
 	}
 	if s.scrollBarDragging {
-		x, _ := ebiten.CursorPosition()
+		x, _ := primaryPointerPosition()
 		s.setCameraFromScrollBarX(x)
 	}
 
@@ -2250,8 +2256,8 @@ func (s *GameScene) handleGameDialogInput() error {
 			s.pressedDialogButton = ""
 			return nil
 		}
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			x, y := ebiten.CursorPosition()
+		if primaryPointerJustPressed() {
+			x, y := primaryPointerPosition()
 			if s.gameHelpOpen && image.Pt(x, y).In(gameHelpOKRect()) {
 				s.pressedDialogButton = "game_help_ok"
 				return nil
@@ -2261,8 +2267,8 @@ func (s *GameScene) handleGameDialogInput() error {
 				return nil
 			}
 		}
-		if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
-			x, y := ebiten.CursorPosition()
+		if primaryPointerJustReleased() {
+			x, y := primaryPointerPosition()
 			p := image.Pt(x, y)
 			button := s.pressedDialogButton
 			s.pressedDialogButton = ""
@@ -2318,8 +2324,8 @@ func (s *GameScene) handleConfirmDialogInput() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) || inpututil.IsKeyJustPressed(ebiten.KeyY) || inpututil.IsKeyJustPressed(ebiten.KeyJ) {
 		return s.confirmDialogYes()
 	}
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		x, y := ebiten.CursorPosition()
+	if primaryPointerJustPressed() {
+		x, y := primaryPointerPosition()
 		switch {
 		case image.Pt(x, y).In(confirmDialogYesRect()):
 			s.pressedDialogButton = "confirm_yes"
@@ -2328,8 +2334,8 @@ func (s *GameScene) handleConfirmDialogInput() error {
 		}
 		return nil
 	}
-	if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
-		x, y := ebiten.CursorPosition()
+	if primaryPointerJustReleased() {
+		x, y := primaryPointerPosition()
 		p := image.Pt(x, y)
 		button := s.pressedDialogButton
 		s.pressedDialogButton = ""
@@ -2487,6 +2493,7 @@ func (s *GameScene) handleBattleInput() {
 		s.adjustShotStrength(tank, -strengthStep)
 	}
 	s.handleBattleHUDButtons(tank, strengthStep)
+	s.handleMobileSideControls(tank, strengthStep)
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
 		if shiftPressed() {
 			s.selectPreviousWeapon(tank)
@@ -2513,8 +2520,8 @@ func (s *GameScene) handleBattleInput() {
 		return
 	}
 
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		x, y := ebiten.CursorPosition()
+	if primaryPointerJustPressed() {
+		x, y := primaryPointerPosition()
 		for i := 0; i < s.weaponSlotCount(); i++ {
 			if image.Pt(x, y).In(s.weaponSlotRect(i)) && s.canSelectWeaponSlot(tank, i) {
 				s.setSelectedWeapon(tank, i)
@@ -2532,7 +2539,7 @@ func (s *GameScene) handleBattleHUDButtons(tank *battleTank, strengthStep int) {
 	if tank == nil || !s.hudMouseAction() {
 		return
 	}
-	x, y := ebiten.CursorPosition()
+	x, y := primaryPointerPosition()
 	cursor := image.Pt(x, y)
 	switch {
 	case cursor.In(s.hudStrengthMinusRect()):
@@ -2569,10 +2576,10 @@ func (s *GameScene) adjustShotStrength(tank *battleTank, delta int) {
 }
 
 func (s *GameScene) hudMouseAction() bool {
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if primaryPointerJustPressed() {
 		return true
 	}
-	return ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && int(s.time)%humanCannonRepeatFrames == 0
+	return primaryPointerPressed() && int(s.time)%humanCannonRepeatFrames == 0
 }
 
 func (s *GameScene) handleComputerTurn() {
@@ -2661,6 +2668,7 @@ func (s *GameScene) updateXMV12DriveMode() {
 	}
 	s.updateXMV12LoopSounds(tank)
 	s.handleXMV12HUDInput(tank)
+	s.handleMobileXMV12SideControls(tank)
 	if s.xmV12EngineOffDelay > 0 {
 		s.clearXMV12IdleVibration(tank)
 		s.stopXMV12LoopSounds()
@@ -2806,10 +2814,10 @@ func (s *GameScene) updateXMV12FacingFromCannon(tank *battleTank) {
 }
 
 func (s *GameScene) handleXMV12HUDInput(tank *battleTank) {
-	if tank == nil || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if tank == nil || !primaryPointerJustPressed() {
 		return
 	}
-	x, y := ebiten.CursorPosition()
+	x, y := primaryPointerPosition()
 	cursor := image.Pt(x, y)
 	switch {
 	case cursor.In(s.xmV12LeftButtonRect()):
@@ -7093,7 +7101,7 @@ func drawMoleArrow(screen *ebiten.Image, camera *ebiten.GeoM, pos engine.Vec) {
 		{DstX: x - width/2, DstY: y - height*0.45, SrcX: 0, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 		{DstX: x + width/2, DstY: y - height*0.45, SrcX: 0, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 	}
-	screen.DrawTriangles(vertices, []uint16{0, 1, 2}, solidWhiteImage, nil)
+	screen.DrawTriangles(vertices, []uint16{0, 1, 2}, getSolidWhiteImage(), nil)
 }
 
 func (s *GameScene) drawSmallCrumblerImpacts(screen *ebiten.Image, camera *ebiten.GeoM) {
@@ -7396,13 +7404,13 @@ func (s *GameScene) drawAbortRoundFlashOverlay(screen *ebiten.Image, r image.Rec
 		}
 		v := float32(progress)
 		op.ColorScale.Scale(v, v, v, v)
-		screen.DrawImage(solidWhiteImage, op)
+		screen.DrawImage(getSolidWhiteImage(), op)
 		return
 	}
 	progress := float64(age-abortRoundFlashWhiteFrame) / float64(maxInt(1, abortRoundFlashFrames-abortRoundFlashWhiteFrame))
 	value := float32(1 - progress)
 	op.ColorScale.Scale(value, value, value, 1)
-	screen.DrawImage(solidWhiteImage, op)
+	screen.DrawImage(getSolidWhiteImage(), op)
 }
 
 func (s *GameScene) palmRevengeScreenFlashAlpha(age int) uint8 {
@@ -7574,6 +7582,10 @@ func (s *GameScene) drawGameHUD(screen *ebiten.Image) {
 	for i := 0; i < s.weaponSlotCount(); i++ {
 		s.drawWeaponSlot(screen, i)
 	}
+}
+
+func (s *GameScene) DrawMobileOverlay(screen *ebiten.Image, viewport image.Rectangle) {
+	s.drawMobileSideControls(screen, viewport)
 }
 
 func (s *GameScene) drawScoreTable(screen *ebiten.Image) {
@@ -8261,10 +8273,10 @@ func (s *GameScene) xmV12MotorOffRect() image.Rectangle {
 }
 
 func (s *GameScene) mousePressedInRect(r image.Rectangle) bool {
-	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+	if !primaryPointerPressed() {
 		return false
 	}
-	x, y := ebiten.CursorPosition()
+	x, y := primaryPointerPosition()
 	return image.Pt(x, y).In(r)
 }
 

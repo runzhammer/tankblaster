@@ -199,7 +199,7 @@ func (s *GameScene) handleShopInput() {
 		return
 	}
 
-	x, y := ebiten.CursorPosition()
+	x, y := primaryPointerPosition()
 	cursor := image.Pt(x, y)
 	if s.shopMode != shopModeEntry {
 		s.handleShopListInput(cursor)
@@ -215,7 +215,7 @@ func (s *GameScene) handleShopInput() {
 		s.shopHoverClass = 0
 	}
 
-	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if !primaryPointerJustPressed() {
 		return
 	}
 	if cursor.In(s.shopClassARect()) {
@@ -469,10 +469,13 @@ func (s *GameScene) handleShopListInput(cursor image.Point) {
 	if wheelY < 0 {
 		s.setShopSelectedIndex(minInt(len(items)-1, s.shopSelectedIndex+int(math.Ceil(-wheelY))))
 	}
+	if s.handleMobileShopListScroll(len(items)) {
+		return
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
 		s.buySelectedShopItem()
 	}
-	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if !primaryPointerJustPressed() {
 		return
 	}
 	if cursor.In(s.shopBackRect()) {

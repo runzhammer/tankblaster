@@ -5,17 +5,11 @@ DESKTOP_BIN ?= $(BUILD_DIR)/$(APP_NAME)
 WINDOWS_BIN ?= $(BUILD_DIR)/$(APP_NAME).exe
 WINDOWS_ICON ?= resources/images/tankblaster.ico
 WINDOWS_ICON_SYSO ?= tankblaster_windows.syso
-ANDROID_DIR ?= $(BUILD_DIR)/android
-ANDROID_AAR ?= $(ANDROID_DIR)/$(APP_NAME).aar
-ANDROID_TARGET ?= android
-ANDROID_API ?= 21
-ANDROID_JAVAPKG ?= com.runzhammer.tankblaster
-MOBILE_PKG ?= ./mobile
+ANDROID_SCRIPT ?= ./scripts/build-android.sh
 GO ?= go
-EBITENMOBILE ?= $(GO) run github.com/hajimehoshi/ebiten/v2/cmd/ebitenmobile
 RSRC ?= $(GO) run github.com/akavel/rsrc@latest
 
-.PHONY: all test run build linux windows android android-aar android-env clean help
+.PHONY: all test run build linux windows android android-debug android-release android-env clean help
 
 all: clean linux
 
@@ -27,7 +21,9 @@ help:
 		'  make run          Run the desktop game locally' \
 		'  make build        Build the desktop binary' \
 		'  make windows      Build a Windows EXE with app icon' \
-		'  make android      Build Android AAR via ebitenmobile' \
+		'  make android      Build Android debug APK' \
+		'  make android-debug Build Android debug APK' \
+		'  make android-release Build Android release APK' \
 		'  make android-env  Print required Android build environment' \
 		'  make clean        Remove build artifacts'
 
@@ -49,23 +45,21 @@ windows:
 	GOOS=windows GOARCH=amd64 $(GO) build -o $(WINDOWS_BIN) .
 	rm -f $(WINDOWS_ICON_SYSO)
 
-android: android-aar
+android: android-debug
 
-android-aar:
-	mkdir -p $(ANDROID_DIR)
-	$(EBITENMOBILE) bind \
-		-target $(ANDROID_TARGET) \
-		-androidapi $(ANDROID_API) \
-		-javapkg $(ANDROID_JAVAPKG) \
-		-o $(ANDROID_AAR) \
-		$(MOBILE_PKG)
+android-debug:
+	$(ANDROID_SCRIPT) debug
+
+android-release:
+	$(ANDROID_SCRIPT) release
 
 android-env:
 	@printf 'ANDROID_HOME=%s\n' "$${ANDROID_HOME:-}"
 	@printf 'ANDROID_SDK_ROOT=%s\n' "$${ANDROID_SDK_ROOT:-}"
 	@printf 'ANDROID_NDK_HOME=%s\n' "$${ANDROID_NDK_HOME:-}"
 	@printf 'JAVA_HOME=%s\n' "$${JAVA_HOME:-}"
-	@printf 'Output AAR: %s\n' "$(ANDROID_AAR)"
+	@printf 'Debug APK: dist/tankblaster-debug.apk\n'
+	@printf 'Release APK: dist/tankblaster-release.apk\n'
 
 clean:
 	rm -rf $(BUILD_DIR)

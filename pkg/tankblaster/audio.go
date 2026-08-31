@@ -27,11 +27,22 @@ type soundPlayer struct {
 
 func newSoundPlayer() *soundPlayer {
 	return &soundPlayer{
-		context: audio.NewContext(AudioSampleRate),
 		cache:   make(map[string][]byte),
 		loops:   make(map[string]*audio.Player),
 		repeats: make(map[string]chan struct{}),
 	}
+}
+
+func (p *soundPlayer) ensureContext() *audio.Context {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.context == nil {
+		p.context = audio.NewContext(AudioSampleRate)
+	}
+	return p.context
 }
 
 func (p *soundPlayer) Play(path string) {
@@ -40,7 +51,7 @@ func (p *soundPlayer) Play(path string) {
 
 func (p *soundPlayer) PlayWithOptions(path string, opts soundOptions) {
 	path = strings.TrimSpace(path)
-	if path == "" || p == nil || p.context == nil {
+	if path == "" || p == nil || p.ensureContext() == nil {
 		return
 	}
 	path = selectedSoundPath(path, opts)
@@ -74,7 +85,7 @@ func (p *soundPlayer) EnsureLoop(key, path string) {
 func (p *soundPlayer) EnsureLoopWithOptions(key, path string, opts soundOptions) {
 	key = strings.TrimSpace(key)
 	path = strings.TrimSpace(path)
-	if key == "" || path == "" || p == nil || p.context == nil {
+	if key == "" || path == "" || p == nil || p.ensureContext() == nil {
 		return
 	}
 	path = selectedSoundPath(path, opts)
