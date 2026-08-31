@@ -22,18 +22,24 @@ func (g *GameSceneLoop) platformLayout(outsideWidth, outsideHeight int) (int, in
 		return cfgW, cfgH
 	}
 
-	scale := float64(outsideHeight) / float64(cfgH)
-	gameW := int(float64(cfgW)*scale + 0.5)
-	gameH := outsideHeight
-	if gameW > outsideWidth {
-		scale = float64(outsideWidth) / float64(cfgW)
-		gameW = outsideWidth
-		gameH = int(float64(cfgH)*scale + 0.5)
+	outsideAspect := float64(outsideWidth) / float64(outsideHeight)
+	gameAspect := float64(cfgW) / float64(cfgH)
+	screenW, screenH := cfgW, cfgH
+	if outsideAspect > gameAspect {
+		screenW = int(float64(cfgH)*outsideAspect + 0.5)
+		if screenW < cfgW {
+			screenW = cfgW
+		}
+	} else if outsideAspect < gameAspect {
+		screenH = int(float64(cfgW)/outsideAspect + 0.5)
+		if screenH < cfgH {
+			screenH = cfgH
+		}
 	}
-	x := (outsideWidth - gameW) / 2
-	y := (outsideHeight - gameH) / 2
-	mobileGameViewport = image.Rect(x, y, x+gameW, y+gameH)
-	return outsideWidth, outsideHeight
+	x := (screenW - cfgW) / 2
+	y := (screenH - cfgH) / 2
+	mobileGameViewport = image.Rect(x, y, x+cfgW, y+cfgH)
+	return screenW, screenH
 }
 
 func (g *GameSceneLoop) drawPlatformScene(screen *ebiten.Image) {

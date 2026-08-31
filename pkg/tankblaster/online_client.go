@@ -1,0 +1,167 @@
+package tankblaster
+
+import (
+	"context"
+	"encoding/json"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+	"github.com/runzhammer/gamedemo/pkg/core"
+	"github.com/runzhammer/gamedemo/pkg/protocol"
+)
+
+type onlineIdentity struct {
+	PlayerID    string `json:"player_id"`
+	PlayerToken string `json:"player_token"`
+	DisplayName string `json:"display_name"`
+}
+
+type onlineClient struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	send   chan protocol.Envelope
+	recv   chan protocol.Envelope
+	errs   chan error
+	id     onlineIdentity
+}
+
+func newOnlineClient(displayName string) *onlineClient {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &onlineClient{
+		ctx: ctx, cancel: cancel,
+		send: make(chan protocol.Envelope, 16),
+		recv: make(chan protocol.Envelope, 32),
+		errs: make(chan error, 4),
+		id:   loadOnlineIdentity(),
+	}
+	if displayName != "" {
+		c.id.DisplayName = displayName
+	}
+	go c.run()
+	return c
+}
+
+func (c *onlineClient) Close() {
+	c.cancel()
+}
+
+func (c *onlineClient) Send(typ protocol.MessageType, payload any) {
+	env, err := protocol.Wrap(typ, payload)
+	if err != nil {
+		select {
+		case c.errs <- err:
+		default:
+		}
+		return
+	}
+	select {
+	case c.send <- env:
+	default:
+	}
+}
+
+func (c *onlineClient) run() {
+	conn, _, err := websocket.Dial(c.ctx, core.Config().Online.ServerURL, nil)
+	if err != nil {
+		c.report(err)
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	c.Send(protocol.TypeHello, protocol.Hello{
+		ProtocolVersion: protocol.ProtocolVersion,
+		PlayerID:        c.id.PlayerID,
+		PlayerToken:     c.id.PlayerToken,
+		DisplayName:     c.id.DisplayName,
+	})
+	go func() {
+		for {
+			var env protocol.Envelope
+			if err := wsjson.Read(c.ctx, conn, &env); err != nil {
+				c.report(err)
+				return
+			}
+			select {
+			case c.recv <- env:
+			case <-c.ctx.Done():
+				return
+			}
+		}
+	}()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case env := <-c.send:
+			if err := wsjson.Write(c.ctx, conn, env); err != nil {
+				c.report(err)
+				return
+			}
+		}
+	}
+}
+
+func (c *onlineClient) report(err error) {
+	select {
+	case c.errs <- err:
+	default:
+	}
+}
+
+func loadOnlineIdentity() onlineIdentity {
+	path := onlineIdentityPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return onlineIdentity{DisplayName: texts().GameDefaultPlayerName}
+	}
+	var id onlineIdentity
+	if json.Unmarshal(data, &id) != nil {
+		return onlineIdentity{DisplayName: texts().GameDefaultPlayerName}
+	}
+	return id
+}
+
+func saveOnlineIdentity(id onlineIdentity) {
+	path := onlineIdentityPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(id, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0o600)
+}
+
+func onlineIdentityPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		dir = "."
+	}
+	return filepath.Join(dir, "tankblaster", "online_identity.json")
+}
+
+func inviteTokenFromInput(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if u, err := url.Parse(value); err == nil && u.Path != "" {
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 2 && parts[len(parts)-2] == "join" {
+			return parts[len(parts)-1]
+		}
+	}
+	if strings.HasPrefix(value, "tankblaster://join/") {
+		return strings.TrimPrefix(value, "tankblaster://join/")
+	}
+	return value
+}
+
+func onlineNowString() string {
+	return time.Now().Format("15:04:05")
+}

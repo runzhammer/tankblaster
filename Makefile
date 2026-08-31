@@ -2,6 +2,7 @@ APP_NAME ?= tankblaster
 MODULE ?= github.com/runzhammer/gamedemo
 BUILD_DIR ?= bin
 DESKTOP_BIN ?= $(BUILD_DIR)/$(APP_NAME)
+SERVER_BIN ?= $(BUILD_DIR)/$(APP_NAME)-server
 WINDOWS_BIN ?= $(BUILD_DIR)/$(APP_NAME).exe
 WINDOWS_ICON ?= resources/images/tankblaster.ico
 WINDOWS_ICON_SYSO ?= tankblaster_windows.syso
@@ -9,7 +10,7 @@ ANDROID_SCRIPT ?= ./scripts/build-android.sh
 GO ?= go
 RSRC ?= $(GO) run github.com/akavel/rsrc@latest
 
-.PHONY: all test run build linux windows android android-debug android-release android-env clean help
+.PHONY: all test run run-server build linux server windows android android-debug android-release android-env clean help
 
 all: clean linux
 
@@ -19,7 +20,9 @@ help:
 		'  make              Build a fresh Linux binary' \
 		'  make test         Run Go tests' \
 		'  make run          Run the desktop game locally' \
+		'  make run-server   Run the headless multiplayer server' \
 		'  make build        Build the desktop binary' \
+		'  make server       Build the headless multiplayer server' \
 		'  make windows      Build a Windows EXE with app icon' \
 		'  make android      Build Android debug APK' \
 		'  make android-debug Build Android debug APK' \
@@ -33,11 +36,18 @@ test:
 run:
 	$(GO) run .
 
+run-server:
+	$(GO) run ./cmd/tankblaster-server -config config/server.example.yaml
+
 build: linux
 
 linux:
 	mkdir -p $(BUILD_DIR)
 	$(GO) build -o $(DESKTOP_BIN) .
+
+server:
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 $(GO) build -o $(SERVER_BIN) ./cmd/tankblaster-server
 
 windows:
 	mkdir -p $(BUILD_DIR)
