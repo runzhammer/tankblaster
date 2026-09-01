@@ -9,6 +9,7 @@ var germanStrings = localizedStrings{
 	PlayerSelectionHelpHint:              "Druecken Sie F1 fuer Hilfe",
 	PlayerSelectionOptionsButton:         "Optionen",
 	PlayerSelectionOnlineButton:          "Onlinespiel",
+	PlayerSelectionOnlineUnavailable:     "Aktuell ist kein Server online.",
 	PlayerSelectionStartButton:           "Start >>",
 	PlayerSelectionMinimumPlayers:        "Mindestens zwei Spieler auswaehlen",
 	PlayerSelectionHelpTitle:             "Tank Blaster Hilfe",

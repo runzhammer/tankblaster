@@ -46,6 +46,15 @@ func newOnlineClient(displayName string) *onlineClient {
 	return c
 }
 
+func onlineServerAvailable(ctx context.Context) bool {
+	conn, _, err := websocket.Dial(ctx, core.Config().Online.ServerURL, nil)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+	return true
+}
+
 func (c *onlineClient) Close() {
 	c.cancel()
 }

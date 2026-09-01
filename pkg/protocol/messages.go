@@ -22,6 +22,8 @@ const (
 	TypeLeaveSession         MessageType = "leave_session"
 	TypeReady                MessageType = "ready"
 	TypeFire                 MessageType = "fire"
+	TypeOnlineGameCommand    MessageType = "online_game_command"
+	TypeMatchComplete        MessageType = "match_complete"
 	TypeReconnect            MessageType = "reconnect"
 	TypeGetLeaderboard       MessageType = "get_leaderboard"
 	TypePing                 MessageType = "ping"
@@ -84,6 +86,7 @@ type HelloAck struct {
 
 type CreateSession struct {
 	DisplayName string `json:"display_name,omitempty"`
+	Rounds      int    `json:"rounds,omitempty"`
 }
 
 type JoinSession struct {
@@ -104,6 +107,24 @@ type FireCommand struct {
 	Power   float64 `json:"power"`
 }
 
+type OnlineGameCommand struct {
+	MatchID        string  `json:"match_id"`
+	PlayerID       string  `json:"player_id"`
+	PlayerIndex    int     `json:"player_index"`
+	Kind           string  `json:"kind"`
+	TurnSequence   int     `json:"turn_sequence,omitempty"`
+	WeaponSlot     int     `json:"weapon_slot,omitempty"`
+	ShotStrength   int     `json:"shot_strength,omitempty"`
+	CannonRotation float64 `json:"cannon_rotation,omitempty"`
+	CameraX        float64 `json:"camera_x,omitempty"`
+	XMV12Mode      bool    `json:"xm_v12_mode,omitempty"`
+	XMV12Direction int     `json:"xm_v12_direction,omitempty"`
+	XMV12MotorOff  bool    `json:"xm_v12_motor_off,omitempty"`
+	ShopMode       int     `json:"shop_mode,omitempty"`
+	ShopHoverClass int     `json:"shop_hover_class,omitempty"`
+	ShopListIndex  int     `json:"shop_list_index,omitempty"`
+}
+
 type Reconnect struct {
 	MatchID string `json:"match_id"`
 }
@@ -112,6 +133,7 @@ type SessionSummary struct {
 	ID            string    `json:"id"`
 	Type          string    `json:"type"`
 	HostName      string    `json:"host_name"`
+	Rounds        int       `json:"rounds"`
 	PlayerCount   int       `json:"player_count"`
 	MaxPlayers    int       `json:"max_players"`
 	AverageRating int       `json:"average_rating"`
@@ -150,6 +172,11 @@ type StateUpdate struct {
 type ShotResult struct {
 	Result gamecore.ShotResult `json:"result"`
 	State  gamecore.MatchState `json:"state"`
+}
+
+type MatchComplete struct {
+	MatchID string         `json:"match_id"`
+	Scores  map[string]int `json:"scores"`
 }
 
 type LeaderboardRequest struct {

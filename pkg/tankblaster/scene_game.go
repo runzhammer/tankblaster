@@ -22,6 +22,7 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
 	"github.com/runzhammer/gamedemo/pkg/models"
+	"github.com/runzhammer/gamedemo/pkg/protocol"
 	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
 	"github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
 	weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
@@ -718,6 +719,7 @@ type GameScene struct {
 	shopClassBStock      []int
 	shopClassBItems      []int
 	shopComputerPlan     *shopComputerPlan
+	shopAwaitingOnline   bool
 	shopTouchScroll      shopTouchScrollState
 	scrollBarDragging    bool
 	zeroPowerStartDelay  int
@@ -735,11 +737,15 @@ type GameScene struct {
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
 	// loader := game.context.Loader()
+	rngSeed := time.Now().UnixNano()
+	if game.online != nil && game.online.state.Seed != 0 {
+		rngSeed = game.online.state.Seed
+	}
 
 	s := &GameScene{
 		g:                 game,
 		phase:             phaseBattle,
-		rng:               rand.New(rand.NewSource(time.Now().UnixNano())),
+		rng:               rand.New(rand.NewSource(rngSeed)),
 		activePlayerIndex: -1,
 		roundNumber:       1,
 		showPlayerNames:   false,
@@ -1808,6 +1814,7 @@ func (g *GameScene) Movement(source *engine.Sprite) {
 
 func (s *GameScene) Update() error {
 	s.time += 1
+	s.consumeOnlineGameCommands()
 	if s.phase != phaseShop {
 		if err := s.handleGameDialogInput(); err != nil {
 			return err
@@ -2205,9 +2212,13 @@ func (s *GameScene) Draw(screen *ebiten.Image) {
 }
 
 func (s *GameScene) handleCameraScrollControls() {
+	if s.g.online != nil && !s.onlineCanControlActivePlayer() {
+		return
+	}
 	if !s.scrollBarAvailable() {
 		return
 	}
+	previousCameraX := s.cameraX
 	if primaryPointerJustPressed() {
 		x, y := primaryPointerPosition()
 		s.scrollBarDragging = image.Pt(x, y).In(debugScrollBarRect())
@@ -2229,6 +2240,9 @@ func (s *GameScene) handleCameraScrollControls() {
 	if ebiten.IsKeyPressed(ebiten.KeyArrowRight) {
 		maxCameraX := math.Max(0, s.worldWidth-core.Config().Screen.Width)
 		s.cameraX = math.Min(maxCameraX, s.cameraX+scrollOMatKeyboardStep)
+	}
+	if s.cameraX != previousCameraX {
+		s.syncOnlineAim(s.activeTank())
 	}
 }
 
@@ -2255,11 +2269,20 @@ func (s *GameScene) handleGameDialogInput() error {
 		}
 		if primaryPointerJustPressed() {
 			x, y := primaryPointerPosition()
-			if s.gameHelpOpen && image.Pt(x, y).In(gameHelpOKRect()) {
+			p := image.Pt(x, y)
+			if s.gameHelpOpen && p.In(dialogCloseRect(gameHelpRect())) {
+				s.pressedDialogButton = "game_help_close"
+				return nil
+			}
+			if s.playerInfoOpen && p.In(dialogCloseRect(playerInfoRect())) {
+				s.pressedDialogButton = "player_info_close"
+				return nil
+			}
+			if s.gameHelpOpen && p.In(gameHelpOKRect()) {
 				s.pressedDialogButton = "game_help_ok"
 				return nil
 			}
-			if s.playerInfoOpen && image.Pt(x, y).In(playerInfoOKRect()) {
+			if s.playerInfoOpen && p.In(playerInfoOKRect()) {
 				s.pressedDialogButton = "player_info_ok"
 				return nil
 			}
@@ -2273,7 +2296,13 @@ func (s *GameScene) handleGameDialogInput() error {
 			case button == "game_help_ok" && s.gameHelpOpen && p.In(gameHelpOKRect()):
 				s.gameHelpOpen = false
 				return nil
+			case button == "game_help_close" && s.gameHelpOpen && p.In(dialogCloseRect(gameHelpRect())):
+				s.gameHelpOpen = false
+				return nil
 			case button == "player_info_ok" && s.playerInfoOpen && p.In(playerInfoOKRect()):
+				s.playerInfoOpen = false
+				return nil
+			case button == "player_info_close" && s.playerInfoOpen && p.In(dialogCloseRect(playerInfoRect())):
 				s.playerInfoOpen = false
 				return nil
 			}
@@ -2323,10 +2352,13 @@ func (s *GameScene) handleConfirmDialogInput() error {
 	}
 	if primaryPointerJustPressed() {
 		x, y := primaryPointerPosition()
+		p := image.Pt(x, y)
 		switch {
-		case image.Pt(x, y).In(confirmDialogYesRect()):
+		case p.In(dialogCloseRect(confirmDialogRect())):
+			s.pressedDialogButton = "confirm_close"
+		case p.In(confirmDialogYesRect()):
 			s.pressedDialogButton = "confirm_yes"
-		case image.Pt(x, y).In(confirmDialogNoRect()):
+		case p.In(confirmDialogNoRect()):
 			s.pressedDialogButton = "confirm_no"
 		}
 		return nil
@@ -2340,6 +2372,8 @@ func (s *GameScene) handleConfirmDialogInput() error {
 		case button == "confirm_yes" && p.In(confirmDialogYesRect()):
 			return s.confirmDialogYes()
 		case button == "confirm_no" && p.In(confirmDialogNoRect()):
+			s.closeConfirmDialog()
+		case button == "confirm_close" && p.In(dialogCloseRect(confirmDialogRect())):
 			s.closeConfirmDialog()
 		}
 	}
@@ -2478,6 +2512,9 @@ func (s *GameScene) handleBattleInput() {
 	if tank.player.Kind == PlayerComputer {
 		return
 	}
+	if !s.onlineCanControlPlayer(tank.playerIndex) {
+		return
+	}
 
 	strengthStep := 1
 	if shiftPressed() {
@@ -2511,9 +2548,7 @@ func (s *GameScene) handleBattleInput() {
 		s.toggleScrollOMat(tank)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyM) && s.playerHasXMV12(tank.playerIndex) && s.dieselForPlayer(tank.playerIndex) > 0 {
-		s.playEventSound(soundEventXMV12Ignition)
-		s.xmV12DriveMode = true
-		s.xmV12DriveDirection = 0
+		s.requestXMV12Start(tank)
 		return
 	}
 
@@ -2528,7 +2563,7 @@ func (s *GameScene) handleBattleInput() {
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
-		s.fireActiveWeapon()
+		s.requestFireActiveWeapon()
 	}
 }
 
@@ -2548,11 +2583,9 @@ func (s *GameScene) handleBattleHUDButtons(tank *battleTank, strengthStep int) {
 	case cursor.In(s.hudAnglePlusRect()):
 		s.adjustTankCannon(tank, s.humanCannonStep())
 	case cursor.In(s.hudFireButtonRect()):
-		s.fireActiveWeapon()
+		s.requestFireActiveWeapon()
 	case cursor.In(s.hudIgnitionRect()) && s.playerHasXMV12(tank.playerIndex) && s.dieselForPlayer(tank.playerIndex) > 0:
-		s.playEventSound(soundEventXMV12Ignition)
-		s.xmV12DriveMode = true
-		s.xmV12DriveDirection = 0
+		s.requestXMV12Start(tank)
 	}
 }
 
@@ -2565,6 +2598,7 @@ func (s *GameScene) adjustShotStrength(tank *battleTank, delta int) {
 	if tank.shotStrength == previous {
 		return
 	}
+	defer s.syncOnlineAim(tank)
 	if delta > 0 {
 		s.playEventSound(soundEventCannonPowerUp)
 		return
@@ -2588,7 +2622,11 @@ func (s *GameScene) handleComputerTurn() {
 		return
 	}
 	if tank.computerPlan == nil {
-		decision := computerplayers.Decide(s.effectiveComputerID(tank), s.computerPlayerState(tank), s.rng)
+		decisionRNG := s.rng
+		if s.g.online != nil {
+			decisionRNG = rand.New(rand.NewSource(s.onlineComputerDecisionSeed(tank)))
+		}
+		decision := computerplayers.Decide(s.effectiveComputerID(tank), s.computerPlayerState(tank), decisionRNG)
 		tank.computerPlan = &computerTurnPlan{
 			phase:          computerTurnWaitCamera,
 			decision:       decision,
@@ -2651,7 +2689,7 @@ func (s *GameScene) updateComputerTurnPlan(tank *battleTank) {
 		if plan.delay > 0 {
 			return
 		}
-		s.fireActiveWeapon()
+		s.requestFireActiveWeapon()
 	}
 }
 
@@ -2664,8 +2702,10 @@ func (s *GameScene) updateXMV12DriveMode() {
 		return
 	}
 	s.updateXMV12LoopSounds(tank)
-	s.handleXMV12HUDInput(tank)
-	s.handleMobileXMV12SideControls(tank)
+	if s.onlineCanControlPlayer(tank.playerIndex) {
+		s.handleXMV12HUDInput(tank)
+		s.handleMobileXMV12SideControls(tank)
+	}
 	if s.xmV12EngineOffDelay > 0 {
 		s.clearXMV12IdleVibration(tank)
 		s.stopXMV12LoopSounds()
@@ -2822,16 +2862,13 @@ func (s *GameScene) handleXMV12HUDInput(tank *battleTank) {
 	cursor := image.Pt(x, y)
 	switch {
 	case cursor.In(s.xmV12LeftButtonRect()):
-		s.xmV12DriveDirection = -1
+		s.requestXMV12Direction(tank, -1)
 	case cursor.In(s.xmV12StopButtonRect()):
-		s.xmV12DriveDirection = 0
+		s.requestXMV12Direction(tank, 0)
 	case cursor.In(s.xmV12RightButtonRect()):
-		s.xmV12DriveDirection = 1
+		s.requestXMV12Direction(tank, 1)
 	case cursor.In(s.xmV12MotorOffRect()):
-		s.playEventSound(soundEventXMV12MotorOff)
-		s.stopXMV12LoopSounds()
-		s.xmV12DriveDirection = 0
-		s.xmV12EngineOffDelay = xmV12EngineOffDelayFrames
+		s.requestXMV12MotorOff(tank)
 	}
 }
 
@@ -2959,6 +2996,7 @@ func (s *GameScene) adjustComputerCannonAngle(tank *battleTank, targetAngle floa
 			leftLimit := tank.body.Rot - math.Pi
 			tank.cannon.Rot = leftLimit + engine.DegToRad(targetAngle)
 			s.clampCannonRotationToTank(tank.cannon, tank.body)
+			s.syncOnlineAim(tank)
 			return false
 		}
 		if delta < 0 {
@@ -2966,6 +3004,7 @@ func (s *GameScene) adjustComputerCannonAngle(tank *battleTank, targetAngle floa
 		}
 		tank.cannon.Rot += engine.DegToRad(step)
 		s.clampCannonRotationToTank(tank.cannon, tank.body)
+		s.syncOnlineAim(tank)
 		return true
 	}
 	return false
@@ -3104,6 +3143,7 @@ func (s *GameScene) setSelectedWeapon(tank *battleTank, slot int) {
 	}
 	tank.selectedWeapon = slot
 	s.playEventSound(soundEventWeaponSelect)
+	s.syncOnlineAim(tank)
 }
 
 func (s *GameScene) invertCannonAngle(tank *battleTank) {
@@ -3114,6 +3154,7 @@ func (s *GameScene) invertCannonAngle(tank *battleTank) {
 	leftLimit := tank.body.Rot - math.Pi
 	tank.cannon.Rot = leftLimit + engine.DegToRad(180-current)
 	s.clampCannonRotationToTank(tank.cannon, tank.body)
+	s.syncOnlineAim(tank)
 }
 
 func (s *GameScene) toggleScrollOMat(tank *battleTank) {
@@ -3128,9 +3169,11 @@ func (s *GameScene) toggleScrollOMat(tank *battleTank) {
 		tank.selectedWeapon = 0
 		s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
 		s.cameraGoalY = 0
+		s.syncOnlineAim(tank)
 		return
 	}
 	tank.selectedWeapon = scrollSlot
+	s.syncOnlineAim(tank)
 }
 
 func (s *GameScene) consumeSelectedWeaponAmmo(tank *battleTank) (bool, bool) {
@@ -3232,6 +3275,26 @@ func (s *GameScene) fireActiveWeapon() {
 		})
 	}
 	s.setProjectiles(projectiles)
+}
+
+func (s *GameScene) requestFireActiveWeapon() {
+	if s.g.online == nil {
+		s.fireActiveWeapon()
+		return
+	}
+	tank := s.activeTank()
+	if tank == nil || tank.cannon == nil || !s.onlineCanControlPlayer(tank.playerIndex) {
+		return
+	}
+	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
+		Kind:           "fire",
+		PlayerIndex:    tank.playerIndex,
+		TurnSequence:   s.g.online.turnSequence,
+		WeaponSlot:     tank.selectedWeapon,
+		ShotStrength:   tank.shotStrength,
+		CannonRotation: tank.cannon.Rot,
+		CameraX:        s.cameraX,
+	})
 }
 
 func (s *GameScene) mfsEffectiveWeapon(playerIndex int, fallback weaponspkg.Weapon) weaponspkg.Weapon {
@@ -4029,6 +4092,7 @@ func (s *GameScene) advanceActivePlayer() {
 	if len(s.tanks) == 0 {
 		return
 	}
+	previousPlayerIndex := s.activePlayerIndex
 	s.clearXMV12IdleVibration(s.activeTank())
 	if s.endRoundIfOnlyOneTankRemains() {
 		return
@@ -4053,6 +4117,7 @@ func (s *GameScene) advanceActivePlayer() {
 	s.clampActiveShotStrength()
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
 	s.cameraGoalY = 0
+	s.syncOnlineTurn(previousPlayerIndex)
 }
 
 func (s *GameScene) nextActivePlayerIndex() int {
@@ -7711,6 +7776,10 @@ func confirmDialogNoRect() image.Rectangle {
 	return image.Rect(r.Max.X-84, r.Max.Y-44, r.Max.X-14, r.Max.Y-20)
 }
 
+func dialogCloseRect(r image.Rectangle) image.Rectangle {
+	return image.Rect(r.Max.X-30, r.Min.Y+4, r.Max.X-8, r.Min.Y+24)
+}
+
 func centerDialogRect(w, h int) image.Rectangle {
 	screen := core.Config().Screen
 	return image.Rect(0, 0, w, h).Add(image.Pt((int(screen.Width)-w)/2, (int(screen.Height)-h)/2))
@@ -7982,6 +8051,7 @@ func (s *GameScene) drawRoundTransitionBanner(screen *ebiten.Image) {
 
 func (s *GameScene) updateRoundTransition() error {
 	if s.roundSeriesComplete {
+		s.reportOnlineMatchComplete()
 		return s.g.SetNewScene(NewHallOfFameScene(s.hallOfFameScores()))
 	}
 	s.roundTransitionDelay--
@@ -7991,6 +8061,7 @@ func (s *GameScene) updateRoundTransition() error {
 	s.roundTransitionDelay = 0
 	if s.roundNumber >= maxInt(1, s.g.rounds) {
 		s.roundSeriesComplete = true
+		s.reportOnlineMatchComplete()
 		return s.g.SetNewScene(NewHallOfFameScene(s.hallOfFameScores()))
 	}
 	s.roundNumber++
@@ -8394,8 +8465,29 @@ func (s *GameScene) chooseStartingPlayerAfterLanding() {
 	if len(living) == 0 {
 		return
 	}
+	if s.g.online != nil {
+		if index := s.g.online.state.CurrentPlayerIndex; index >= 0 && index < len(s.tanks) && s.tankCanAct(s.tanks[index]) {
+			s.activePlayerIndex = index
+			s.resetComputerTurnPlans()
+			return
+		}
+	}
 	s.activePlayerIndex = living[s.rng.Intn(len(living))]
 	s.resetComputerTurnPlans()
+}
+
+func (s *GameScene) onlineCanControlActivePlayer() bool {
+	return s.onlineCanControlPlayer(s.activePlayerIndex)
+}
+
+func (s *GameScene) onlineCanControlPlayer(playerIndex int) bool {
+	if s.g.online == nil {
+		return true
+	}
+	if playerIndex < 0 || playerIndex >= len(s.g.online.state.Players) {
+		return false
+	}
+	return s.g.online.state.Players[playerIndex].ID == s.g.online.playerID
 }
 
 func (s *GameScene) allTanksLanded() bool {
@@ -8549,6 +8641,7 @@ func (s *GameScene) adjustTankCannon(tank *battleTank, degrees float64) {
 	tank.cannon.Rot += engine.DegToRad(degrees)
 	s.wrapCannonRotationToTank(tank.cannon, tank.body)
 	s.updateXMV12FacingFromCannon(tank)
+	s.syncOnlineAim(tank)
 }
 
 func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
@@ -8560,6 +8653,10 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 		return
 	}
 	if tank.player.Kind == PlayerComputer {
+		s.clampCannonRotationToTank(source, tank.body)
+		return
+	}
+	if !s.onlineCanControlPlayer(tank.playerIndex) {
 		s.clampCannonRotationToTank(source, tank.body)
 		return
 	}
@@ -8575,6 +8672,7 @@ func (s *GameScene) behaviorRotateActiveCannon(source *engine.Sprite) {
 		s.clampCannonRotationToTank(source, tank.body)
 	}
 	s.updateXMV12FacingFromCannon(tank)
+	s.syncOnlineAim(tank)
 }
 
 func (s *GameScene) resetComputerTurnPlans() {

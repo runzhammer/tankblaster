@@ -25,6 +25,20 @@ func copyTextToClipboard(value string) error {
 	return err
 }
 
+func readClipboardText() (string, error) {
+	clipboardInit.once.Do(func() {
+		clipboardInit.err = clipboard.Init()
+	})
+	if clipboardInit.err != nil {
+		return "", clipboardInit.err
+	}
+	data, err := clipboard.Read(context.Background(), clipboard.FmtText)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 func PendingClipboardText() string {
 	return ""
 }

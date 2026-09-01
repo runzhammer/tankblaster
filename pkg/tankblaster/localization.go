@@ -16,6 +16,7 @@ type localizedStrings struct {
 	PlayerSelectionHelpHint              string
 	PlayerSelectionOptionsButton         string
 	PlayerSelectionOnlineButton          string
+	PlayerSelectionOnlineUnavailable     string
 	PlayerSelectionStartButton           string
 	PlayerSelectionMinimumPlayers        string
 	PlayerSelectionHelpTitle             string

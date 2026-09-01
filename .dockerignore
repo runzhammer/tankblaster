@@ -1,0 +1,8 @@
+.git
+.live-test
+bin
+dist
+android/.gradle
+android/app/build
+*.db
+*.swp

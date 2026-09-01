@@ -8,6 +8,7 @@ import (
 
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
+	"github.com/runzhammer/gamedemo/pkg/gamecore"
 	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
 )
 
@@ -57,8 +58,19 @@ type GameLoop struct {
 	rounds  int
 	players []PlayerConfig
 	options gameOptions
+	online  *onlineGameRuntime
 
 	// bgm *audio.Player
+}
+
+type onlineGameRuntime struct {
+	client            *onlineClient
+	playerID          string
+	state             gamecore.MatchState
+	autoPlay          bool
+	applyingRemoteCmd bool
+	turnSequence      int
+	matchResultSent   bool
 }
 
 type gameOptions struct {
@@ -192,6 +204,8 @@ func debugStartSceneFactory(scene string) func(*GameLoop) (core.Scene, error) {
 		return NewDebugShopScene
 	case "score", "scores", "hall_of_fame", "hall-of-fame", "bestenliste":
 		return NewDebugHallOfFameScene
+	case "online", "onlinespiel", "online_game":
+		return NewOnlineScene
 	default:
 		return NewGameScene
 	}

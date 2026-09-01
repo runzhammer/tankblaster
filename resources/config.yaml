@@ -97,7 +97,7 @@ gameplay:
       points: 1
       credit_per_remaining_energy: 15
 debug:
-  enabled: true
+  enabled: false
   start_scene: game # game / shop / score
   start_shop: false
   # Optional im Debug-Modus: leere/fehlende Liste erlaubt alle Todesanimationen.
@@ -115,4 +115,5 @@ debug:
     rounds: 10
     players: *computer_players
 online:
+  enabled: true
   server_url: "ws://127.0.0.1:8765/game"

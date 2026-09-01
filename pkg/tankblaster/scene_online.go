@@ -3,15 +3,22 @@ package tankblaster
 import (
 	"image"
 	"image/color"
+	"math"
+	"math/rand"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/runzhammer/gamedemo/pkg/core"
+	"github.com/runzhammer/gamedemo/pkg/gamecore"
 	"github.com/runzhammer/gamedemo/pkg/protocol"
 	"golang.org/x/image/colornames"
 )
+
+const onlineJoinInputMaxRunes = 512
 
 type onlineScene struct {
 	g           *GameLoop
@@ -23,9 +30,18 @@ type onlineScene struct {
 	sessionID   string
 	matchID     string
 	inviteURL   string
+	rounds      int
 	sessions    []protocol.SessionSummary
 	leaders     []protocol.LeaderboardEntry
 	inputRunes  []rune
+	matchState  gamecore.MatchState
+	autoJoin    bool
+	autoPlay    bool
+	autoQueued  bool
+	autoTurnKey string
+	autoFireAt  int
+	readySent   map[string]bool
+	rng         *rand.Rand
 	tick        int
 }
 
@@ -34,10 +50,20 @@ func NewOnlineScene(game *GameLoop) (core.Scene, error) {
 	if id.DisplayName == "" {
 		id.DisplayName = texts().GameDefaultPlayerName
 	}
+	if value := strings.TrimSpace(os.Getenv("TANKBLASTER_ONLINE_DISPLAY_NAME")); value != "" {
+		id.DisplayName = truncateRunes(value, 16)
+	}
+	autoJoin := onlineEnvBool("TANKBLASTER_ONLINE_AUTO_JOIN")
+	autoPlay := onlineEnvBool("TANKBLASTER_ONLINE_AUTO_PLAY")
 	s := &onlineScene{
 		g:           game,
 		displayName: id.DisplayName,
 		status:      texts().OnlineConnecting,
+		rounds:      normalizedOnlineRounds(game.rounds),
+		autoJoin:    autoJoin || autoPlay,
+		autoPlay:    autoPlay,
+		readySent:   map[string]bool{},
+		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	s.client = newOnlineClient(s.displayName)
 	return s, nil
@@ -47,6 +73,12 @@ func (s *onlineScene) Update() error {
 	defer s.syncOnlineTextInputActive()
 	s.tick++
 	s.consumeNetwork()
+	s.updateAutopilot()
+	if s.matchID != "" && s.matchState.Status == gamecore.MatchInGame {
+		return s.g.SetNewScene(func(game *GameLoop) (core.Scene, error) {
+			return NewOnlineGameScene(game, s.client, s.matchState, s.autoPlay)
+		})
+	}
 	s.handleKeyboard()
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		return s.back()
@@ -64,7 +96,11 @@ func (s *onlineScene) Update() error {
 	}
 	if p.In(joinInputRect()) {
 		s.finishDisplayNameInput()
-		s.copyJoinInput()
+		s.pasteJoinInput()
+		return nil
+	}
+	if s.handleRoundsClick(p) {
+		s.finishDisplayNameInput()
 		return nil
 	}
 	if s.inviteURL != "" && p.In(inviteLinkRect()) {
@@ -102,6 +138,7 @@ func (s *onlineScene) Draw(screen *ebiten.Image) {
 	}
 	drawTextFace(screen, nameText, uiTextFace, onlineNameInputRect().Min.X+12, onlineNameInputRect().Min.Y+24, colornames.Black)
 	drawTextFace(screen, core.Config().Online.ServerURL, dialogTextFace, 446, 111, colornames.Silver)
+	s.drawRounds(screen)
 
 	drawFrame(screen, image.Rect(72, 158, 952, 214), color.RGBA{R: 39, G: 45, B: 52, A: 255}, colornames.Gray)
 	drawTextFace(screen, s.status, uiTextFace, 92, 192, colornames.White)
@@ -136,11 +173,11 @@ func (s *onlineScene) buttons() []onlineButton {
 			return nil
 		}},
 		{t.OnlineCreatePublicSession, image.Rect(244, 232, 486, 264), func() error {
-			s.client.Send(protocol.TypeCreatePublicSession, protocol.CreateSession{DisplayName: s.displayName})
+			s.client.Send(protocol.TypeCreatePublicSession, protocol.CreateSession{DisplayName: s.displayName, Rounds: s.rounds})
 			return nil
 		}},
 		{t.OnlineCreatePrivateSession, image.Rect(502, 232, 746, 264), func() error {
-			s.client.Send(protocol.TypeCreatePrivateSession, protocol.CreateSession{DisplayName: s.displayName})
+			s.client.Send(protocol.TypeCreatePrivateSession, protocol.CreateSession{DisplayName: s.displayName, Rounds: s.rounds})
 			return nil
 		}},
 		{t.OnlineOpenSessions, image.Rect(762, 232, 952, 264), func() error {
@@ -200,6 +237,7 @@ func (s *onlineScene) handleMessage(env protocol.Envelope) {
 			s.client.id.DisplayName = msg.DisplayName
 			saveOnlineIdentity(s.client.id)
 			s.status = t.OnlineConnected + " - Rating " + strconv.Itoa(msg.Rating)
+			s.updateAutopilot()
 		}
 	case protocol.TypeMatchmakingQueued:
 		s.status = t.OnlineQueued
@@ -208,6 +246,7 @@ func (s *onlineScene) handleMessage(env protocol.Envelope) {
 		if err == nil {
 			s.sessionID = msg.Session.ID
 			s.status = t.OnlineSessionCreated + ": " + msg.Session.ID
+			s.ensureSessionReady(msg.Session)
 		}
 	case protocol.TypeInviteCreated:
 		msg, err := protocol.Decode[protocol.InviteCreated](env)
@@ -226,6 +265,7 @@ func (s *onlineScene) handleMessage(env protocol.Envelope) {
 		if err == nil {
 			s.sessionID = msg.Session.ID
 			s.status = t.OnlineSessionJoined + ": " + msg.Session.ID
+			s.ensureSessionReady(msg.Session)
 		}
 	case protocol.TypeMatchFound:
 		msg, err := protocol.Decode[protocol.MatchFound](env)
@@ -235,7 +275,16 @@ func (s *onlineScene) handleMessage(env protocol.Envelope) {
 			s.status = t.OnlineMatchStarted + ": " + msg.MatchID
 		}
 	case protocol.TypeGameStart, protocol.TypeTurnStart, protocol.TypeStateUpdate:
+		msg, err := protocol.Decode[protocol.StateUpdate](env)
+		if err == nil {
+			s.matchState = msg.State
+		}
 		s.status = t.OnlineMatchStarted
+	case protocol.TypeShotResult:
+		msg, err := protocol.Decode[protocol.ShotResult](env)
+		if err == nil {
+			s.matchState = msg.State
+		}
 	case protocol.TypeLeaderboard:
 		msg, err := protocol.Decode[protocol.Leaderboard](env)
 		if err == nil {
@@ -250,6 +299,126 @@ func (s *onlineScene) handleMessage(env protocol.Envelope) {
 	}
 }
 
+func (s *onlineScene) ensureSessionReady(sess protocol.SessionSummary) {
+	if sess.ID == "" || s.readySent[sess.ID] {
+		return
+	}
+	s.readySent[sess.ID] = true
+	s.client.Send(protocol.TypeReady, protocol.Ready{SessionID: sess.ID, Ready: true})
+}
+
+func (s *onlineScene) handleRoundsClick(p image.Point) bool {
+	if p.In(onlineRoundsMinusRect()) {
+		if s.rounds > 1 {
+			s.rounds--
+		}
+		return true
+	}
+	if p.In(onlineRoundsPlusRect()) {
+		if s.rounds < 99 {
+			s.rounds++
+		}
+		return true
+	}
+	return false
+}
+
+func (s *onlineScene) drawRounds(screen *ebiten.Image) {
+	t := texts()
+	drawFrame(screen, onlineRoundsRect(), colornames.White, colornames.Black)
+	drawTextFace(screen, t.PlayerSelectionRounds+": "+strconv.Itoa(s.rounds), dialogTextFace, onlineRoundsRect().Min.X+10, onlineRoundsRect().Min.Y+22, colornames.Black)
+	drawButton(screen, onlineRoundsMinusRect(), "-")
+	drawButton(screen, onlineRoundsPlusRect(), "+")
+}
+
+func (s *onlineScene) updateAutopilot() {
+	if s.client == nil {
+		return
+	}
+	if s.autoJoin && !s.autoQueued && s.client.id.PlayerID != "" {
+		s.autoQueued = true
+		s.client.Send(protocol.TypeQuickMatch, struct{}{})
+	}
+	if !s.autoPlay || s.matchID == "" || s.matchState.Status != gamecore.MatchInGame {
+		return
+	}
+	if s.tick < s.autoFireAt || s.matchState.CurrentPlayerIndex < 0 || s.matchState.CurrentPlayerIndex >= len(s.matchState.Players) {
+		return
+	}
+	current := s.matchState.Players[s.matchState.CurrentPlayerIndex]
+	if current.ID != s.client.id.PlayerID {
+		return
+	}
+	turnKey := s.matchState.MatchID + ":" + strconv.Itoa(s.matchState.Round) + ":" + strconv.Itoa(s.matchState.CurrentPlayerIndex) + ":" + strconv.Itoa(len(s.matchState.Terrain))
+	if turnKey == s.autoTurnKey {
+		return
+	}
+	s.autoTurnKey = turnKey
+	s.autoFireAt = s.tick + 45 + s.rng.Intn(45)
+	cmd := s.autoFireCommand()
+	s.client.Send(protocol.TypeFire, cmd)
+}
+
+func (s *onlineScene) autoFireCommand() protocol.FireCommand {
+	angle := 45.0 + s.rng.Float64()*90
+	power := 55.0 + s.rng.Float64()*35
+	shooter, target := s.autoShooterAndTarget()
+	if shooter != nil && target != nil {
+		if target.X >= shooter.X {
+			angle = 0
+		} else {
+			angle = 180
+		}
+		dx := math.Abs(target.X-shooter.X) - math.Abs(float64(s.matchState.Wind))*0.8
+		power = math.Max(25, math.Min(100, dx/7))
+		if power > 82 {
+			power = 82 + s.rng.Float64()*18
+		}
+	}
+	return protocol.FireCommand{
+		MatchID: s.matchID,
+		Weapon:  "atom_bomb",
+		Angle:   angle,
+		Power:   power,
+	}
+}
+
+func (s *onlineScene) autoShooterAndTarget() (*gamecore.TankState, *gamecore.TankState) {
+	var shooter *gamecore.TankState
+	for i := range s.matchState.Tanks {
+		if s.matchState.Tanks[i].PlayerID == s.client.id.PlayerID {
+			shooter = &s.matchState.Tanks[i]
+			break
+		}
+	}
+	if shooter == nil {
+		return nil, nil
+	}
+	var best *gamecore.TankState
+	bestDistance := math.MaxFloat64
+	for i := range s.matchState.Tanks {
+		tank := &s.matchState.Tanks[i]
+		if !tank.Alive || tank.PlayerID == shooter.PlayerID {
+			continue
+		}
+		distance := math.Abs(tank.X - shooter.X)
+		if distance < bestDistance {
+			best = tank
+			bestDistance = distance
+		}
+	}
+	return shooter, best
+}
+
+func onlineEnvBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *onlineScene) handleKeyboard() {
 	s.inputRunes = ebiten.AppendInputChars(s.inputRunes[:0])
 	if s.nameFocused {
@@ -257,11 +426,15 @@ func (s *onlineScene) handleKeyboard() {
 		return
 	}
 	drainPlayerNameInputCommands()
+	if inpututil.IsKeyJustPressed(ebiten.KeyV) && (ebiten.IsKeyPressed(ebiten.KeyControl) || ebiten.IsKeyPressed(ebiten.KeyMeta)) {
+		s.pasteJoinInput()
+		return
+	}
 	if len(s.inputRunes) > 0 {
 		var b strings.Builder
 		b.WriteString(s.joinInput)
 		for _, r := range s.inputRunes {
-			if len([]rune(b.String())) < 96 {
+			if len([]rune(b.String())) < onlineJoinInputMaxRunes {
 				b.WriteRune(r)
 			}
 		}
@@ -279,6 +452,20 @@ func (s *onlineScene) handleKeyboard() {
 			s.client.Send(protocol.TypeJoinSession, protocol.JoinSession{JoinCode: token, InviteToken: token})
 		}
 	}
+}
+
+func (s *onlineScene) pasteJoinInput() {
+	value, err := readClipboardText()
+	if err != nil {
+		s.status = texts().OnlineClipboardUnavailable + ": " + err.Error()
+		return
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		s.copyJoinInput()
+		return
+	}
+	s.joinInput = truncateRunes(value, onlineJoinInputMaxRunes)
 }
 
 func (s *onlineScene) handleDisplayNameKeyboard() {
@@ -386,7 +573,7 @@ func (s *onlineScene) drawSessions(screen *ebiten.Image) {
 		}
 		r := image.Rect(100, 410+i*42, 924, 444+i*42)
 		drawFrame(screen, r, color.RGBA{R: 235, G: 240, B: 245, A: 255}, colornames.Black)
-		line := sess.HostName + "    " + strconv.Itoa(sess.PlayerCount) + " / " + strconv.Itoa(sess.MaxPlayers) + "    Rating " + strconv.Itoa(sess.AverageRating)
+		line := sess.HostName + "    " + strconv.Itoa(sess.PlayerCount) + " / " + strconv.Itoa(sess.MaxPlayers) + "    " + t.PlayerSelectionRounds + ": " + strconv.Itoa(normalizedOnlineRounds(sess.Rounds)) + "    Rating " + strconv.Itoa(sess.AverageRating)
 		drawTextFace(screen, line, dialogTextFace, r.Min.X+12, r.Min.Y+22, colornames.Black)
 	}
 }
@@ -413,6 +600,18 @@ func joinInputRect() image.Rectangle {
 
 func onlineNameInputRect() image.Rectangle {
 	return image.Rect(180, 84, 420, 118)
+}
+
+func onlineRoundsRect() image.Rectangle {
+	return image.Rect(72, 124, 294, 150)
+}
+
+func onlineRoundsMinusRect() image.Rectangle {
+	return image.Rect(306, 121, 338, 153)
+}
+
+func onlineRoundsPlusRect() image.Rectangle {
+	return image.Rect(346, 121, 378, 153)
 }
 
 func inviteLinkRect() image.Rectangle {
@@ -442,4 +641,14 @@ func trimLastRune(value string) string {
 		return value
 	}
 	return string(runes[:len(runes)-1])
+}
+
+func normalizedOnlineRounds(rounds int) int {
+	if rounds < 1 {
+		return 1
+	}
+	if rounds > 99 {
+		return 99
+	}
+	return rounds
 }
