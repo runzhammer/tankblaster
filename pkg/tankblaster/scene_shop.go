@@ -62,7 +62,7 @@ type shopInventory struct {
 	classA            []int
 	classB            []int
 	mfsBoosterCharges int
-	energyShield      float64
+	energyShield      int
 	hasXMV12          bool
 	diesel            float64
 }
@@ -396,9 +396,6 @@ func (s *GameScene) affordableComputerShopChoices(playerIndex int, mode shopMode
 		if s.isScrollOMatItem(itemIndex) && s.shopItemCountForPlayer(playerIndex, itemIndex) > 0 {
 			continue
 		}
-		if s.isEnergyShieldItem(itemIndex) && s.energyShieldPercentForPlayer(playerIndex) >= int(energyShieldMaxPercent) {
-			continue
-		}
 		if s.isXMV12Item(itemIndex) && s.playerHasXMV12(playerIndex) {
 			continue
 		}
@@ -602,9 +599,6 @@ func (s *GameScene) buySelectedShopItem() {
 		return
 	}
 	if s.isScrollOMatItem(itemIndex) && s.shopItemCountForPlayer(playerIndex, itemIndex) > 0 {
-		return
-	}
-	if s.isEnergyShieldItem(itemIndex) && s.energyShieldPercentForPlayer(playerIndex) >= int(energyShieldMaxPercent) {
 		return
 	}
 	if s.isXMV12Item(itemIndex) && s.playerHasXMV12(playerIndex) {

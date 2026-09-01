@@ -9,7 +9,7 @@ func HBomb() Weapon {
 	weapon := withDefaultSounds(Weapon{
 		Name:                   "H-Bombe",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
+		RadialDamage:           RadialDamageProfile{InnerRadius: 110, OuterRadius: 165, MaxDamage: 100},
 		Unlocked:               true,
 		RoundProjectile:        true,
 		DamagesTerrain:         true,

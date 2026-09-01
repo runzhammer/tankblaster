@@ -71,15 +71,9 @@ const reentryAnimationFrames = 170
 const (
 	projectileRadius           = 4
 	impactRadiusMultiplier     = 4
-	directHitCreditBonus       = 4000
-	impactSplashMinDamage      = 10
-	impactSplashMaxDamage      = 40
 	sandFallFrames             = 12
-	fallDamageStepPixels       = 20
-	fallDamagePerStep          = 10
 	zeroPowerFrames            = 216
 	zeroPowerDissolveFrames    = 12
-	creditsPerScorePoint       = 500
 	debugShopStartingCredits   = 20000
 	roundTransitionSeconds     = 10.0 / 3.0
 	computerAdjustSpeedFactor  = 1.6
@@ -142,11 +136,10 @@ const (
 	shockwavePulseCount       = 4
 	shockwaveLineWidth        = 6.0
 	shockwaveInnerLineWidth   = 2.0
-	shockwaveDamageOuterExtra = 200.0
 	shockwaveCameraOrbit      = 34.0
 	shockwaveCameraAngular    = 0.82
 	airStrikeWaitFrames       = 540
-	airStrikeBombCount        = 8
+	airStrikeBombCount        = 10
 	airStrikeBombSpacing      = 80.0
 	airStrikeBombDelayFrames  = 20
 	airStrikeBombDelayWindow  = airStrikeBombDelayFrames * (airStrikeBombCount - 1)
@@ -173,6 +166,7 @@ const (
 	moleBroeslerLoopKey       = "mole_broesler"
 	crumblerBroeslerLoopKey   = "crumbler_broesler"
 	laserLoopKey              = "laser"
+	airStrikeBeaconLoopKey    = "air_strike_beacon"
 	airStrikeJetLoopKey       = "air_strike_jet"
 	abortRoundFlashFrames     = 300
 	abortRoundFlashWhiteFrame = 180
@@ -361,6 +355,7 @@ type impactAnimation struct {
 	cycles         int
 	color          color.RGBA
 	damage         int
+	radialDamage   weaponspkg.RadialDamageProfile
 	attacker       *battleTank
 	damageApplied  map[int]bool
 	outward        bool
@@ -1304,6 +1299,7 @@ func (s *GameScene) plantPalmAtImpact(pos engine.Vec) {
 	if s.palmImage == nil || s.palmPixels == nil {
 		return
 	}
+	s.playSound(soundpaths.SoundGrowing)
 	palmBounds := s.palmPixels.Bounds()
 	palmSize := engine.V(float64(palmBounds.Dx()), float64(palmBounds.Dy()))
 	centerX := math.Max(palmSize.X/2, math.Min(s.worldWidth-palmSize.X/2, pos.X))
@@ -1877,10 +1873,12 @@ func (s *GameScene) Update() error {
 			} else if s.xmV12DriveMode {
 				s.updateXMV12DriveMode()
 			} else {
-				s.clampActiveShotStrength()
-				s.handleBattleInput()
-				s.handleComputerTurn()
-				s.updateProjectile()
+				if s.ensureActivePlayerCanAct() {
+					s.clampActiveShotStrength()
+					s.handleBattleInput()
+					s.handleComputerTurn()
+					s.updateProjectile()
+				}
 				if s.turnAdvanceDelay == 0 {
 					s.updateBattleCamera()
 				}
@@ -2782,6 +2780,9 @@ func (s *GameScene) syncBattleEffectLoops() {
 	if len(s.smallCrumblerImpacts) == 0 {
 		s.stopSoundLoop(crumblerBroeslerLoopKey)
 	}
+	if len(s.airStrikeImpacts) == 0 {
+		s.stopSoundLoop(airStrikeBeaconLoopKey)
+	}
 }
 
 func (s *GameScene) stopBattleEffectLoops() {
@@ -2791,6 +2792,7 @@ func (s *GameScene) stopBattleEffectLoops() {
 	s.stopSoundLoop(moleBroeslerLoopKey)
 	s.stopSoundLoop(crumblerBroeslerLoopKey)
 	s.stopSoundLoop(laserLoopKey)
+	s.stopSoundLoop(airStrikeBeaconLoopKey)
 	s.stopSoundLoop(airStrikeJetLoopKey)
 }
 
@@ -3205,17 +3207,12 @@ func (s *GameScene) fireActiveWeapon() {
 	}
 	angles := []float64{tank.cannon.Rot}
 	if weapon.TripleShot {
-		if !hasEffectiveWeapon && s.consumeMFSBoosterCharge(tank.playerIndex) {
-			atomImpact := weaponspkg.AtomBomb()
-			weapon.ImpactScale = atomImpact.ImpactScale
-			weapon.ImpactAnimationSeconds = atomImpact.ImpactAnimationSeconds
-			weapon.ImpactCycles = atomImpact.ImpactCycles
-			weapon.ImpactGradientOutward = atomImpact.ImpactGradientOutward
-			weapon.ImpactAnimationStyle = atomImpact.ImpactAnimationStyle
+		if !hasEffectiveWeapon {
+			weapon = s.mfsEffectiveWeapon(tank.playerIndex, weapon)
 			hasEffectiveWeapon = true
 		}
 		offset := 5 * math.Pi / 180
-		angles = []float64{tank.cannon.Rot, tank.cannon.Rot - offset, tank.cannon.Rot + offset}
+		angles = []float64{tank.cannon.Rot - offset, tank.cannon.Rot, tank.cannon.Rot + offset}
 	}
 	projectiles := make([]*projectile, 0, len(angles))
 	for _, angle := range angles {
@@ -3235,6 +3232,23 @@ func (s *GameScene) fireActiveWeapon() {
 		})
 	}
 	s.setProjectiles(projectiles)
+}
+
+func (s *GameScene) mfsEffectiveWeapon(playerIndex int, fallback weaponspkg.Weapon) weaponspkg.Weapon {
+	state, boosted := s.consumeMFSBoosterState(playerIndex)
+	if !boosted {
+		return fallback
+	}
+	switch state {
+	case 0:
+		return weaponspkg.LargeGrenade()
+	case 1:
+		return weaponspkg.AtomBomb()
+	case 2:
+		return weaponspkg.HBomb()
+	default:
+		return weaponspkg.Grenade()
+	}
 }
 
 func (s *GameScene) cannonMuzzle(cannon *engine.Sprite) *engine.Vec {
@@ -3414,10 +3428,16 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 				s.scheduleCloudSearchForProjectile(p)
 				return false, nil
 			}
-			if damage := weapon.Damage; damage > 0 {
+			if p.zeroPowerScatter {
+				s.onZeroPowerScatterGroundImpact(p)
+				s.scheduleCloudSearchForProjectile(p)
+				return false, nil
+			}
+			if damage := weapon.Damage; damage > 0 && !weapon.PlantsPalm {
 				s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
-				s.awardDirectHitCredits(tank, s.lastDamageSource)
 				s.darkenTank(tank, 0.10)
+			} else if weaponHasImpactEffect(weapon) {
+				s.onGroundImpact(p)
 			}
 			s.reportComputerShot(p.pos, tank.playerIndex, true)
 			s.delayTurnAdvance(s.tankHitPauseFrames())
@@ -3426,6 +3446,19 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 		}
 	}
 	return true, nil
+}
+
+func weaponHasImpactEffect(weapon weaponspkg.Weapon) bool {
+	return weapon.DamagesTerrain ||
+		weapon.PlantsPalm ||
+		weapon.FillsWater ||
+		weapon.Moles ||
+		weapon.SmallCrumblers ||
+		weapon.LargeCrumblers ||
+		weapon.Mosquitos ||
+		weapon.Shockwave ||
+		weapon.AirStrike ||
+		weapon.ImpactAnimationStyle == weaponspkg.ImpactAnimationFireball
 }
 
 func (s *GameScene) shouldSplitProjectile(p *projectile, previousVelocityY float64) bool {
@@ -3544,7 +3577,6 @@ func (s *GameScene) fireLaserWeapon(shooter *battleTank, muzzle engine.Vec, angl
 		effect.tip = hit.pos
 		if hit.tank != nil {
 			s.damageTank(hit.tank, weapon.Damage, shooter, damageCauseDirect)
-			s.awardDirectHitCredits(hit.tank, shooter)
 			s.darkenTank(hit.tank, 0.10)
 			s.reportComputerShot(hit.pos, hit.tank.playerIndex, true)
 			delay = maxInt(delay, s.tankHitPauseFrames())
@@ -4059,7 +4091,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		s.startDudImpact(p.pos)
 		return true
 	}
-	if !weapon.DamagesTerrain && !weapon.PlantsPalm && !weapon.FillsWater && !weapon.Moles && !weapon.SmallCrumblers && !weapon.LargeCrumblers && !weapon.Mosquitos && !weapon.Shockwave && !weapon.AirStrike && weapon.ImpactAnimationStyle != weaponspkg.ImpactAnimationFireball {
+	if !weaponHasImpactEffect(weapon) {
 		s.reportComputerShot(p.pos, -1, false)
 		return false
 	}
@@ -4114,6 +4146,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	if weapon.PlantsPalm {
 		s.reportComputerShot(p.pos, -1, false)
 		s.plantPalmAtImpact(p.pos)
+		s.damageTank(p.shooter, weapon.Damage, p.shooter, damageCauseDirect)
 		s.delayTurnAdvance(s.palmHitPauseFrames())
 		return true
 	}
@@ -4135,7 +4168,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		terrainApplied = false
 		damageApplied = make(map[int]bool)
 	} else {
-		s.damageTanksInImpactRadius(p.pos, radius)
+		s.damageTanksInImpactRadius(p.pos, weapon)
 		falls := s.applyCraterAndRefillWater(p.pos.X, p.pos.Y, radius)
 		if len(falls) > 0 {
 			s.sandFalls = append(s.sandFalls, sandFallAnimation{
@@ -4151,6 +4184,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 		duration:       duration,
 		cycles:         impactCyclesForWeapon(weapon),
 		damage:         weapon.Damage,
+		radialDamage:   weapon.RadialDamage,
 		attacker:       s.lastDamageSource,
 		damageApplied:  damageApplied,
 		outward:        weapon.ImpactGradientOutward,
@@ -4163,59 +4197,35 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	return true
 }
 
-func (s *GameScene) damageTanksInImpactRadius(center engine.Vec, radius float64) {
-	if radius <= 0 {
-		return
-	}
-	for _, tank := range s.tanks {
-		if tank == nil || tank.body == nil || tank.power <= 0 {
-			continue
-		}
-		distance := distancePointToRect(center, tank.body.Bounds().ScaledAtCenter(0.78))
-		if distance > radius {
-			continue
-		}
-		damage := impactSplashMinDamage + int(math.Round(float64(impactSplashMaxDamage-impactSplashMinDamage)*(1-distance/radius)))
-		damage = maxInt(impactSplashMinDamage, minInt(impactSplashMaxDamage, damage))
-		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
-	}
+func (s *GameScene) damageTanksInImpactRadius(center engine.Vec, weapon weaponspkg.Weapon) {
+	s.damageTanksInRadialProfile(center, weapon.RadialDamage, s.lastDamageSource)
 }
 
-func (s *GameScene) damageTanksInImpactRadiusFixed(center engine.Vec, radius float64, damage int) {
-	if radius <= 0 || damage <= 0 {
+func (s *GameScene) damageTanksInRadialProfile(center engine.Vec, profile weaponspkg.RadialDamageProfile, attacker *battleTank) {
+	if profile.MaxDamage <= 0 {
 		return
 	}
 	for _, tank := range s.tanks {
 		if tank == nil || tank.body == nil || tank.power <= 0 {
 			continue
 		}
-		distance := distancePointToRect(center, tank.body.Bounds().ScaledAtCenter(0.78))
-		if distance > radius {
+		damage := radialDamageToTank(center, tank, profile)
+		if damage <= 0 {
 			continue
-		}
-		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
-	}
-}
-
-func (s *GameScene) damageTanksInZeroPowerScatterRadius(center engine.Vec, radius float64, attacker *battleTank) {
-	if radius <= 0 {
-		return
-	}
-	coreRadius := 50.0
-	for _, tank := range s.tanks {
-		if tank == nil || tank.body == nil || tank.power <= 0 {
-			continue
-		}
-		distance := distancePointToRect(center, tank.body.Bounds().ScaledAtCenter(0.78))
-		if distance > radius {
-			continue
-		}
-		damage := 20
-		if distance <= coreRadius {
-			damage = 100
 		}
 		s.damageTank(tank, damage, attacker, damageCauseDirect)
 	}
+}
+
+func radialDamageToTank(center engine.Vec, tank *battleTank, profile weaponspkg.RadialDamageProfile) int {
+	if tank == nil || tank.body == nil {
+		return 0
+	}
+	tankCenter := tank.body.Bounds().Center()
+	dx := int(tankCenter.X) - int(center.X)
+	dy := int(tankCenter.Y) - int(center.Y)
+	distance := int(math.Sqrt(float64(dx*dx + dy*dy)))
+	return weaponspkg.CalculateRadialDamage(distance, profile)
 }
 
 func (s *GameScene) startZeroPowerImpactAtTank(tank *battleTank, weapon weaponspkg.Weapon) {
@@ -4243,7 +4253,7 @@ func (s *GameScene) startTerrainImpact(pos engine.Vec, weapon weaponspkg.Weapon,
 		}
 	} else {
 		if damage {
-			s.damageTanksInImpactRadius(pos, radius)
+			s.damageTanksInImpactRadius(pos, weapon)
 		}
 		falls := s.applyCraterAndRefillWater(pos.X, pos.Y, radius)
 		if len(falls) > 0 {
@@ -4260,6 +4270,7 @@ func (s *GameScene) startTerrainImpact(pos engine.Vec, weapon weaponspkg.Weapon,
 		duration:       duration,
 		cycles:         impactCyclesForWeapon(weapon),
 		damage:         weapon.Damage,
+		radialDamage:   weapon.RadialDamage,
 		attacker:       s.lastDamageSource,
 		damageApplied:  damageApplied,
 		outward:        weapon.ImpactGradientOutward,
@@ -4370,8 +4381,14 @@ func (s *GameScene) fireZeroPowerScatterProjectiles(tank *battleTank) {
 		{R: 145, G: 255, B: 80, A: 255},
 	}
 	angleOffset := 15 * math.Pi / 180
-	angles := []float64{-math.Pi/2 - angleOffset, -math.Pi / 2, -math.Pi/2 + angleOffset}
-	projectiles := make([]*projectile, 0, 3)
+	angles := []float64{
+		-math.Pi/2 - 2*angleOffset,
+		-math.Pi/2 - angleOffset,
+		-math.Pi / 2,
+		-math.Pi/2 + angleOffset,
+		-math.Pi/2 + 2*angleOffset,
+	}
+	projectiles := make([]*projectile, 0, len(angles))
 	for _, angle := range angles {
 		velocity := engine.V(speed, 0).Rotated(angle)
 		weapon := weaponspkg.Grenade()
@@ -4405,10 +4422,15 @@ func (s *GameScene) onZeroPowerScatterGroundImpact(p *projectile) {
 		return
 	}
 	s.playZeroPowerSound(zeroPowerSoundScatterImpact)
-	const radius = 100.0
+	radius := 30 + s.rng.Intn(71)
+	profile := weaponspkg.RadialDamageProfile{
+		InnerRadius: (2 * radius) / 3,
+		OuterRadius: radius,
+		MaxDamage:   100,
+	}
 	duration := s.impactAnimationFramesForWeapon(weaponspkg.Grenade())
-	s.damageTanksInZeroPowerScatterRadius(p.pos, radius, p.shooter)
-	falls := s.applyCraterAndRefillWater(p.pos.X, p.pos.Y, radius)
+	s.damageTanksInRadialProfile(p.pos, profile, p.shooter)
+	falls := s.applyCraterAndRefillWater(p.pos.X, p.pos.Y, float64(radius))
 	if len(falls) > 0 {
 		s.sandFalls = append(s.sandFalls, sandFallAnimation{
 			pixels:   falls,
@@ -4418,7 +4440,7 @@ func (s *GameScene) onZeroPowerScatterGroundImpact(p *projectile) {
 	s.dropUnsupportedTanks()
 	s.impacts = append(s.impacts, impactAnimation{
 		pos:            p.pos,
-		radius:         radius,
+		radius:         float64(radius),
 		duration:       duration,
 		cycles:         1,
 		color:          p.scatterImpactColor,
@@ -4528,6 +4550,8 @@ func (s *GameScene) projectileHitsWaterSurface(p *projectile, radius float64) (e
 }
 
 func (s *GameScene) startMoleImpact(pos engine.Vec) {
+	s.damageTanksInImpactRadius(pos, weaponspkg.Moles())
+	s.playEventSoundLoop(moleBroeslerLoopKey, soundEventCrumblerImpact)
 	lines := make([]moleStarLine, moleStarLineCount)
 	for i := range lines {
 		angle := -math.Pi + float64(i)*2*math.Pi/float64(len(lines)) + (s.rng.Float64()-0.5)*0.08
@@ -4593,6 +4617,7 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 }
 
 func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
+	s.playEventSoundLoop(airStrikeBeaconLoopKey, soundEventAirStrikeBeacon)
 	bombs := make([]airStrikeBomb, airStrikeBombCount)
 	startY := -s.skyExtraHeight() - 80
 	lastDelay := airStrikeWaitFrames
@@ -4615,7 +4640,7 @@ func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
 			delay:  delay,
 		}
 	}
-	duration := lastDelay + airStrikeBombFallFrames + s.impactAnimationFramesForWeapon(weaponspkg.LargeGrenade()) + s.impactPauseFrames()
+	duration := lastDelay + airStrikeBombFallFrames + s.impactAnimationFramesForWeapon(weaponspkg.AtomBomb()) + s.impactPauseFrames()
 	s.airStrikeImpacts = append(s.airStrikeImpacts, &airStrikeImpact{
 		pos:      pos,
 		duration: duration,
@@ -4670,20 +4695,25 @@ func (s *GameScene) updateAirStrikeImpact(impact *airStrikeImpact) {
 }
 
 func (s *GameScene) updateAirStrikeBeaconSound(impact *airStrikeImpact) {
-	if impact == nil || impact.bojeHidden || s.blinkBojeAnimation.totalTicks <= 0 {
+	if impact == nil || s.blinkBojeAnimation.totalTicks <= 0 {
+		return
+	}
+	if impact.bojeHidden {
+		s.stopSoundLoop(airStrikeBeaconLoopKey)
 		return
 	}
 	cycle := impact.age / s.blinkBojeAnimation.totalTicks
-	if cycle <= impact.lastBeaconCycle || impact.beepsPlayed >= 10 {
+	if impact.beepsPlayed >= 5 && !impact.jetStarted {
+		impact.jetStarted = true
+		s.stopSoundLoop(airStrikeBeaconLoopKey)
+		s.playEventSound(soundEventAirStrikeJet)
+		return
+	}
+	if cycle <= impact.lastBeaconCycle {
 		return
 	}
 	impact.lastBeaconCycle = cycle
 	impact.beepsPlayed++
-	s.playEventSound(soundEventAirStrikeBeacon)
-	if impact.beepsPlayed >= 5 && !impact.jetStarted {
-		impact.jetStarted = true
-		s.playEventSound(soundEventAirStrikeJet)
-	}
 }
 
 func (s *GameScene) airStrikeBombHitsTank(pos engine.Vec) *battleTank {
@@ -4702,11 +4732,11 @@ func (s *GameScene) airStrikeBombHitsTank(pos engine.Vec) *battleTank {
 
 func (s *GameScene) applyAirStrikeBombImpact(pos engine.Vec) {
 	s.playEventSound(soundEventAirStrikeBomb)
-	weapon := weaponspkg.LargeGrenade()
+	weapon := weaponspkg.AtomBomb()
 	radius := impactRadiusForWeapon(weapon) * airStrikeImpactScale
 	duration := s.impactAnimationFramesForWeapon(weapon)
 	s.zeroPowerStartDelay = (duration * 2) / 3
-	s.damageTanksInImpactRadius(pos, radius)
+	s.damageTanksInImpactRadius(pos, weapon)
 	s.zeroPowerStartDelay = 0
 	if falls := s.applyCraterAndRefillWater(pos.X, pos.Y, radius); len(falls) > 0 {
 		s.sandFalls = append(s.sandFalls, sandFallAnimation{
@@ -4761,25 +4791,7 @@ func (s *GameScene) damageTanksInShockwave(center engine.Vec, visibleRadius floa
 	if visibleRadius <= 0 {
 		return
 	}
-	fullDamageRadius := visibleRadius * 0.5
-	outerRadius := visibleRadius + shockwaveDamageOuterExtra
-	falloffRange := math.Max(1, outerRadius-fullDamageRadius)
-	for _, tank := range s.tanks {
-		if tank == nil || tank.body == nil || tank.power <= 0 {
-			continue
-		}
-		distance := distancePointToRect(center, tank.body.Bounds().ScaledAtCenter(0.78))
-		if distance > outerRadius {
-			continue
-		}
-		damage := 100
-		if distance > fullDamageRadius {
-			t := (distance - fullDamageRadius) / falloffRange
-			damage = int(math.Round(100 - 80*t))
-			damage = maxInt(20, minInt(100, damage))
-		}
-		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
-	}
+	s.damageTanksInImpactRadius(center, weaponspkg.Shockwave())
 }
 
 func (s *GameScene) startMoskitoImpact(pos engine.Vec, shooter *battleTank) {
@@ -5286,22 +5298,6 @@ func (s *GameScene) drownTank(tank *battleTank, fill *waterFill) {
 		}
 		fill.hitPlayers[tank.playerIndex] = true
 	}
-	previousPower := tank.power
-	damage := s.applyEnergyShieldDamage(tank, 100)
-	tank.power = maxInt(0, tank.power-damage)
-	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
-	if tank.power > 0 {
-		return
-	}
-	tank.shotStrength = 0
-	tank.zeroPowerShown = true
-	tank.zeroPowerGone = true
-	s.removeTankSprites(tank)
-	if previousPower > 0 {
-		s.awardZeroPowerScore(tank, s.lastDamageSource, damageCauseDirect)
-	}
-	s.startWaterBlubberForTank(tank, fill)
-	s.delayTurnAdvance(s.tankHitPauseFrames())
 }
 
 func (s *GameScene) removeTankSprites(tank *battleTank) {
@@ -5344,21 +5340,15 @@ func (s *GameScene) startFireballImpact(pos engine.Vec, weapon weaponspkg.Weapon
 	if len(animation.frames) == 0 {
 		return
 	}
-	s.playEventSoundLoop(fireballBurningLoopKey, soundEventPalmIgnite)
+	s.playEventSound(soundEventPalmIgnite)
 	duration := maxInt(animation.totalTicks, s.impactAnimationFramesForWeapon(weapon))
-	damage := weapon.ImpactDamage
-	if damage <= 0 {
-		damage = 40
-	}
 	effect := animatedImpact{
 		pos:       pos,
 		duration:  duration,
 		animation: animation,
-		damage:    damage,
-		loopKey:   fireballBurningLoopKey,
 	}
 	s.animatedImpacts = append(s.animatedImpacts, effect)
-	s.damageTanksInRectFixed(s.animationWorldRect(pos, animation), damage)
+	s.damageTanksInImpactRadius(pos, weapon)
 	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
 		s.turnAdvanceDelay = minimumDelay
 	}
@@ -5379,25 +5369,6 @@ func (s *GameScene) startDudImpact(pos engine.Vec) {
 	if minimumDelay := duration + s.impactPauseFrames(); s.turnAdvanceDelay < minimumDelay {
 		s.turnAdvanceDelay = minimumDelay
 	}
-}
-
-func (s *GameScene) damageTanksInRectFixed(rect engine.Rect, damage int) {
-	if damage <= 0 {
-		return
-	}
-	for _, tank := range s.tanks {
-		if tank == nil || tank.body == nil || tank.power <= 0 {
-			continue
-		}
-		if !rectsIntersect(tank.body.Bounds().ScaledAtCenter(0.78), rect) {
-			continue
-		}
-		s.damageTank(tank, damage, s.lastDamageSource, damageCauseDirect)
-	}
-}
-
-func rectsIntersect(a, b engine.Rect) bool {
-	return a.Min.X <= b.Max.X && a.Max.X >= b.Min.X && a.Min.Y <= b.Max.Y && a.Max.Y >= b.Min.Y
 }
 
 func positiveMod(value, divisor int) int {
@@ -5455,7 +5426,7 @@ func (s *GameScene) updateImpacts() {
 }
 
 func (s *GameScene) damageTanksTouchedByPlasmaImpact(impact *impactAnimation, progress float64) {
-	if impact == nil || impact.damage <= 0 || impact.damageApplied == nil {
+	if impact == nil || impact.radialDamage.MaxDamage <= 0 || impact.damageApplied == nil {
 		return
 	}
 	radius := plasmaVisibleRadius(impact.radius, progress)
@@ -5470,8 +5441,12 @@ func (s *GameScene) damageTanksTouchedByPlasmaImpact(impact *impactAnimation, pr
 		if distance > radius {
 			continue
 		}
+		damage := radialDamageToTank(impact.pos, tank, impact.radialDamage)
+		if damage <= 0 {
+			continue
+		}
 		impact.damageApplied[tank.playerIndex] = true
-		s.damageTank(tank, impact.damage, impact.attacker, damageCauseDirect)
+		s.damageTank(tank, damage, impact.attacker, damageCauseDirect)
 	}
 }
 
@@ -5727,12 +5702,13 @@ func (s *GameScene) damagePalmRevengeTank(event *palmRevengeEvent) {
 	event.damageDone = true
 	tank := event.target
 	previousPower := tank.power
-	damage := s.applyEnergyShieldDamage(tank, 100)
-	tank.power = maxInt(0, tank.power-damage)
+	nominalDamage := 100
+	appliedDamage := s.applyEnergyShieldDamage(tank, nominalDamage)
+	tank.power = maxInt(0, tank.power-appliedDamage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
 		s.playEventSound(soundEventRevengeTankBroken)
-		s.addScore(tank.playerIndex, -3)
+		s.applySuicidePenalty(tank)
 		tank.zeroPowerShown = true
 	}
 }
@@ -6184,12 +6160,14 @@ func (s *GameScene) clampActiveShotStrength() {
 }
 
 func (s *GameScene) damageTank(tank *battleTank, damage int, attacker *battleTank, cause damageCause) {
-	if tank == nil || damage <= 0 {
+	if tank == nil || tank.power <= 0 || damage <= 0 {
 		return
 	}
 	previousPower := tank.power
-	damage = s.applyEnergyShieldDamage(tank, damage)
-	tank.power = maxInt(0, tank.power-damage)
+	nominalDamage := damage
+	s.awardDamageCredits(tank, attacker, nominalDamage)
+	appliedDamage := s.applyEnergyShieldDamage(tank, nominalDamage)
+	tank.power = maxInt(0, tank.power-appliedDamage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
 		s.awardZeroPowerScore(tank, attacker, cause)
@@ -6200,12 +6178,14 @@ func (s *GameScene) damageTank(tank *battleTank, damage int, attacker *battleTan
 }
 
 func (s *GameScene) damageTankAsTerrain(tank *battleTank, damage int, attacker *battleTank, cause damageCause) {
-	if tank == nil || damage <= 0 {
+	if tank == nil || tank.power <= 0 || damage <= 0 {
 		return
 	}
 	previousPower := tank.power
-	damage = s.applyEnergyShieldDamage(tank, damage)
-	tank.power = maxInt(0, tank.power-damage)
+	nominalDamage := damage
+	s.awardDamageCredits(tank, attacker, nominalDamage)
+	appliedDamage := s.applyEnergyShieldDamage(tank, nominalDamage)
+	tank.power = maxInt(0, tank.power-appliedDamage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
 		s.awardZeroPowerScore(tank, attacker, cause)
@@ -6216,14 +6196,11 @@ func (s *GameScene) damageTankAsTerrain(tank *battleTank, damage int, attacker *
 	}
 }
 
-func (s *GameScene) awardDirectHitCredits(target, attacker *battleTank) {
-	if target == nil || attacker == nil || target == attacker {
+func (s *GameScene) awardDamageCredits(victim, attacker *battleTank, nominalDamage int) {
+	if victim == nil || attacker == nil || victim == attacker || nominalDamage <= 0 {
 		return
 	}
-	if attacker.playerIndex < 0 || attacker.playerIndex >= len(s.credits) {
-		return
-	}
-	s.credits[attacker.playerIndex] += directHitCreditBonus
+	s.addCredits(victim.playerIndex, nominalDamage*core.Config().Gameplay.Scoring.DamageReceivedCreditMultiplier)
 }
 
 func (s *GameScene) awardZeroPowerScore(defeated, attacker *battleTank, cause damageCause) {
@@ -6231,20 +6208,28 @@ func (s *GameScene) awardZeroPowerScore(defeated, attacker *battleTank, cause da
 		return
 	}
 	if defeated == attacker {
-		s.addScore(defeated.playerIndex, -3)
-		for _, tank := range s.tanks {
-			if tank != nil && tank != defeated {
-				s.addScore(tank.playerIndex, 1)
-			}
-		}
+		s.applySuicidePenalty(defeated)
 		return
 	}
-	switch cause {
-	case damageCauseFall:
-		s.addScore(attacker.playerIndex, 1)
-	default:
-		s.addScore(attacker.playerIndex, 3)
+	s.rewardKill(attacker)
+}
+
+func (s *GameScene) rewardKill(attacker *battleTank) {
+	if attacker == nil {
+		return
 	}
+	scoring := core.Config().Gameplay.Scoring
+	s.addScore(attacker.playerIndex, scoring.Kill.Points)
+	s.addCredits(attacker.playerIndex, scoring.Kill.Credits)
+}
+
+func (s *GameScene) applySuicidePenalty(player *battleTank) {
+	if player == nil {
+		return
+	}
+	scoring := core.Config().Gameplay.Scoring
+	s.addScore(player.playerIndex, -scoring.Suicide.PointsPenalty)
+	s.addCredits(player.playerIndex, -scoring.Suicide.CreditsPenalty)
 }
 
 func (s *GameScene) addScore(playerIndex, points int) {
@@ -6266,6 +6251,18 @@ func (s *GameScene) addScore(playerIndex, points int) {
 	if playerIndex < len(s.tanks) && s.tanks[playerIndex] != nil {
 		s.tanks[playerIndex].score = s.scores[playerIndex]
 	}
+}
+
+func (s *GameScene) addCredits(playerIndex, credits int) {
+	if playerIndex < 0 || credits == 0 {
+		return
+	}
+	if len(s.credits) <= playerIndex {
+		next := make([]int, playerIndex+1)
+		copy(next, s.credits)
+		s.credits = next
+	}
+	s.credits[playerIndex] = maxInt(0, s.credits[playerIndex]+credits)
 }
 
 func (s *GameScene) scoreForPlayer(playerIndex int) int {
@@ -8360,7 +8357,7 @@ func (s *GameScene) applyFallDamage(tank *battleTank, fallDistance float64) {
 	if tank == nil || fallDistance <= 0 {
 		return
 	}
-	damage := int(fallDistance * float64(fallDamagePerStep) / float64(fallDamageStepPixels))
+	damage := (2 * int(fallDistance)) / 3
 	damage = maxInt(1, damage)
 	s.damageTank(tank, damage, s.lastDamageSource, damageCauseFall)
 }
@@ -8406,7 +8403,10 @@ func (s *GameScene) allTanksLanded() bool {
 		return false
 	}
 	for _, tank := range s.tanks {
-		if tank == nil || !tank.landed {
+		if tank == nil {
+			return false
+		}
+		if tank.power > 0 && !tank.landed {
 			return false
 		}
 	}
@@ -8415,6 +8415,24 @@ func (s *GameScene) allTanksLanded() bool {
 
 func (s *GameScene) tankCanAct(tank *battleTank) bool {
 	return tank != nil && tank.power > 0 && tank.landed && !tank.falling
+}
+
+func (s *GameScene) ensureActivePlayerCanAct() bool {
+	if s.activePlayerIndex >= 0 && s.activePlayerIndex < len(s.tanks) && s.tankCanAct(s.tanks[s.activePlayerIndex]) {
+		return true
+	}
+	if s.endRoundIfOnlyOneTankRemains() {
+		return false
+	}
+	next := s.nextActivePlayerIndex()
+	if next < 0 {
+		return false
+	}
+	s.activePlayerIndex = next
+	s.resetComputerTurnPlans()
+	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+	s.cameraGoalY = 0
+	return true
 }
 
 func (s *GameScene) livingTankIndexes() []int {
@@ -8445,23 +8463,34 @@ func (s *GameScene) endRoundIfOnlyOneTankRemains() bool {
 		return false
 	}
 	s.playEventSound(soundEventRoundEnd)
-	s.creditRoundScores()
+	if winner := s.roundWinner(); winner != nil {
+		s.rewardRoundWinner(winner)
+	}
 	s.roundTransitionDelay = secondsToFrames(roundTransitionSeconds)
 	return true
 }
 
-func (s *GameScene) creditRoundScores() {
-	if len(s.credits) < len(s.roundScores) {
-		next := make([]int, len(s.roundScores))
-		copy(next, s.credits)
-		s.credits = next
-	}
-	for index, score := range s.roundScores {
-		if score <= 0 {
+func (s *GameScene) roundWinner() *battleTank {
+	var winner *battleTank
+	for _, tank := range s.tanks {
+		if tank == nil || tank.power <= 0 {
 			continue
 		}
-		s.credits[index] += score * creditsPerScorePoint
+		if winner != nil {
+			return nil
+		}
+		winner = tank
 	}
+	return winner
+}
+
+func (s *GameScene) rewardRoundWinner(winner *battleTank) {
+	if winner == nil || winner.power <= 0 {
+		return
+	}
+	scoring := core.Config().Gameplay.Scoring
+	s.addScore(winner.playerIndex, scoring.RoundWin.Points)
+	s.addCredits(winner.playerIndex, winner.power*scoring.RoundWin.CreditPerRemainingEnergy)
 }
 
 func (s *GameScene) behaviorAttachCannonToTank(tank *engine.Sprite) engine.Behavior {

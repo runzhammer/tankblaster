@@ -1,14 +1,10 @@
 package tankblaster
 
-import "math"
-
 const (
-	energyShieldItemName            = "Energieschild"
-	energyShieldMaxPercent          = 100.0
-	energyShieldPercentPerPurchase  = 100.0
-	energyShieldDamageMultiplier    = 0.25
-	energyShieldCostPerDamagePoint  = 0.5
-	energyShieldDamageAbsorbPerUnit = (1.0 - energyShieldDamageMultiplier) / energyShieldCostPerDamagePoint
+	energyShieldItemName           = "Energieschild"
+	energyShieldPercentPerPurchase = 100
+	energyShieldDamageNumerator    = 3
+	energyShieldDamageDenominator  = 7
 )
 
 func (s *GameScene) energyShieldItemIndex() int {
@@ -24,17 +20,14 @@ func (s *GameScene) addEnergyShield(playerIndex, purchases int) {
 		return
 	}
 	s.ensureInventory(playerIndex)
-	s.inventories[playerIndex].energyShield = math.Min(
-		energyShieldMaxPercent,
-		s.inventories[playerIndex].energyShield+float64(purchases)*energyShieldPercentPerPurchase,
-	)
+	s.inventories[playerIndex].energyShield += purchases * energyShieldPercentPerPurchase
 }
 
 func (s *GameScene) energyShieldPercentForPlayer(playerIndex int) int {
 	if playerIndex < 0 || playerIndex >= len(s.inventories) {
 		return 0
 	}
-	return maxInt(0, minInt(int(math.Round(s.inventories[playerIndex].energyShield)), int(energyShieldMaxPercent)))
+	return maxInt(0, s.inventories[playerIndex].energyShield)
 }
 
 func (s *GameScene) applyEnergyShieldDamage(tank *battleTank, damage int) int {
@@ -47,13 +40,11 @@ func (s *GameScene) applyEnergyShieldDamage(tank *battleTank, damage int) int {
 		return damage
 	}
 
-	requiredShield := float64(damage) * energyShieldCostPerDamagePoint
-	if shield >= requiredShield {
-		s.inventories[tank.playerIndex].energyShield = math.Max(0, shield-requiredShield)
-		return maxInt(1, int(math.Round(float64(damage)*energyShieldDamageMultiplier)))
+	shield -= (energyShieldDamageNumerator * damage) / energyShieldDamageDenominator
+	s.inventories[tank.playerIndex].energyShield = shield
+	if shield < 0 {
+		s.inventories[tank.playerIndex].energyShield = 0
+		return -shield
 	}
-
-	absorbedDamage := shield * energyShieldDamageAbsorbPerUnit
-	s.inventories[tank.playerIndex].energyShield = 0
-	return maxInt(1, int(math.Round(float64(damage)-absorbedDamage)))
+	return 0
 }

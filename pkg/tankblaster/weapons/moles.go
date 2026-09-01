@@ -4,7 +4,7 @@ func Moles() Weapon {
 	return withDefaultSounds(Weapon{
 		Name:                   "Maulwürfe",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
+		RadialDamage:           RadialDamageProfile{InnerRadius: 53, OuterRadius: 80, MaxDamage: 100},
 		Unlocked:               true,
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,

@@ -84,9 +84,21 @@ gameplay:
     max_count: 2
     min_speed: 0.05
     max_speed: 0.13
+  # Defaults mirror the Points/Credits economy of Tank Blaster II 1.3.0.0.
+  scoring:
+    damage_received_credit_multiplier: 7
+    kill:
+      points: 2
+      credits: 3000
+    suicide:
+      points_penalty: 3
+      credits_penalty: 1000
+    round_win:
+      points: 1
+      credit_per_remaining_energy: 15
 debug:
-  enabled: false
-  start_scene: score # game / shop / score
+  enabled: true
+  start_scene: game # game / shop / score
   start_shop: false
   # Optional im Debug-Modus: leere/fehlende Liste erlaubt alle Todesanimationen.
   # Erlaubte Namen:
@@ -101,6 +113,6 @@ debug:
   zero_power_animations: []
   game:
     rounds: 10
-    players: *human_players
+    players: *computer_players
 online:
   server_url: "ws://127.0.0.1:8765/game"

@@ -4,7 +4,7 @@ func WonderPalm() Weapon {
 	return withDefaultSounds(Weapon{
 		Name:                   "Wunderpalme",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
+		Damage:                 125,
 		Unlocked:               true,
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,
