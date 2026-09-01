@@ -19,6 +19,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	if value := os.Getenv("TANKBLASTER_SERVER_DB"); value != "" {
+		cfg.Database.Path = value
+	}
 	store, err := server.OpenStore(cfg)
 	if err != nil {
 		log.Fatalf("open store: %v", err)

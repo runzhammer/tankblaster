@@ -5,6 +5,8 @@ import (
 	"image"
 	"image/png"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/runzhammer/gamedemo/pkg/core"
@@ -13,6 +15,8 @@ import (
 )
 
 func main() {
+
+	applyRuntimeConfig()
 
 	ebiten.SetWindowSize(int((*core.Config()).Screen.Width), int((*core.Config()).Screen.Height))
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
@@ -28,6 +32,24 @@ func main() {
 
 	if err = ebiten.RunGame(tankblasterGame); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func applyRuntimeConfig() {
+	cfg := core.Config()
+	if value := os.Getenv("TANKBLASTER_DEBUG_ENABLED"); value != "" {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "1", "true", "yes", "on":
+			cfg.Debug.Enabled = true
+		case "0", "false", "no", "off":
+			cfg.Debug.Enabled = false
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("TANKBLASTER_DEBUG_START_SCENE")); value != "" {
+		cfg.Debug.StartScene = value
+	}
+	if value := strings.TrimSpace(os.Getenv("TANKBLASTER_ONLINE_SERVER_URL")); value != "" {
+		cfg.Online.ServerURL = value
 	}
 }
 

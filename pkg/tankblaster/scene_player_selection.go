@@ -417,6 +417,9 @@ func (s *playerSelectionScene) handleStartClick(x, y int) bool {
 }
 
 func (s *playerSelectionScene) handleOnlineClick(x, y int) bool {
+	if !core.Config().Online.Enabled {
+		return false
+	}
 	return image.Pt(x, y).In(image.Rect(205, 673, 348, 706))
 }
 
@@ -833,7 +836,9 @@ func (s *playerSelectionScene) drawFooter(screen *ebiten.Image) {
 	t := texts()
 	drawFilledRect(screen, image.Rect(372, 676, 586, 695), colornames.Yellow)
 	drawCenteredText(screen, t.PlayerSelectionHelpHint, image.Rect(372, 676, 586, 695), colornames.Black)
-	drawButton(screen, image.Rect(205, 673, 348, 706), t.PlayerSelectionOnlineButton)
+	if core.Config().Online.Enabled {
+		drawButton(screen, image.Rect(205, 673, 348, 706), t.PlayerSelectionOnlineButton)
+	}
 	drawButton(screen, image.Rect(624, 673, 756, 706), t.PlayerSelectionOptionsButton)
 	drawButton(screen, image.Rect(780, 673, 922, 706), t.PlayerSelectionStartButton)
 }

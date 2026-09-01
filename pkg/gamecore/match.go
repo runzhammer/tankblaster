@@ -36,11 +36,13 @@ type TerrainCrater struct {
 
 type MatchState struct {
 	MatchID            string          `json:"match_id"`
+	Seed               int64           `json:"seed"`
 	Players            []Player        `json:"players"`
 	Tanks              []TankState     `json:"tanks"`
 	Terrain            []TerrainCrater `json:"terrain"`
 	CurrentPlayerIndex int             `json:"current_player_index"`
 	Round              int             `json:"round"`
+	TotalRounds        int             `json:"total_rounds"`
 	Wind               int             `json:"wind"`
 	Status             MatchStatus     `json:"status"`
 	WinnerID           string          `json:"winner_id,omitempty"`
@@ -68,11 +70,15 @@ type ShotResult struct {
 }
 
 type Engine struct {
-	rng *rand.Rand
+	rng  *rand.Rand
+	seed int64
 }
 
 func NewEngine(seed int64) *Engine {
-	return &Engine{rng: rand.New(rand.NewSource(seed))}
+	return &Engine{
+		rng:  rand.New(rand.NewSource(seed)),
+		seed: seed,
+	}
 }
 
 func (e *Engine) NewMatch(matchID string, players []Player) MatchState {
@@ -94,10 +100,12 @@ func (e *Engine) NewMatch(matchID string, players []Player) MatchState {
 	}
 	return MatchState{
 		MatchID:            matchID,
+		Seed:               e.seed,
 		Players:            append([]Player(nil), players...),
 		Tanks:              tanks,
 		CurrentPlayerIndex: 0,
 		Round:              1,
+		TotalRounds:        1,
 		Wind:               wind,
 		Status:             MatchInGame,
 	}

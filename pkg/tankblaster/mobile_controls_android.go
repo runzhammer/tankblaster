@@ -59,12 +59,10 @@ func (s *GameScene) handleMobileSideControls(tank *battleTank, strengthStep int)
 		case mobileControlWeaponNext:
 			s.selectNextWeapon(tank)
 		case mobileControlFire:
-			s.fireActiveWeapon()
+			s.requestFireActiveWeapon()
 		case mobileControlIgnition:
 			if mobileControlJustPressed(button.rect) && s.playerHasXMV12(tank.playerIndex) && s.dieselForPlayer(tank.playerIndex) > 0 {
-				s.playEventSound(soundEventXMV12Ignition)
-				s.xmV12DriveMode = true
-				s.xmV12DriveDirection = 0
+				s.requestXMV12Start(tank)
 			}
 		}
 	}
@@ -80,19 +78,16 @@ func (s *GameScene) handleMobileXMV12SideControls(tank *battleTank) {
 		}
 		switch button.id {
 		case mobileControlDriveLeft:
-			s.xmV12DriveDirection = -1
+			s.requestXMV12Direction(tank, -1)
 		case mobileControlDriveStop:
-			s.xmV12DriveDirection = 0
+			s.requestXMV12Direction(tank, 0)
 		case mobileControlDriveRight:
-			s.xmV12DriveDirection = 1
+			s.requestXMV12Direction(tank, 1)
 		case mobileControlMotorOff:
 			if !mobileControlJustPressed(button.rect) {
 				continue
 			}
-			s.playEventSound(soundEventXMV12MotorOff)
-			s.stopXMV12LoopSounds()
-			s.xmV12DriveDirection = 0
-			s.xmV12EngineOffDelay = xmV12EngineOffDelayFrames
+			s.requestXMV12MotorOff(tank)
 		}
 	}
 }

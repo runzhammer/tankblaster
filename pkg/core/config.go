@@ -51,6 +51,7 @@ type FileSettings struct {
 		} `yaml:"game"`
 	} `yaml:"debug"`
 	Online struct {
+		Enabled   *bool  `yaml:"enabled"`
 		ServerURL string `yaml:"server_url"`
 	} `yaml:"online"`
 }
@@ -144,6 +145,7 @@ type Settings struct {
 		}
 	}
 	Online struct {
+		Enabled   bool
 		ServerURL string
 	}
 }
@@ -252,6 +254,10 @@ func init() {
 		s.Debug.Game.Rounds = 10
 	}
 	s.Debug.Game.Players = fs.Debug.Game.Players
+	s.Online.Enabled = true
+	if fs.Online.Enabled != nil {
+		s.Online.Enabled = *fs.Online.Enabled
+	}
 	s.Online.ServerURL = fs.Online.ServerURL
 	if s.Online.ServerURL == "" {
 		s.Online.ServerURL = "ws://127.0.0.1:8765/game"

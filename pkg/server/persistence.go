@@ -34,6 +34,13 @@ func OpenStore(cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Database.Driver == "sqlite" {
+		db.SetMaxOpenConns(1)
+		if _, err := db.ExecContext(context.Background(), `PRAGMA busy_timeout = 5000`); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	s := &Store{db: db, cfg: cfg}
 	if err := s.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -111,6 +118,10 @@ FROM players WHERE player_id = ?`, playerID).Scan(
 }
 
 func (s *Store) RecordWin(ctx context.Context, winnerID, loserID string) error {
+	return s.RecordMatchResult(ctx, winnerID, loserID, s.cfg.Score.WinPoints, s.cfg.Score.LossPoints, 1)
+}
+
+func (s *Store) RecordMatchResult(ctx context.Context, winnerID, loserID string, winnerScore, loserScore, rounds int) error {
 	winner, err := s.playerByID(ctx, winnerID)
 	if err != nil {
 		return err
@@ -121,7 +132,7 @@ func (s *Store) RecordWin(ctx context.Context, winnerID, loserID string) error {
 	}
 	winnerRating, loserRating := winner.Rating, loser.Rating
 	if s.cfg.Rating.Enabled {
-		winnerRating, loserRating = elo(winner.Rating, loser.Rating, s.cfg.Rating.KFactor, s.cfg.Rating.MinimumRating)
+		winnerRating, loserRating = matchElo(winner.Rating, loser.Rating, s.cfg.Rating.KFactor, s.cfg.Rating.MinimumRating, rounds, winnerScore, loserScore)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -131,14 +142,14 @@ func (s *Store) RecordWin(ctx context.Context, winnerID, loserID string) error {
 	_, err = tx.ExecContext(ctx, `
 UPDATE players
 SET rating = ?, matches_played = matches_played + 1, wins = wins + 1, score = score + ?
-WHERE player_id = ?`, winnerRating, s.cfg.Score.WinPoints, winnerID)
+WHERE player_id = ?`, winnerRating, winnerScore, winnerID)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
 UPDATE players
 SET rating = ?, matches_played = matches_played + 1, losses = losses + 1, score = score + ?
-WHERE player_id = ?`, loserRating, s.cfg.Score.LossPoints, loserID)
+WHERE player_id = ?`, loserRating, loserScore, loserID)
 	if err != nil {
 		return err
 	}
@@ -174,10 +185,26 @@ FROM players ORDER BY score DESC, rating DESC, wins DESC LIMIT ?`, limit)
 }
 
 func elo(winnerRating, loserRating, k, minimum int) (int, int) {
+	return matchElo(winnerRating, loserRating, k, minimum, 1, 1, 0)
+}
+
+func matchElo(winnerRating, loserRating, k, minimum, rounds, winnerScore, loserScore int) (int, int) {
+	if rounds < 1 {
+		rounds = 1
+	}
 	expectedWinner := 1 / (1 + math.Pow(10, float64(loserRating-winnerRating)/400))
-	expectedLoser := 1 / (1 + math.Pow(10, float64(winnerRating-loserRating)/400))
-	nextWinner := winnerRating + int(math.Round(float64(k)*(1-expectedWinner)))
-	nextLoser := loserRating + int(math.Round(float64(k)*(0-expectedLoser)))
+	roundFactor := math.Min(3, math.Sqrt(float64(rounds)))
+	margin := winnerScore - loserScore
+	if margin < 1 {
+		margin = 1
+	}
+	scoreFactor := 1 + math.Min(1, float64(margin)/float64(rounds*10))*0.75
+	delta := int(math.Round(float64(k) * roundFactor * scoreFactor * (1 - expectedWinner)))
+	if delta < 1 {
+		delta = 1
+	}
+	nextWinner := winnerRating + delta
+	nextLoser := loserRating - delta
 	if nextWinner < minimum {
 		nextWinner = minimum
 	}

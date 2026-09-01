@@ -115,4 +115,5 @@ debug:
     rounds: 10
     players: *computer_players
 online:
+  enabled: true
   server_url: "ws://127.0.0.1:8765/game"

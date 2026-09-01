@@ -39,6 +39,7 @@ type Session struct {
 	ID          string
 	Type        SessionType
 	HostID      string
+	Rounds      int
 	Players     []SessionPlayer
 	MaxPlayers  int
 	CreatedAt   time.Time
@@ -71,14 +72,16 @@ func NewHub(cfg Config, store *Store) *Hub {
 	}
 }
 
-func (h *Hub) CreateSession(kind SessionType, player SessionPlayer) (*Session, error) {
+func (h *Hub) CreateSession(kind SessionType, player SessionPlayer, rounds int) (*Session, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := time.Now().UTC()
+	rounds = normalizedRounds(rounds)
 	s := &Session{
 		ID:         randomID("ses", 12),
 		Type:       kind,
 		HostID:     player.PlayerID,
+		Rounds:     rounds,
 		Players:    []SessionPlayer{player},
 		MaxPlayers: h.cfg.Sessions.MaxPlayers,
 		CreatedAt:  now,
@@ -209,6 +212,7 @@ func (h *Hub) QuickMatch(player SessionPlayer) (*Session, bool, error) {
 				ID:         randomID("ses", 12),
 				Type:       SessionMatchmaking,
 				HostID:     queued.Player.PlayerID,
+				Rounds:     normalizedRounds(0),
 				Players:    []SessionPlayer{queued.Player, player},
 				MaxPlayers: h.cfg.Sessions.MaxPlayers,
 				CreatedAt:  now,
@@ -271,6 +275,50 @@ func (h *Hub) Fire(sessionID, playerID string, req protocol.FireCommand) (*Sessi
 	return s, result, nil
 }
 
+func (h *Hub) CompleteMatch(matchID, reporterID string, scores map[string]int) (*Session, string, string, int, int, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var sess *Session
+	for _, s := range h.sessions {
+		if s.Match.MatchID == matchID {
+			sess = s
+			break
+		}
+	}
+	if sess == nil {
+		return nil, "", "", 0, 0, errProtocol("match_not_found", "match not found")
+	}
+	if sess.Status == SessionFinished {
+		return sess, "", "", 0, 0, nil
+	}
+	if len(sess.Players) != 2 {
+		return nil, "", "", 0, 0, errProtocol("unsupported_match", "only two-player matches can be rated")
+	}
+	left := sess.Players[0].PlayerID
+	right := sess.Players[1].PlayerID
+	leftScore, leftOK := scores[left]
+	rightScore, rightOK := scores[right]
+	if !leftOK || !rightOK {
+		return nil, "", "", 0, 0, errProtocol("bad_message", "match scores are incomplete")
+	}
+	if leftScore == rightScore {
+		return nil, "", "", 0, 0, errProtocol("draw", "draws are not rated")
+	}
+	winnerID, loserID := left, right
+	winnerScore, loserScore := leftScore, rightScore
+	if rightScore > leftScore {
+		winnerID, loserID = right, left
+		winnerScore, loserScore = rightScore, leftScore
+	}
+	if reporterID != winnerID {
+		return nil, "", "", 0, 0, errProtocol("not_winner", "only the winner can report the match result")
+	}
+	sess.Status = SessionFinished
+	sess.Match.Status = gamecore.MatchFinished
+	sess.Match.WinnerID = winnerID
+	return sess, winnerID, loserID, winnerScore, loserScore, nil
+}
+
 func (h *Hub) CleanupExpired() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -295,6 +343,7 @@ func (h *Hub) startMatchLocked(s *Session) {
 		players = append(players, gamecore.Player{ID: p.PlayerID, DisplayName: p.DisplayName, Rating: p.Rating})
 	}
 	s.Match = gamecore.NewEngine(time.Now().UnixNano()).NewMatch(randomID("mat", 12), players)
+	s.Match.TotalRounds = normalizedRounds(s.Rounds)
 	s.Status = SessionInGame
 	for i := range s.Players {
 		s.Players[i].Ready = true
@@ -334,12 +383,23 @@ func sessionSummary(s *Session) protocol.SessionSummary {
 		ID:            s.ID,
 		Type:          string(s.Type),
 		HostName:      s.hostName(),
+		Rounds:        normalizedRounds(s.Rounds),
 		PlayerCount:   len(s.Players),
 		MaxPlayers:    s.MaxPlayers,
 		AverageRating: s.averageRating(),
 		Status:        string(s.Status),
 		CreatedAt:     s.CreatedAt,
 	}
+}
+
+func normalizedRounds(rounds int) int {
+	if rounds < 1 {
+		return 1
+	}
+	if rounds > 99 {
+		return 99
+	}
+	return rounds
 }
 
 func (s *Session) hostName() string {

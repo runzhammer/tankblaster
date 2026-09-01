@@ -16,6 +16,10 @@ func copyTextToClipboard(value string) error {
 	return nil
 }
 
+func readClipboardText() (string, error) {
+	return "", nil
+}
+
 func PendingClipboardText() string {
 	androidClipboard.mu.Lock()
 	defer androidClipboard.mu.Unlock()

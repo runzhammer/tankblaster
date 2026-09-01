@@ -145,7 +145,11 @@ func (s *Server) handleEnvelope(ctx context.Context, c *Client, env protocol.Env
 		if err := c.requireAuth(); err != nil {
 			return err
 		}
-		sess, err := s.hub.CreateSession(SessionPublic, c.sessionPlayer())
+		req, err := protocol.Decode[protocol.CreateSession](env)
+		if err != nil {
+			return errProtocol("bad_message", "invalid create session request")
+		}
+		sess, err := s.hub.CreateSession(SessionPublic, c.sessionPlayer(), req.Rounds)
 		if err != nil {
 			return err
 		}
@@ -154,7 +158,11 @@ func (s *Server) handleEnvelope(ctx context.Context, c *Client, env protocol.Env
 		if err := c.requireAuth(); err != nil {
 			return err
 		}
-		sess, err := s.hub.CreateSession(SessionPrivate, c.sessionPlayer())
+		req, err := protocol.Decode[protocol.CreateSession](env)
+		if err != nil {
+			return errProtocol("bad_message", "invalid create session request")
+		}
+		sess, err := s.hub.CreateSession(SessionPrivate, c.sessionPlayer(), req.Rounds)
 		if err != nil {
 			return err
 		}
@@ -246,6 +254,41 @@ func (s *Server) handleEnvelope(ctx context.Context, c *Client, env protocol.Env
 			return s.broadcast(sess, protocol.TypeGameOver, protocol.StateUpdate{State: sess.Match})
 		}
 		return nil
+	case protocol.TypeOnlineGameCommand:
+		if err := c.requireAuth(); err != nil {
+			return err
+		}
+		req, err := protocol.Decode[protocol.OnlineGameCommand](env)
+		if err != nil || req.MatchID == "" || req.Kind == "" {
+			return errProtocol("bad_message", "invalid online game command")
+		}
+		sess := findSessionForMatchState(s.hub, req.MatchID)
+		if sess == nil {
+			return errProtocol("match_not_found", "match not found")
+		}
+		if !sessionHasPlayer(sess, c.player.PlayerID) {
+			return errProtocol("not_in_match", "player is not in that match")
+		}
+		req.PlayerID = c.player.PlayerID
+		return s.broadcast(sess, protocol.TypeOnlineGameCommand, req)
+	case protocol.TypeMatchComplete:
+		if err := c.requireAuth(); err != nil {
+			return err
+		}
+		req, err := protocol.Decode[protocol.MatchComplete](env)
+		if err != nil || req.MatchID == "" {
+			return errProtocol("bad_message", "invalid match result")
+		}
+		sess, winnerID, loserID, winnerScore, loserScore, err := s.hub.CompleteMatch(req.MatchID, c.player.PlayerID, req.Scores)
+		if err != nil {
+			return err
+		}
+		if winnerID != "" && s.store != nil {
+			if err := s.store.RecordMatchResult(ctx, winnerID, loserID, winnerScore, loserScore, normalizedRounds(sess.Match.TotalRounds)); err != nil {
+				log.Printf("record match result: %v", err)
+			}
+		}
+		return s.broadcast(sess, protocol.TypeGameOver, protocol.StateUpdate{State: sess.Match})
 	case protocol.TypeGetLeaderboard:
 		req, _ := protocol.Decode[protocol.LeaderboardRequest](env)
 		entries, err := s.store.Leaderboard(ctx, req.Limit)
@@ -351,14 +394,30 @@ func validateName(name string) string {
 }
 
 func findSessionForMatch(h *Hub, matchID string) string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for id, sess := range h.sessions {
-		if sess.Match.MatchID == matchID {
-			return id
-		}
+	if sess := findSessionForMatchState(h, matchID); sess != nil {
+		return sess.ID
 	}
 	return ""
+}
+
+func findSessionForMatchState(h *Hub, matchID string) *Session {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, sess := range h.sessions {
+		if sess.Match.MatchID == matchID {
+			return sess
+		}
+	}
+	return nil
+}
+
+func sessionHasPlayer(sess *Session, playerID string) bool {
+	for _, player := range sess.Players {
+		if player.PlayerID == playerID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) cleanupLoop(ctx context.Context) {
