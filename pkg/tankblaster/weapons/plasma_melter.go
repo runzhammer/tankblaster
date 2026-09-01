@@ -11,7 +11,7 @@ func PlasmaMelter() Weapon {
 	weapon := withDefaultSounds(Weapon{
 		Name:                   "Plasmaschmelzer",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
+		RadialDamage:           RadialDamageProfile{InnerRadius: 198, OuterRadius: 297, MaxDamage: 100},
 		Unlocked:               true,
 		RoundProjectile:        true,
 		DamagesTerrain:         true,

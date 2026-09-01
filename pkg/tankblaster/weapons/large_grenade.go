@@ -9,7 +9,7 @@ func LargeGrenade() Weapon {
 	return withDefaultSounds(Weapon{
 		Name:                   "Große Granate",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
+		RadialDamage:           RadialDamageProfile{InnerRadius: 32, OuterRadius: 48, MaxDamage: 100},
 		Unlocked:               true,
 		RoundProjectile:        true,
 		DamagesTerrain:         true,

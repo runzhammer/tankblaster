@@ -4,7 +4,6 @@ func Water() Weapon {
 	return withDefaultSounds(Weapon{
 		Name:                   "Wasser",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
 		Unlocked:               true,
 		RoundProjectile:        true,
 		ImpactAnimationSeconds: DefaultImpactAnimationSeconds,

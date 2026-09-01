@@ -11,7 +11,7 @@ func AtomBomb() Weapon {
 	weapon := withDefaultSounds(Weapon{
 		Name:                   "Atombombe",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
+		RadialDamage:           RadialDamageProfile{InnerRadius: 60, OuterRadius: 90, MaxDamage: 100},
 		Unlocked:               true,
 		RoundProjectile:        true,
 		DamagesTerrain:         true,

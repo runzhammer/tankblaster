@@ -8,7 +8,6 @@ func SplitterBomb() Weapon {
 	return withDefaultSounds(Weapon{
 		Name:                   "Splitterbombe",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
 		Unlocked:               true,
 		RoundProjectile:        true,
 		DamagesTerrain:         true,
@@ -20,6 +19,7 @@ func SplitterBomb() Weapon {
 
 func SplitterBombFragment() Weapon {
 	fragment := Grenade()
+	fragment.RadialDamage = RadialDamageProfile{InnerRadius: 10, OuterRadius: 15, MaxDamage: 100}
 	fragment.ProjectileScale = splitterBombFragmentScale
 	return fragment
 }

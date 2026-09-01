@@ -17,6 +17,7 @@ type Weapon struct {
 	Name                   string
 	Color                  color.RGBA
 	Damage                 int
+	RadialDamage           RadialDamageProfile
 	FireSound              string
 	ImpactSound            string
 	Unlocked               bool
@@ -43,6 +44,25 @@ type Weapon struct {
 	SplitterBomb           bool
 	Laser                  bool
 	Utility                bool
+}
+
+type RadialDamageProfile struct {
+	InnerRadius int
+	OuterRadius int
+	MaxDamage   int
+}
+
+func CalculateRadialDamage(distance int, profile RadialDamageProfile) int {
+	if profile.MaxDamage <= 0 || profile.OuterRadius <= profile.InnerRadius {
+		return 0
+	}
+	if distance <= profile.InnerRadius {
+		return profile.MaxDamage
+	}
+	if distance >= profile.OuterRadius {
+		return 0
+	}
+	return ((profile.OuterRadius - distance) * profile.MaxDamage) / (profile.OuterRadius - profile.InnerRadius)
 }
 
 type ImpactAnimationStyle uint8

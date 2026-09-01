@@ -4,7 +4,7 @@ func MFSTriple() Weapon {
 	return withDefaultSounds(Weapon{
 		Name:                   "MFS 3-fach",
 		Color:                  whiteProjectileColor(),
-		Damage:                 DirectHitDamage,
+		RadialDamage:           RadialDamageProfile{InnerRadius: 32, OuterRadius: 48, MaxDamage: 100},
 		Unlocked:               true,
 		RoundProjectile:        true,
 		DamagesTerrain:         true,

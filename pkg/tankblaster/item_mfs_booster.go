@@ -34,6 +34,20 @@ func (s *GameScene) consumeMFSBoosterCharge(playerIndex int) bool {
 	return true
 }
 
+func (s *GameScene) consumeMFSBoosterState(playerIndex int) (int, bool) {
+	if playerIndex < 0 || playerIndex >= len(s.inventories) {
+		return 0, false
+	}
+	s.ensureInventory(playerIndex)
+	charges := s.inventories[playerIndex].mfsBoosterCharges
+	if charges <= 0 {
+		return 0, false
+	}
+	state := (mfsBoosterUsesPerPurchase - positiveMod(charges, mfsBoosterUsesPerPurchase)) % 3
+	s.inventories[playerIndex].mfsBoosterCharges--
+	return state, true
+}
+
 func (s *GameScene) mfsBoosterCountForPlayer(playerIndex int) int {
 	if playerIndex < 0 || playerIndex >= len(s.inventories) {
 		return 0

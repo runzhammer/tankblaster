@@ -25,17 +25,20 @@ func (s *GameScene) weaponForProjectile(p *projectile) weaponspkg.Weapon {
 
 func (s *GameScene) randomSurpriseEggWeapon() weaponspkg.Weapon {
 	weapons := gameWeapons()
-	candidates := make([]weaponspkg.Weapon, 0, len(weapons))
-	for index, weapon := range weapons {
-		if index == 0 || weapon.SurpriseEgg || weapon.Utility {
-			continue
-		}
-		candidates = append(candidates, weapon)
-	}
-	if len(candidates) == 0 {
+	index := s.randomSurpriseEggWeaponIndex()
+	if index < 0 || index >= len(weapons) {
 		return weapons[1]
 	}
-	return candidates[s.rng.Intn(len(candidates))]
+	return weapons[index]
+}
+
+func (s *GameScene) randomSurpriseEggWeaponIndex() int {
+	for {
+		weapon := s.rng.Intn(19)
+		if weapon != 0 && weapon != 13 && weapon != 18 {
+			return weapon
+		}
+	}
 }
 
 func projectileRadiusForWeapon(weapon weaponspkg.Weapon) float64 {

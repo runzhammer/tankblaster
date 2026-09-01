@@ -37,6 +37,7 @@ type FileSettings struct {
 			MinSpeed float64 `yaml:"min_speed"`
 			MaxSpeed float64 `yaml:"max_speed"`
 		} `yaml:"clouds"`
+		Scoring FileScoringSettings `yaml:"scoring"`
 	} `yaml:"gameplay"`
 	Debug struct {
 		Enabled             bool     `yaml:"enabled"`
@@ -52,6 +53,38 @@ type FileSettings struct {
 	Online struct {
 		ServerURL string `yaml:"server_url"`
 	} `yaml:"online"`
+}
+
+type FileScoringSettings struct {
+	DamageReceivedCreditMultiplier *int `yaml:"damage_received_credit_multiplier"`
+	Kill                           struct {
+		Points  *int `yaml:"points"`
+		Credits *int `yaml:"credits"`
+	} `yaml:"kill"`
+	Suicide struct {
+		PointsPenalty  *int `yaml:"points_penalty"`
+		CreditsPenalty *int `yaml:"credits_penalty"`
+	} `yaml:"suicide"`
+	RoundWin struct {
+		Points                   *int `yaml:"points"`
+		CreditPerRemainingEnergy *int `yaml:"credit_per_remaining_energy"`
+	} `yaml:"round_win"`
+}
+
+type ScoringSettings struct {
+	DamageReceivedCreditMultiplier int
+	Kill                           struct {
+		Points  int
+		Credits int
+	}
+	Suicide struct {
+		PointsPenalty  int
+		CreditsPenalty int
+	}
+	RoundWin struct {
+		Points                   int
+		CreditPerRemainingEnergy int
+	}
 }
 
 type DebugPlayerSettings struct {
@@ -97,6 +130,7 @@ type Settings struct {
 			MinSpeed float64
 			MaxSpeed float64
 		}
+		Scoring ScoringSettings
 	}
 	Debug struct {
 		Enabled             bool
@@ -204,6 +238,7 @@ func init() {
 	if s.Gameplay.Clouds.MaxSpeed < s.Gameplay.Clouds.MinSpeed {
 		s.Gameplay.Clouds.MaxSpeed = s.Gameplay.Clouds.MinSpeed
 	}
+	s.Gameplay.Scoring = scoringSettingsWithDefaults(fs.Gameplay.Scoring)
 	s.Debug.Enabled = fs.Debug.Enabled
 	s.Debug.Mode = fs.Debug.Mode
 	s.Debug.StartScene = fs.Debug.StartScene
@@ -226,6 +261,41 @@ func init() {
 
 func Config() *Settings {
 	return GameSettings
+}
+
+func scoringSettingsWithDefaults(fs FileScoringSettings) ScoringSettings {
+	// Defaults mirror the Points/Credits economy of Tank Blaster II 1.3.0.0.
+	var s ScoringSettings
+	s.DamageReceivedCreditMultiplier = 7
+	s.Kill.Points = 2
+	s.Kill.Credits = 3000
+	s.Suicide.PointsPenalty = 3
+	s.Suicide.CreditsPenalty = 1000
+	s.RoundWin.Points = 1
+	s.RoundWin.CreditPerRemainingEnergy = 15
+
+	if fs.DamageReceivedCreditMultiplier != nil {
+		s.DamageReceivedCreditMultiplier = *fs.DamageReceivedCreditMultiplier
+	}
+	if fs.Kill.Points != nil {
+		s.Kill.Points = *fs.Kill.Points
+	}
+	if fs.Kill.Credits != nil {
+		s.Kill.Credits = *fs.Kill.Credits
+	}
+	if fs.Suicide.PointsPenalty != nil {
+		s.Suicide.PointsPenalty = *fs.Suicide.PointsPenalty
+	}
+	if fs.Suicide.CreditsPenalty != nil {
+		s.Suicide.CreditsPenalty = *fs.Suicide.CreditsPenalty
+	}
+	if fs.RoundWin.Points != nil {
+		s.RoundWin.Points = *fs.RoundWin.Points
+	}
+	if fs.RoundWin.CreditPerRemainingEnergy != nil {
+		s.RoundWin.CreditPerRemainingEnergy = *fs.RoundWin.CreditPerRemainingEnergy
+	}
+	return s
 }
 
 func (c ColorSettings) RGBA(fallback color.RGBA) color.RGBA {
