@@ -24,3 +24,6 @@ android/app/build/
 android/app/libs/*.aar
 android/app/libs/*-sources.jar
 dist/
+.live-test/
+.tmp
+.vscode

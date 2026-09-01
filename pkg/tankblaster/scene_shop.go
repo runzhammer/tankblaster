@@ -40,6 +40,7 @@ const (
 	shopComputerEnterList shopComputerPhase = iota
 	shopComputerNavigate
 	shopComputerBuy
+	shopComputerChooseNext
 	shopComputerBack
 	shopComputerContinue
 )
@@ -194,6 +195,12 @@ func (s *GameScene) shopPlayersWithCredits() []int {
 }
 
 func (s *GameScene) handleShopInput() {
+	if s.g.online != nil && !s.onlineCanControlPlayer(s.currentShopPlayerIndex()) {
+		return
+	}
+	if s.shopAwaitingOnline {
+		return
+	}
 	if s.currentShopPlayerIsComputer() {
 		s.handleComputerShopInput()
 		return
@@ -208,34 +215,28 @@ func (s *GameScene) handleShopInput() {
 
 	switch {
 	case cursor.In(s.shopClassARect()):
-		s.shopHoverClass = 1
+		s.requestShopHover(1)
 	case cursor.In(s.shopClassBRect()):
-		s.shopHoverClass = 2
+		s.requestShopHover(2)
 	default:
-		s.shopHoverClass = 0
+		s.requestShopHover(0)
 	}
 
 	if !primaryPointerJustPressed() {
 		return
 	}
 	if cursor.In(s.shopClassARect()) {
-		s.shopMode = shopModeClassA
-		s.shopSelectedIndex = 0
+		s.requestShopMode(shopModeClassA)
 		return
 	}
 	if cursor.In(s.shopClassBRect()) {
-		s.shopMode = shopModeClassB
-		s.shopSelectedIndex = 0
+		s.requestShopMode(shopModeClassB)
 		return
 	}
 	if !cursor.In(s.shopContinueRect()) {
 		return
 	}
-	if s.shopPlayerCursor < len(s.shopPlayerOrder)-1 {
-		s.advanceShopPlayer()
-		return
-	}
-	s.startRound()
+	s.requestShopContinue()
 }
 
 func (s *GameScene) handleComputerShopInput() {
@@ -257,9 +258,7 @@ func (s *GameScene) handleComputerShopInput() {
 
 	switch plan.phase {
 	case shopComputerEnterList:
-		s.shopMode = plan.mode
-		s.shopSelectedIndex = 0
-		s.shopHoverClass = 0
+		s.requestShopMode(plan.mode)
 		plan.phase = shopComputerNavigate
 		plan.delay = shopComputerNavigateDelay
 	case shopComputerNavigate:
@@ -271,12 +270,12 @@ func (s *GameScene) handleComputerShopInput() {
 		}
 		plan.targetIndex = maxInt(0, minInt(plan.targetIndex, len(items)-1))
 		if s.shopSelectedIndex < plan.targetIndex {
-			s.shopSelectedIndex++
+			s.requestShopSelect(s.shopSelectedIndex + 1)
 			plan.delay = shopComputerNavigateDelay
 			return
 		}
 		if s.shopSelectedIndex > plan.targetIndex {
-			s.shopSelectedIndex--
+			s.requestShopSelect(s.shopSelectedIndex - 1)
 			plan.delay = shopComputerNavigateDelay
 			return
 		}
@@ -284,10 +283,18 @@ func (s *GameScene) handleComputerShopInput() {
 		plan.delay = shopComputerBuyDelay
 	case shopComputerBuy:
 		before := s.credits[playerIndex]
-		s.buySelectedShopItem()
+		s.requestBuySelectedShopItem()
+		if s.g.online != nil {
+			plan.purchases++
+			plan.phase = shopComputerChooseNext
+			plan.delay = shopComputerBuyDelay
+			return
+		}
 		if s.credits[playerIndex] < before {
 			plan.purchases++
 		}
+		fallthrough
+	case shopComputerChooseNext:
 		next, ok := s.nextComputerShopChoiceInMode(playerIndex, plan.mode, plan.purchases)
 		if !ok {
 			plan.phase = shopComputerBack
@@ -298,17 +305,12 @@ func (s *GameScene) handleComputerShopInput() {
 		plan.phase = shopComputerNavigate
 		plan.delay = shopComputerNavigateDelay
 	case shopComputerBack:
-		s.shopMode = shopModeEntry
-		s.shopHoverClass = 0
+		s.requestShopBack()
 		plan.phase = shopComputerContinue
 		plan.delay = shopComputerContinueDelay
 	case shopComputerContinue:
 		s.shopComputerPlan = nil
-		if s.shopPlayerCursor < len(s.shopPlayerOrder)-1 {
-			s.advanceShopPlayer()
-			return
-		}
-		s.startRound()
+		s.requestShopContinue()
 	}
 }
 
@@ -454,39 +456,104 @@ func (s *GameScene) handleShopListInput(cursor image.Point) {
 		return
 	}
 	if shouldNavigateShopList(ebiten.KeyArrowUp) {
-		s.setShopSelectedIndex(maxInt(0, s.shopSelectedIndex-1))
+		s.requestShopSelect(maxInt(0, s.shopSelectedIndex-1))
 	}
 	if shouldNavigateShopList(ebiten.KeyArrowDown) {
-		s.setShopSelectedIndex(minInt(len(items)-1, s.shopSelectedIndex+1))
+		s.requestShopSelect(minInt(len(items)-1, s.shopSelectedIndex+1))
 	}
 	_, wheelY := ebiten.Wheel()
 	if wheelY > 0 {
-		s.setShopSelectedIndex(maxInt(0, s.shopSelectedIndex-int(math.Ceil(wheelY))))
+		s.requestShopSelect(maxInt(0, s.shopSelectedIndex-int(math.Ceil(wheelY))))
 	}
 	if wheelY < 0 {
-		s.setShopSelectedIndex(minInt(len(items)-1, s.shopSelectedIndex+int(math.Ceil(-wheelY))))
+		s.requestShopSelect(minInt(len(items)-1, s.shopSelectedIndex+int(math.Ceil(-wheelY))))
 	}
 	if s.handleMobileShopListScroll(len(items)) {
 		return
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
-		s.buySelectedShopItem()
+		s.requestBuySelectedShopItem()
 	}
 	if !primaryPointerJustPressed() {
 		return
 	}
 	if cursor.In(s.shopBackRect()) {
-		s.shopMode = shopModeEntry
-		s.shopHoverClass = 0
+		s.requestShopBack()
 		return
 	}
 	if cursor.In(s.shopBuyRect()) {
-		s.buySelectedShopItem()
+		s.requestBuySelectedShopItem()
 		return
 	}
 	if index, ok := s.shopListIndexAt(cursor, len(items)); ok {
-		s.setShopSelectedIndex(index)
+		s.requestShopSelect(index)
 	}
+}
+
+func (s *GameScene) requestShopHover(hoverClass int) {
+	if s.shopHoverClass == hoverClass {
+		return
+	}
+	if s.g.online != nil {
+		s.syncOnlineShopHover(hoverClass)
+		return
+	}
+	s.shopHoverClass = hoverClass
+}
+
+func (s *GameScene) requestShopMode(mode shopMode) {
+	if s.g.online != nil {
+		s.syncOnlineShopMode(mode)
+		return
+	}
+	s.setShopMode(mode)
+}
+
+func (s *GameScene) setShopMode(mode shopMode) {
+	s.shopMode = mode
+	s.shopSelectedIndex = 0
+	s.shopHoverClass = 0
+}
+
+func (s *GameScene) requestShopSelect(index int) {
+	if s.g.online != nil {
+		s.syncOnlineShopSelect(index)
+		return
+	}
+	s.setShopSelectedIndex(index)
+}
+
+func (s *GameScene) requestBuySelectedShopItem() {
+	if s.g.online != nil {
+		s.syncOnlineShopBuy()
+		return
+	}
+	s.buySelectedShopItem()
+}
+
+func (s *GameScene) requestShopBack() {
+	if s.g.online != nil {
+		s.syncOnlineShopBack()
+		return
+	}
+	s.shopMode = shopModeEntry
+	s.shopHoverClass = 0
+}
+
+func (s *GameScene) requestShopContinue() {
+	if s.g.online != nil {
+		s.syncOnlineShopContinue()
+		return
+	}
+	s.continueShop()
+}
+
+func (s *GameScene) continueShop() {
+	if s.shopPlayerCursor < len(s.shopPlayerOrder)-1 {
+		s.advanceShopPlayer()
+		return
+	}
+	s.startRound()
 }
 
 func (s *GameScene) setShopSelectedIndex(index int) {

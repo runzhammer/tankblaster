@@ -1,0 +1,38 @@
+server:
+  address: "0.0.0.0:8765"
+  public_url: "http://127.0.0.1:8765"
+
+database:
+  driver: "sqlite"
+  path: "/data/tankblaster.db"
+
+sessions:
+  max_players: 2
+  invite_ttl: "24h"
+  invite_token_length: 32
+  join_code_length: 8
+  max_session_lifetime: "2h"
+  cleanup_interval: "1m"
+
+matchmaking:
+  enabled: true
+  initial_rating_range: 100
+  rating_range_step: 100
+  rating_range_expand_interval: "15s"
+  maximum_rating_range: 1000
+  queue_timeout: "10m"
+
+rating:
+  enabled: true
+  initial_rating: 1000
+  k_factor: 32
+  minimum_rating: 0
+
+score:
+  win_points: 100
+  loss_points: 0
+  draw_points: 25
+
+leaderboard:
+  default_limit: 50
+  maximum_limit: 100

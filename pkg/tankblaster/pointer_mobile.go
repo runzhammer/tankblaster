@@ -66,6 +66,10 @@ func primaryPointerPressedInRect(r image.Rectangle) bool {
 	return false
 }
 
+func primaryPointerIsTouch() bool {
+	return true
+}
+
 func gamePointerPosition(x, y int) (int, int) {
 	viewport := core.GameViewport()
 	if viewport.Empty() {

@@ -719,6 +719,7 @@ type GameScene struct {
 	shopClassBStock      []int
 	shopClassBItems      []int
 	shopComputerPlan     *shopComputerPlan
+	shopAwaitingOnline   bool
 	shopTouchScroll      shopTouchScrollState
 	scrollBarDragging    bool
 	zeroPowerStartDelay  int
@@ -2268,11 +2269,20 @@ func (s *GameScene) handleGameDialogInput() error {
 		}
 		if primaryPointerJustPressed() {
 			x, y := primaryPointerPosition()
-			if s.gameHelpOpen && image.Pt(x, y).In(gameHelpOKRect()) {
+			p := image.Pt(x, y)
+			if s.gameHelpOpen && p.In(dialogCloseRect(gameHelpRect())) {
+				s.pressedDialogButton = "game_help_close"
+				return nil
+			}
+			if s.playerInfoOpen && p.In(dialogCloseRect(playerInfoRect())) {
+				s.pressedDialogButton = "player_info_close"
+				return nil
+			}
+			if s.gameHelpOpen && p.In(gameHelpOKRect()) {
 				s.pressedDialogButton = "game_help_ok"
 				return nil
 			}
-			if s.playerInfoOpen && image.Pt(x, y).In(playerInfoOKRect()) {
+			if s.playerInfoOpen && p.In(playerInfoOKRect()) {
 				s.pressedDialogButton = "player_info_ok"
 				return nil
 			}
@@ -2286,7 +2296,13 @@ func (s *GameScene) handleGameDialogInput() error {
 			case button == "game_help_ok" && s.gameHelpOpen && p.In(gameHelpOKRect()):
 				s.gameHelpOpen = false
 				return nil
+			case button == "game_help_close" && s.gameHelpOpen && p.In(dialogCloseRect(gameHelpRect())):
+				s.gameHelpOpen = false
+				return nil
 			case button == "player_info_ok" && s.playerInfoOpen && p.In(playerInfoOKRect()):
+				s.playerInfoOpen = false
+				return nil
+			case button == "player_info_close" && s.playerInfoOpen && p.In(dialogCloseRect(playerInfoRect())):
 				s.playerInfoOpen = false
 				return nil
 			}
@@ -2336,10 +2352,13 @@ func (s *GameScene) handleConfirmDialogInput() error {
 	}
 	if primaryPointerJustPressed() {
 		x, y := primaryPointerPosition()
+		p := image.Pt(x, y)
 		switch {
-		case image.Pt(x, y).In(confirmDialogYesRect()):
+		case p.In(dialogCloseRect(confirmDialogRect())):
+			s.pressedDialogButton = "confirm_close"
+		case p.In(confirmDialogYesRect()):
 			s.pressedDialogButton = "confirm_yes"
-		case image.Pt(x, y).In(confirmDialogNoRect()):
+		case p.In(confirmDialogNoRect()):
 			s.pressedDialogButton = "confirm_no"
 		}
 		return nil
@@ -2353,6 +2372,8 @@ func (s *GameScene) handleConfirmDialogInput() error {
 		case button == "confirm_yes" && p.In(confirmDialogYesRect()):
 			return s.confirmDialogYes()
 		case button == "confirm_no" && p.In(confirmDialogNoRect()):
+			s.closeConfirmDialog()
+		case button == "confirm_close" && p.In(dialogCloseRect(confirmDialogRect())):
 			s.closeConfirmDialog()
 		}
 	}
@@ -7753,6 +7774,10 @@ func confirmDialogYesRect() image.Rectangle {
 func confirmDialogNoRect() image.Rectangle {
 	r := confirmDialogRect()
 	return image.Rect(r.Max.X-84, r.Max.Y-44, r.Max.X-14, r.Max.Y-20)
+}
+
+func dialogCloseRect(r image.Rectangle) image.Rectangle {
+	return image.Rect(r.Max.X-30, r.Min.Y+4, r.Max.X-8, r.Min.Y+24)
 }
 
 func centerDialogRect(w, h int) image.Rectangle {

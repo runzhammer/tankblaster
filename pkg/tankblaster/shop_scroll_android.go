@@ -41,7 +41,7 @@ func (s *GameScene) handleMobileShopListScroll(count int) bool {
 		rowH := maxInt(1, s.shopListRowHeight())
 		if delta <= -rowH/3 || delta >= rowH/3 {
 			s.shopTouchScroll.dragged = true
-			s.setShopSelectedIndex(maxInt(0, minInt(count-1, s.shopTouchScroll.start+delta/rowH)))
+			s.requestShopSelect(maxInt(0, minInt(count-1, s.shopTouchScroll.start+delta/rowH)))
 		}
 		return s.shopTouchScroll.dragged
 	}

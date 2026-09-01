@@ -120,6 +120,9 @@ type OnlineGameCommand struct {
 	XMV12Mode      bool    `json:"xm_v12_mode,omitempty"`
 	XMV12Direction int     `json:"xm_v12_direction,omitempty"`
 	XMV12MotorOff  bool    `json:"xm_v12_motor_off,omitempty"`
+	ShopMode       int     `json:"shop_mode,omitempty"`
+	ShopHoverClass int     `json:"shop_hover_class,omitempty"`
+	ShopListIndex  int     `json:"shop_list_index,omitempty"`
 }
 
 type Reconnect struct {

@@ -35,3 +35,7 @@ func primaryPointerPressedInRect(r image.Rectangle) bool {
 	x, y := primaryPointerPosition()
 	return image.Pt(x, y).In(r)
 }
+
+func primaryPointerIsTouch() bool {
+	return false
+}

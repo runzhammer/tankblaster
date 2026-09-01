@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -47,6 +48,11 @@ func applyRuntimeConfig() {
 	}
 	if value := strings.TrimSpace(os.Getenv("TANKBLASTER_DEBUG_START_SCENE")); value != "" {
 		cfg.Debug.StartScene = value
+	}
+	if value := strings.TrimSpace(os.Getenv("TANKBLASTER_DEBUG_ROUNDS")); value != "" {
+		if rounds, err := strconv.Atoi(value); err == nil {
+			cfg.Debug.Game.Rounds = rounds
+		}
 	}
 	if value := strings.TrimSpace(os.Getenv("TANKBLASTER_ONLINE_SERVER_URL")); value != "" {
 		cfg.Online.ServerURL = value

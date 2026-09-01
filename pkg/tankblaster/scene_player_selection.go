@@ -2,11 +2,13 @@ package tankblaster
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/draw"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/golang/freetype/truetype"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -28,6 +30,9 @@ const (
 
 	slotW = 150
 	slotH = 232
+
+	onlineAvailabilityCheckIntervalTicks = 300
+	onlineUnavailableMessageTicks        = 180
 )
 
 var defaultPlayerColors = []color.RGBA{
@@ -84,18 +89,25 @@ type playerSelectionSlot struct {
 type playerSelectionScene struct {
 	g *GameLoop
 
-	rounds         int
-	tick           int
-	slots          [maxPlayerSlots]playerSelectionSlot
-	focusedName    int
-	openPaletteFor int
-	inputRunes     []rune
-	message        string
-	optionsOpen    bool
-	helpOpen       bool
-	languageOpen   bool
-	languageDraft  languageID
-	optionsDraft   gameOptions
+	rounds                int
+	tick                  int
+	slots                 [maxPlayerSlots]playerSelectionSlot
+	focusedName           int
+	openPaletteFor        int
+	inputRunes            []rune
+	message               string
+	optionsOpen           bool
+	helpOpen              bool
+	languageOpen          bool
+	languageDraft         languageID
+	optionsDraft          gameOptions
+	transientMessage      string
+	transientMessageUntil int
+
+	onlineAvailable     bool
+	onlineCheckInFlight bool
+	onlineNextCheckTick int
+	onlineCheckResults  chan bool
 
 	baseImage         *ebiten.Image
 	canvas            *ebiten.Image
@@ -110,13 +122,14 @@ func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 	baseImage := mustImageFromPNG(r.PlayerSelectionBase)
 	game.playSound(tankBlasterSounds.Events[soundEventPlayerSelectionStart])
 	s := &playerSelectionScene{
-		g:              game,
-		rounds:         game.rounds,
-		focusedName:    -1,
-		openPaletteFor: -1,
-		baseImage:      baseImage,
-		canvas:         ebiten.NewImage(baseImage.Bounds().Dx(), baseImage.Bounds().Dy()),
-		humanPortrait:  mustImageFromPNG(r.PlayerHuman),
+		g:                  game,
+		rounds:             game.rounds,
+		focusedName:        -1,
+		openPaletteFor:     -1,
+		baseImage:          baseImage,
+		canvas:             ebiten.NewImage(baseImage.Bounds().Dx(), baseImage.Bounds().Dy()),
+		onlineCheckResults: make(chan bool, 1),
+		humanPortrait:      mustImageFromPNG(r.PlayerHuman),
 		computerPortraits: map[computerplayers.ID]*ebiten.Image{
 			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
 			computerplayers.FrederikID: mustImageFromPNG(r.PlayerComputerFrederik),
@@ -128,6 +141,7 @@ func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 	if s.rounds <= 0 {
 		s.rounds = 10
 	}
+	s.queueOnlineAvailabilityCheck()
 	for i := range s.slots {
 		s.slots[i].Color = defaultPlayerColors[i%len(defaultPlayerColors)]
 	}
@@ -137,6 +151,7 @@ func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 func (s *playerSelectionScene) Update() error {
 	defer s.syncPlayerNameInputActive()
 	s.tick++
+	s.updateOnlineAvailability()
 	if inpututil.IsKeyJustPressed(ebiten.KeyF1) {
 		s.openHelpDialog()
 		return nil
@@ -191,8 +206,8 @@ func (s *playerSelectionScene) Update() error {
 	if s.handleStartClick(x, y) {
 		return s.startGame()
 	}
-	if s.handleOnlineClick(x, y) {
-		return s.g.SetNewScene(NewOnlineScene)
+	if handled, err := s.handleOnlineClick(x, y); handled {
+		return err
 	}
 	if s.handlePaletteClick(x, y) {
 		return nil
@@ -416,11 +431,18 @@ func (s *playerSelectionScene) handleStartClick(x, y int) bool {
 	return image.Pt(x, y).In(image.Rect(780, 673, 922, 707))
 }
 
-func (s *playerSelectionScene) handleOnlineClick(x, y int) bool {
+func (s *playerSelectionScene) handleOnlineClick(x, y int) (bool, error) {
 	if !core.Config().Online.Enabled {
-		return false
+		return false, nil
 	}
-	return image.Pt(x, y).In(image.Rect(205, 673, 348, 706))
+	if !image.Pt(x, y).In(onlineSelectionButtonRect()) {
+		return false, nil
+	}
+	if !s.onlineAvailable {
+		s.showOnlineUnavailableMessage()
+		return true, nil
+	}
+	return true, s.g.SetNewScene(NewOnlineScene)
 }
 
 func (s *playerSelectionScene) handleOptionsClick(x, y int) bool {
@@ -456,6 +478,9 @@ func (s *playerSelectionScene) dialogButtonAt(x, y int) string {
 	p := image.Pt(x, y)
 	if s.languageOpen {
 		r := languageDialogRect()
+		if p.In(dialogCloseRect(r)) {
+			return "language_close"
+		}
 		if p.In(image.Rect(r.Min.X+88, r.Min.Y+120, r.Min.X+162, r.Min.Y+141)) {
 			return "language_ok"
 		}
@@ -464,6 +489,8 @@ func (s *playerSelectionScene) dialogButtonAt(x, y int) string {
 	if s.optionsOpen {
 		r := optionsDialogRect()
 		switch {
+		case p.In(dialogCloseRect(r)):
+			return "options_close"
 		case p.In(image.Rect(r.Max.X-88, r.Min.Y+56, r.Max.X-16, r.Min.Y+77)):
 			return "options_ok"
 		case p.In(image.Rect(r.Max.X-88, r.Min.Y+86, r.Max.X-16, r.Min.Y+107)):
@@ -474,6 +501,9 @@ func (s *playerSelectionScene) dialogButtonAt(x, y int) string {
 	}
 	if s.helpOpen {
 		r := helpDialogRect()
+		if p.In(dialogCloseRect(r)) {
+			return "selection_help_close"
+		}
 		if p.In(image.Rect(r.Max.X-75, r.Max.Y-63, r.Max.X-12, r.Max.Y-39)) {
 			return "selection_help_ok"
 		}
@@ -496,13 +526,19 @@ func (s *playerSelectionScene) releaseDialogButton(x, y int) {
 		s.optionsOpen = false
 	case "options_cancel":
 		s.optionsOpen = false
+	case "options_close":
+		s.optionsOpen = false
 	case "options_language":
 		s.languageDraft = currentLanguage
 		s.languageOpen = true
 	case "language_ok":
 		currentLanguage = s.languageDraft
 		s.languageOpen = false
+	case "language_close":
+		s.languageOpen = false
 	case "selection_help_ok":
+		s.helpOpen = false
+	case "selection_help_close":
 		s.helpOpen = false
 	}
 }
@@ -689,6 +725,50 @@ func (s *playerSelectionScene) startGame() error {
 	return s.g.SetNewScene(NewGameScene)
 }
 
+func (s *playerSelectionScene) updateOnlineAvailability() {
+	for {
+		select {
+		case available := <-s.onlineCheckResults:
+			s.onlineAvailable = available
+			s.onlineCheckInFlight = false
+			s.onlineNextCheckTick = s.tick + onlineAvailabilityCheckIntervalTicks
+		default:
+			if s.transientMessage != "" && s.tick >= s.transientMessageUntil {
+				s.transientMessage = ""
+			}
+			if core.Config().Online.Enabled && !s.onlineCheckInFlight && s.tick >= s.onlineNextCheckTick {
+				s.queueOnlineAvailabilityCheck()
+			}
+			return
+		}
+	}
+}
+
+func (s *playerSelectionScene) queueOnlineAvailabilityCheck() {
+	if !core.Config().Online.Enabled || s.onlineCheckInFlight || s.onlineCheckResults == nil {
+		return
+	}
+	s.onlineCheckInFlight = true
+	go func(results chan<- bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
+		defer cancel()
+		available := onlineServerAvailable(ctx)
+		select {
+		case results <- available:
+		default:
+		}
+	}(s.onlineCheckResults)
+}
+
+func (s *playerSelectionScene) showOnlineUnavailableMessage() {
+	s.transientMessage = texts().PlayerSelectionOnlineUnavailable
+	s.transientMessageUntil = s.tick + onlineUnavailableMessageTicks
+}
+
+func onlineSelectionButtonRect() image.Rectangle {
+	return image.Rect(205, 673, 348, 706)
+}
+
 func (s *playerSelectionScene) drawRounds(screen *ebiten.Image) {
 	t := texts()
 	drawFilledRect(screen, image.Rect(205, 76, 432, 99), colornames.White)
@@ -701,9 +781,15 @@ func (s *playerSelectionScene) drawStartState(screen *ebiten.Image) {
 	if s.selectedPlayerCount() < 2 {
 		drawFilledRect(screen, image.Rect(784, 677, 918, 702), color.RGBA{R: 180, G: 180, B: 180, A: 180})
 	}
-	if s.message != "" {
+	message := ""
+	if s.transientMessage != "" && s.tick < s.transientMessageUntil {
+		message = s.transientMessage
+	} else {
+		message = s.message
+	}
+	if message != "" {
 		drawFilledRect(screen, image.Rect(350, 650, 650, 671), colornames.Yellow)
-		drawCenteredText(screen, s.message, image.Rect(350, 650, 650, 671), colornames.Black)
+		drawCenteredText(screen, message, image.Rect(350, 650, 650, 671), colornames.Black)
 	}
 }
 
@@ -837,10 +923,27 @@ func (s *playerSelectionScene) drawFooter(screen *ebiten.Image) {
 	drawFilledRect(screen, image.Rect(372, 676, 586, 695), colornames.Yellow)
 	drawCenteredText(screen, t.PlayerSelectionHelpHint, image.Rect(372, 676, 586, 695), colornames.Black)
 	if core.Config().Online.Enabled {
-		drawButton(screen, image.Rect(205, 673, 348, 706), t.PlayerSelectionOnlineButton)
+		r := onlineSelectionButtonRect()
+		if s.onlineAvailable {
+			drawButton(screen, r, t.PlayerSelectionOnlineButton)
+		} else {
+			drawDisabledButton(screen, r, t.PlayerSelectionOnlineButton)
+			if s.onlineButtonHovered() && !primaryPointerIsTouch() {
+				drawTooltip(screen, t.PlayerSelectionOnlineUnavailable, image.Pt(r.Min.X, r.Min.Y-10))
+			}
+		}
 	}
 	drawButton(screen, image.Rect(624, 673, 756, 706), t.PlayerSelectionOptionsButton)
 	drawButton(screen, image.Rect(780, 673, 922, 706), t.PlayerSelectionStartButton)
+}
+
+func (s *playerSelectionScene) onlineButtonHovered() bool {
+	if !core.Config().Online.Enabled {
+		return false
+	}
+	x, y := primaryPointerPosition()
+	x, y = s.toSelectionCoords(x, y)
+	return image.Pt(x, y).In(onlineSelectionButtonRect())
 }
 
 func (s *playerSelectionScene) drawOptionsDialog(screen *ebiten.Image) {
@@ -1063,6 +1166,31 @@ func drawButton(screen *ebiten.Image, r image.Rectangle, label string) {
 	}
 	drawRaisedButtonEdges(screen, r, 3)
 	drawCenteredText(screen, label, r, colornames.Black)
+}
+
+func drawDisabledButton(screen *ebiten.Image, r image.Rectangle, label string) {
+	drawFrame(screen, r, color.RGBA{R: 175, G: 175, B: 175, A: 255}, color.RGBA{R: 95, G: 95, B: 95, A: 255})
+	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Min.Y+2, r.Max.X-2, r.Min.Y+5), color.RGBA{R: 205, G: 205, B: 205, A: 255})
+	drawFilledRect(screen, image.Rect(r.Min.X+2, r.Min.Y+2, r.Min.X+5, r.Max.Y-2), color.RGBA{R: 205, G: 205, B: 205, A: 255})
+	drawCenteredText(screen, label, r.Add(image.Pt(1, 1)), color.RGBA{R: 115, G: 115, B: 115, A: 255})
+	drawCenteredText(screen, label, r, color.RGBA{R: 65, G: 65, B: 65, A: 255})
+}
+
+func drawTooltip(screen *ebiten.Image, label string, anchor image.Point) {
+	paddingX := 8
+	paddingY := 5
+	b := text.BoundString(dialogTextFace, label)
+	w := b.Dx() + paddingX*2
+	h := b.Dy() + paddingY*2
+	r := image.Rect(anchor.X, anchor.Y-h, anchor.X+w, anchor.Y)
+	if r.Min.X < 4 {
+		r = r.Add(image.Pt(4-r.Min.X, 0))
+	}
+	if r.Max.X > int(core.Config().Screen.Width)-4 {
+		r = r.Add(image.Pt(int(core.Config().Screen.Width)-4-r.Max.X, 0))
+	}
+	drawFrame(screen, r, color.RGBA{R: 255, G: 252, B: 218, A: 255}, colornames.Black)
+	drawTextFace(screen, label, dialogTextFace, r.Min.X+paddingX, r.Min.Y+paddingY+b.Dy(), colornames.Black)
 }
 
 func drawDialogButton(screen *ebiten.Image, r image.Rectangle, label string) {

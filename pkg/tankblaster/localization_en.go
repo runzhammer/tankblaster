@@ -9,6 +9,7 @@ var englishStrings = localizedStrings{
 	PlayerSelectionHelpHint:              "Press F1 for help",
 	PlayerSelectionOptionsButton:         "Options",
 	PlayerSelectionOnlineButton:          "Play Online",
+	PlayerSelectionOnlineUnavailable:     "No server is online right now.",
 	PlayerSelectionStartButton:           "Start >>",
 	PlayerSelectionMinimumPlayers:        "Select at least two players",
 	PlayerSelectionHelpTitle:             "Tank Blaster Help",

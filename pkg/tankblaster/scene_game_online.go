@@ -63,7 +63,94 @@ func (s *GameScene) applyOnlineGameCommand(cmd protocol.OnlineGameCommand) {
 		s.applyOnlineXMV12Command(cmd)
 	case "turn":
 		s.applyOnlineTurnCommand(cmd)
+	case "shop_hover":
+		s.applyOnlineShopHoverCommand(cmd)
+	case "shop_mode":
+		s.applyOnlineShopModeCommand(cmd)
+	case "shop_select":
+		s.applyOnlineShopSelectCommand(cmd)
+	case "shop_buy":
+		s.applyOnlineShopBuyCommand(cmd)
+	case "shop_back":
+		s.applyOnlineShopBackCommand(cmd)
+	case "shop_continue":
+		s.applyOnlineShopContinueCommand(cmd)
 	}
+}
+
+func (s *GameScene) applyOnlineShopHoverCommand(cmd protocol.OnlineGameCommand) {
+	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	s.shopHoverClass = maxInt(0, minInt(2, cmd.ShopHoverClass))
+}
+
+func (s *GameScene) applyOnlineShopModeCommand(cmd protocol.OnlineGameCommand) {
+	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	s.withRemoteOnlineCommand(func() {
+		mode := shopMode(cmd.ShopMode)
+		if mode != shopModeClassA && mode != shopModeClassB {
+			return
+		}
+		s.setShopMode(mode)
+	})
+}
+
+func (s *GameScene) applyOnlineShopSelectCommand(cmd protocol.OnlineGameCommand) {
+	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	s.withRemoteOnlineCommand(func() {
+		s.setShopSelectedIndex(cmd.ShopListIndex)
+	})
+}
+
+func (s *GameScene) applyOnlineShopBuyCommand(cmd protocol.OnlineGameCommand) {
+	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	s.withRemoteOnlineCommand(func() {
+		s.buySelectedShopItem()
+	})
+}
+
+func (s *GameScene) applyOnlineShopBackCommand(cmd protocol.OnlineGameCommand) {
+	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	s.withRemoteOnlineCommand(func() {
+		s.shopMode = shopModeEntry
+		s.shopHoverClass = 0
+	})
+}
+
+func (s *GameScene) applyOnlineShopContinueCommand(cmd protocol.OnlineGameCommand) {
+	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	s.withRemoteOnlineCommand(func() {
+		s.continueShop()
+	})
+}
+
+func (s *GameScene) onlineShopCommandAllowed(cmd protocol.OnlineGameCommand) bool {
+	if s.g.online == nil || cmd.MatchID != s.g.online.state.MatchID || s.phase != phaseShop {
+		return false
+	}
+	if cmd.PlayerID == s.g.online.playerID {
+		s.shopAwaitingOnline = false
+	}
+	return s.onlinePlayerIndexForCommand(cmd) == s.currentShopPlayerIndex()
+}
+
+func (s *GameScene) withRemoteOnlineCommand(apply func()) {
+	s.g.online.applyingRemoteCmd = true
+	defer func() {
+		s.g.online.applyingRemoteCmd = false
+	}()
+	apply()
 }
 
 func (s *GameScene) applyOnlineFireCommand(cmd protocol.OnlineGameCommand) {
@@ -247,6 +334,82 @@ func (s *GameScene) syncOnlineTurn(previousPlayerIndex int) {
 		TurnSequence: s.g.online.turnSequence,
 		CameraX:      s.cameraX,
 	})
+}
+
+func (s *GameScene) syncOnlineShopHover(hoverClass int) {
+	if s.g.online == nil || s.g.online.applyingRemoteCmd || !s.onlineCanControlPlayer(s.currentShopPlayerIndex()) {
+		return
+	}
+	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
+		Kind:           "shop_hover",
+		PlayerIndex:    s.currentShopPlayerIndex(),
+		ShopHoverClass: maxInt(0, minInt(2, hoverClass)),
+	})
+}
+
+func (s *GameScene) syncOnlineShopMode(mode shopMode) {
+	if !s.canSendOnlineShopCommand() {
+		return
+	}
+	s.shopAwaitingOnline = true
+	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
+		Kind:        "shop_mode",
+		PlayerIndex: s.currentShopPlayerIndex(),
+		ShopMode:    int(mode),
+	})
+}
+
+func (s *GameScene) syncOnlineShopSelect(index int) {
+	if !s.canSendOnlineShopCommand() {
+		return
+	}
+	s.shopAwaitingOnline = true
+	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
+		Kind:          "shop_select",
+		PlayerIndex:   s.currentShopPlayerIndex(),
+		ShopListIndex: index,
+	})
+}
+
+func (s *GameScene) syncOnlineShopBuy() {
+	if !s.canSendOnlineShopCommand() {
+		return
+	}
+	s.shopAwaitingOnline = true
+	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
+		Kind:        "shop_buy",
+		PlayerIndex: s.currentShopPlayerIndex(),
+	})
+}
+
+func (s *GameScene) syncOnlineShopBack() {
+	if !s.canSendOnlineShopCommand() {
+		return
+	}
+	s.shopAwaitingOnline = true
+	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
+		Kind:        "shop_back",
+		PlayerIndex: s.currentShopPlayerIndex(),
+	})
+}
+
+func (s *GameScene) syncOnlineShopContinue() {
+	if !s.canSendOnlineShopCommand() {
+		return
+	}
+	s.shopAwaitingOnline = true
+	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
+		Kind:        "shop_continue",
+		PlayerIndex: s.currentShopPlayerIndex(),
+	})
+}
+
+func (s *GameScene) canSendOnlineShopCommand() bool {
+	return s.g.online != nil &&
+		!s.g.online.applyingRemoteCmd &&
+		!s.shopAwaitingOnline &&
+		s.phase == phaseShop &&
+		s.onlineCanControlPlayer(s.currentShopPlayerIndex())
 }
 
 func (s *GameScene) onlineCommandIsCurrentTurn(cmd protocol.OnlineGameCommand) bool {
