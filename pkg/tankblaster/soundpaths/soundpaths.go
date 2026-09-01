@@ -87,22 +87,22 @@ const (
 	PalmRevenge            = SoundBaumschrei
 	CloudSearch            = None
 	CloudLightning         = SoundBlitz
-	RevengeTankBroken      = SoundHahaha
+	RevengeTankBroken      = None
 	WaterFill              = None
 	WaterBlubber           = SoundBlubber
 	WaterBlotch            = SoundBlotsch
 	DudImpact              = SoundSchnaeppchen
 	MoleImpact             = SoundMole
 	CrumblerImpact         = SoundBroesler
-	SplitterBombSplit      = SoundClusterexplo
+	SplitterBombSplit      = SoundClusterblast
 	AirStrikeBeacon        = SoundBeep
-	AirStrikeBomb          = SoundExplosion2
+	AirStrikeBomb          = SoundAtom
 	AirStrikeJet           = SoundJet
 	Shockwave              = SoundShockwave
 	Mosquitos              = SoundMoskitos
 	MosquitoScream         = SoundScream
 	Laser                  = SoundLaser
-	LaserSmoke             = None
+	LaserSmoke             = SoundDampf
 	XMV12Ignition          = SoundAnlassen
 	XMV12EngineLoop        = SoundMotor
 	XMV12TrackLoop         = SoundKette
@@ -111,19 +111,19 @@ const (
 	ShopBuy                = SoundKasse
 	ShopNotEnoughMoney     = SoundMoney
 	ShopNextPlayer         = None
-	ButtonPress            = SoundKlick
+	ButtonPress            = None
 	ProjectileReentry      = SoundFlyout
 	ProjectileReentryExit  = SoundFlyout
 	ProjectileReentryEnter = SoundFlyin
 )
 
 const (
-	ZeroPowerDust               = SoundDampf
-	ZeroPowerExplosion          = SoundExplosion1
-	ZeroPowerMushroom           = SoundExplosion3
+	ZeroPowerDust               = SoundBroeselklirr
+	ZeroPowerExplosion          = SoundExplosion3
+	ZeroPowerMushroom           = SoundExplosion2
 	ZeroPowerSmoke              = None
-	ZeroPowerGrenadeImpact      = SoundExplosion1
-	ZeroPowerLargeGrenadeImpact = SoundExplosion2
+	ZeroPowerGrenadeImpact      = SoundIncinerator1
+	ZeroPowerLargeGrenadeImpact = SoundIncinerator2
 	ZeroPowerAtomImpact         = SoundAtom
 	ZeroPowerScatterProjectiles = SoundClusterblast
 	ZeroPowerScatterImpact      = SoundColorblop

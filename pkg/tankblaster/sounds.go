@@ -146,8 +146,6 @@ var tankBlasterSounds = audioConfig{
 		zeroPowerSoundScatterImpact:      soundpaths.ZeroPowerScatterImpact,
 	},
 	Options: map[string]soundOptions{
-		soundpaths.WeaponImpactDefault: {
-			AlternatePaths: []string{soundpaths.SoundIncinerator2},
-		},
+		soundpaths.SoundBeep: {KeepSilenceForLoop: true},
 	},
 }

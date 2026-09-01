@@ -16,6 +16,7 @@ import (
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine/tinge"
 	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
+	"github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
 	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/colornames"
 	"golang.org/x/image/font"
@@ -289,11 +290,13 @@ func (s *playerSelectionScene) handleSelectionShortcuts() (bool, error) {
 	case inpututil.IsKeyJustPressed(ebiten.KeyEqual) || inpututil.IsKeyJustPressed(ebiten.KeyKPAdd):
 		if s.rounds < 99 {
 			s.rounds++
+			s.playRoundCountChangeSound(1)
 		}
 		return true, nil
 	case inpututil.IsKeyJustPressed(ebiten.KeyMinus) || inpututil.IsKeyJustPressed(ebiten.KeyKPSubtract):
 		if s.rounds > 1 {
 			s.rounds--
+			s.playRoundCountChangeSound(-1)
 		}
 		return true, nil
 	default:
@@ -382,15 +385,30 @@ func (s *playerSelectionScene) handleRoundsClick(x, y int) bool {
 	case p.In(minus):
 		if s.rounds > 1 {
 			s.rounds--
+			s.playRoundCountChangeSound(-1)
 		}
 		return true
 	case p.In(plus):
 		if s.rounds < 99 {
 			s.rounds++
+			s.playRoundCountChangeSound(1)
 		}
 		return true
 	default:
 		return false
+	}
+}
+
+func (s *playerSelectionScene) playRoundCountChangeSound(delta int) {
+	if s == nil || s.g == nil {
+		return
+	}
+	if delta > 0 {
+		s.g.playSound(soundpaths.SoundUp)
+		return
+	}
+	if delta < 0 {
+		s.g.playSound(soundpaths.SoundDown)
 	}
 }
 

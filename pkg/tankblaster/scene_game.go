@@ -166,6 +166,7 @@ const (
 	moleBroeslerLoopKey       = "mole_broesler"
 	crumblerBroeslerLoopKey   = "crumbler_broesler"
 	laserLoopKey              = "laser"
+	airStrikeBeaconLoopKey    = "air_strike_beacon"
 	airStrikeJetLoopKey       = "air_strike_jet"
 	abortRoundFlashFrames     = 300
 	abortRoundFlashWhiteFrame = 180
@@ -1298,6 +1299,7 @@ func (s *GameScene) plantPalmAtImpact(pos engine.Vec) {
 	if s.palmImage == nil || s.palmPixels == nil {
 		return
 	}
+	s.playSound(soundpaths.SoundGrowing)
 	palmBounds := s.palmPixels.Bounds()
 	palmSize := engine.V(float64(palmBounds.Dx()), float64(palmBounds.Dy()))
 	centerX := math.Max(palmSize.X/2, math.Min(s.worldWidth-palmSize.X/2, pos.X))
@@ -2778,6 +2780,9 @@ func (s *GameScene) syncBattleEffectLoops() {
 	if len(s.smallCrumblerImpacts) == 0 {
 		s.stopSoundLoop(crumblerBroeslerLoopKey)
 	}
+	if len(s.airStrikeImpacts) == 0 {
+		s.stopSoundLoop(airStrikeBeaconLoopKey)
+	}
 }
 
 func (s *GameScene) stopBattleEffectLoops() {
@@ -2787,6 +2792,7 @@ func (s *GameScene) stopBattleEffectLoops() {
 	s.stopSoundLoop(moleBroeslerLoopKey)
 	s.stopSoundLoop(crumblerBroeslerLoopKey)
 	s.stopSoundLoop(laserLoopKey)
+	s.stopSoundLoop(airStrikeBeaconLoopKey)
 	s.stopSoundLoop(airStrikeJetLoopKey)
 }
 
@@ -4545,6 +4551,7 @@ func (s *GameScene) projectileHitsWaterSurface(p *projectile, radius float64) (e
 
 func (s *GameScene) startMoleImpact(pos engine.Vec) {
 	s.damageTanksInImpactRadius(pos, weaponspkg.Moles())
+	s.playEventSoundLoop(moleBroeslerLoopKey, soundEventCrumblerImpact)
 	lines := make([]moleStarLine, moleStarLineCount)
 	for i := range lines {
 		angle := -math.Pi + float64(i)*2*math.Pi/float64(len(lines)) + (s.rng.Float64()-0.5)*0.08
@@ -4610,6 +4617,7 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 }
 
 func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
+	s.playEventSoundLoop(airStrikeBeaconLoopKey, soundEventAirStrikeBeacon)
 	bombs := make([]airStrikeBomb, airStrikeBombCount)
 	startY := -s.skyExtraHeight() - 80
 	lastDelay := airStrikeWaitFrames
@@ -4687,20 +4695,25 @@ func (s *GameScene) updateAirStrikeImpact(impact *airStrikeImpact) {
 }
 
 func (s *GameScene) updateAirStrikeBeaconSound(impact *airStrikeImpact) {
-	if impact == nil || impact.bojeHidden || s.blinkBojeAnimation.totalTicks <= 0 {
+	if impact == nil || s.blinkBojeAnimation.totalTicks <= 0 {
+		return
+	}
+	if impact.bojeHidden {
+		s.stopSoundLoop(airStrikeBeaconLoopKey)
 		return
 	}
 	cycle := impact.age / s.blinkBojeAnimation.totalTicks
-	if cycle <= impact.lastBeaconCycle || impact.beepsPlayed >= 10 {
+	if impact.beepsPlayed >= 5 && !impact.jetStarted {
+		impact.jetStarted = true
+		s.stopSoundLoop(airStrikeBeaconLoopKey)
+		s.playEventSound(soundEventAirStrikeJet)
+		return
+	}
+	if cycle <= impact.lastBeaconCycle {
 		return
 	}
 	impact.lastBeaconCycle = cycle
 	impact.beepsPlayed++
-	s.playEventSound(soundEventAirStrikeBeacon)
-	if impact.beepsPlayed >= 5 && !impact.jetStarted {
-		impact.jetStarted = true
-		s.playEventSound(soundEventAirStrikeJet)
-	}
 }
 
 func (s *GameScene) airStrikeBombHitsTank(pos engine.Vec) *battleTank {
@@ -5327,13 +5340,12 @@ func (s *GameScene) startFireballImpact(pos engine.Vec, weapon weaponspkg.Weapon
 	if len(animation.frames) == 0 {
 		return
 	}
-	s.playEventSoundLoop(fireballBurningLoopKey, soundEventPalmIgnite)
+	s.playEventSound(soundEventPalmIgnite)
 	duration := maxInt(animation.totalTicks, s.impactAnimationFramesForWeapon(weapon))
 	effect := animatedImpact{
 		pos:       pos,
 		duration:  duration,
 		animation: animation,
-		loopKey:   fireballBurningLoopKey,
 	}
 	s.animatedImpacts = append(s.animatedImpacts, effect)
 	s.damageTanksInImpactRadius(pos, weapon)
