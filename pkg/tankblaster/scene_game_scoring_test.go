@@ -271,3 +271,28 @@ func TestSurpriseEggRejectsOriginalExcludedWeaponIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestDestroyedUnlandedTankDoesNotBlockAllTanksLanded(t *testing.T) {
+	s := newScoringTestScene(0, 100)
+	s.tanks[0].landed = false
+	s.tanks[1].landed = true
+
+	if !s.allTanksLanded() {
+		t.Fatal("destroyed unlanded tank should not block battle turn progression")
+	}
+}
+
+func TestEnsureActivePlayerCanActSkipsDestroyedActiveTank(t *testing.T) {
+	s := newScoringTestScene(0, 100, 100)
+	s.activePlayerIndex = 0
+	for _, tank := range s.tanks {
+		tank.landed = true
+	}
+
+	if !s.ensureActivePlayerCanAct() {
+		t.Fatal("expected another active player to be selected")
+	}
+	if got, want := s.activePlayerIndex, 1; got != want {
+		t.Fatalf("active player = %d, want %d", got, want)
+	}
+}

@@ -1871,10 +1871,12 @@ func (s *GameScene) Update() error {
 			} else if s.xmV12DriveMode {
 				s.updateXMV12DriveMode()
 			} else {
-				s.clampActiveShotStrength()
-				s.handleBattleInput()
-				s.handleComputerTurn()
-				s.updateProjectile()
+				if s.ensureActivePlayerCanAct() {
+					s.clampActiveShotStrength()
+					s.handleBattleInput()
+					s.handleComputerTurn()
+					s.updateProjectile()
+				}
 				if s.turnAdvanceDelay == 0 {
 					s.updateBattleCamera()
 				}
@@ -8389,7 +8391,10 @@ func (s *GameScene) allTanksLanded() bool {
 		return false
 	}
 	for _, tank := range s.tanks {
-		if tank == nil || !tank.landed {
+		if tank == nil {
+			return false
+		}
+		if tank.power > 0 && !tank.landed {
 			return false
 		}
 	}
@@ -8398,6 +8403,24 @@ func (s *GameScene) allTanksLanded() bool {
 
 func (s *GameScene) tankCanAct(tank *battleTank) bool {
 	return tank != nil && tank.power > 0 && tank.landed && !tank.falling
+}
+
+func (s *GameScene) ensureActivePlayerCanAct() bool {
+	if s.activePlayerIndex >= 0 && s.activePlayerIndex < len(s.tanks) && s.tankCanAct(s.tanks[s.activePlayerIndex]) {
+		return true
+	}
+	if s.endRoundIfOnlyOneTankRemains() {
+		return false
+	}
+	next := s.nextActivePlayerIndex()
+	if next < 0 {
+		return false
+	}
+	s.activePlayerIndex = next
+	s.resetComputerTurnPlans()
+	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+	s.cameraGoalY = 0
+	return true
 }
 
 func (s *GameScene) livingTankIndexes() []int {
