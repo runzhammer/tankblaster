@@ -29,7 +29,7 @@ help:
 		'  make live-test-cp Run server, one human client, and one autopiloted client' \
 		'  make build        Build the desktop binary' \
 		'  make server       Build the headless multiplayer server' \
-		'  make server-docker Build the headless multiplayer server Docker image' \
+		'  make server-docker Build the headless multiplayer server image with Docker or Podman' \
 		'  make windows      Build a Windows EXE with app icon' \
 		'  make android      Build Android debug APK' \
 		'  make android-debug Build Android debug APK' \
@@ -90,7 +90,16 @@ server:
 	CGO_ENABLED=0 $(GO) build -o $(SERVER_BIN) ./cmd/tankblaster-server
 
 server-docker:
-	docker build -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .
+	@if [ -n "$${DISTROBOX_ENTER_PATH:-}" ] && command -v distrobox-host-exec >/dev/null 2>&1; then \
+		distrobox-host-exec podman build -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
+	elif command -v docker >/dev/null 2>&1; then \
+		docker build -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
+	elif command -v podman >/dev/null 2>&1; then \
+		podman build -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
+	else \
+		printf '%s\n' 'Neither docker nor podman was found in PATH.' >&2; \
+		exit 1; \
+	fi
 
 windows:
 	mkdir -p $(BUILD_DIR)
