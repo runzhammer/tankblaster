@@ -190,6 +190,8 @@ func debugStartSceneFactory(scene string) func(*GameLoop) (core.Scene, error) {
 		return NewGameScene
 	case "shop", "store", "laden":
 		return NewDebugShopScene
+	case "score", "scores", "hall_of_fame", "hall-of-fame", "bestenliste":
+		return NewDebugHallOfFameScene
 	default:
 		return NewGameScene
 	}

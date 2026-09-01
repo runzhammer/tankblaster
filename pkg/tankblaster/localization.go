@@ -80,6 +80,7 @@ type localizedStrings struct {
 	GameScorePlayer                      string
 	GameScoreSuccess                     string
 	GameScoreStatus                      string
+	HallOfFameBack                       string
 	GameStatusActive                     string
 	GameStatusOut                        string
 	GameStatusEliminated                 string

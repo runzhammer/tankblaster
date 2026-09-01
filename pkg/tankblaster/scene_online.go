@@ -18,6 +18,7 @@ type onlineScene struct {
 	client      *onlineClient
 	displayName string
 	joinInput   string
+	nameFocused bool
 	status      string
 	sessionID   string
 	matchID     string
@@ -25,6 +26,7 @@ type onlineScene struct {
 	sessions    []protocol.SessionSummary
 	leaders     []protocol.LeaderboardEntry
 	inputRunes  []rune
+	tick        int
 }
 
 func NewOnlineScene(game *GameLoop) (core.Scene, error) {
@@ -42,6 +44,8 @@ func NewOnlineScene(game *GameLoop) (core.Scene, error) {
 }
 
 func (s *onlineScene) Update() error {
+	defer s.syncOnlineTextInputActive()
+	s.tick++
 	s.consumeNetwork()
 	s.handleKeyboard()
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
@@ -52,22 +56,32 @@ func (s *onlineScene) Update() error {
 	}
 	x, y := primaryPointerPosition()
 	p := image.Pt(x, y)
+	if p.In(onlineNameInputRect()) {
+		s.nameFocused = true
+		s.displayName = ""
+		SetPlayerNameText("")
+		return nil
+	}
 	if p.In(joinInputRect()) {
+		s.finishDisplayNameInput()
 		s.copyJoinInput()
 		return nil
 	}
 	if s.inviteURL != "" && p.In(inviteLinkRect()) {
+		s.finishDisplayNameInput()
 		s.copyInviteURL()
 		return nil
 	}
 	for _, b := range s.buttons() {
 		if p.In(b.rect) {
+			s.finishDisplayNameInput()
 			return b.action()
 		}
 	}
 	for i, sess := range s.sessions {
 		r := image.Rect(100, 410+i*42, 924, 444+i*42)
 		if p.In(r) {
+			s.finishDisplayNameInput()
 			s.sessionID = sess.ID
 			s.client.Send(protocol.TypeJoinSession, protocol.JoinSession{SessionID: sess.ID})
 			return nil
@@ -80,8 +94,14 @@ func (s *onlineScene) Draw(screen *ebiten.Image) {
 	screen.Fill(color.RGBA{R: 24, G: 27, B: 31, A: 255})
 	t := texts()
 	drawTextFace(screen, t.OnlineTitle, uiTextFace, 72, 70, colornames.White)
-	drawTextFace(screen, t.OnlineDisplayName+": "+s.displayName, uiTextFace, 72, 106, colornames.Lightblue)
-	drawTextFace(screen, core.Config().Online.ServerURL, dialogTextFace, 72, 130, colornames.Silver)
+	drawTextFace(screen, t.OnlineDisplayName, dialogTextFace, 72, 102, colornames.Lightblue)
+	drawFrame(screen, onlineNameInputRect(), colornames.White, colornames.Black)
+	nameText := s.displayName
+	if s.nameFocused && s.tick/24%2 == 0 {
+		nameText += "|"
+	}
+	drawTextFace(screen, nameText, uiTextFace, onlineNameInputRect().Min.X+12, onlineNameInputRect().Min.Y+24, colornames.Black)
+	drawTextFace(screen, core.Config().Online.ServerURL, dialogTextFace, 446, 111, colornames.Silver)
 
 	drawFrame(screen, image.Rect(72, 158, 952, 214), color.RGBA{R: 39, G: 45, B: 52, A: 255}, colornames.Gray)
 	drawTextFace(screen, s.status, uiTextFace, 92, 192, colornames.White)
@@ -99,6 +119,7 @@ func (s *onlineScene) Draw(screen *ebiten.Image) {
 		drawFrame(screen, inviteLinkRect(), color.RGBA{R: 255, G: 245, B: 184, A: 255}, colornames.Black)
 		drawTextFace(screen, t.OnlineInviteLink+": "+s.inviteURL, dialogTextFace, 84, 725, colornames.Black)
 	}
+	s.drawFocusedNameOverlay(screen)
 }
 
 type onlineButton struct {
@@ -231,6 +252,11 @@ func (s *onlineScene) handleMessage(env protocol.Envelope) {
 
 func (s *onlineScene) handleKeyboard() {
 	s.inputRunes = ebiten.AppendInputChars(s.inputRunes[:0])
+	if s.nameFocused {
+		s.handleDisplayNameKeyboard()
+		return
+	}
+	drainPlayerNameInputCommands()
 	if len(s.inputRunes) > 0 {
 		var b strings.Builder
 		b.WriteString(s.joinInput)
@@ -253,6 +279,75 @@ func (s *onlineScene) handleKeyboard() {
 			s.client.Send(protocol.TypeJoinSession, protocol.JoinSession{JoinCode: token, InviteToken: token})
 		}
 	}
+}
+
+func (s *onlineScene) handleDisplayNameKeyboard() {
+	for _, command := range drainPlayerNameInputCommands() {
+		switch {
+		case command.finish:
+			s.finishDisplayNameInput()
+		case command.backspace:
+			s.displayName = trimLastRune(s.displayName)
+		case command.replace:
+			s.displayName = truncateRunes(command.text, 16)
+		case command.text != "":
+			s.displayName = truncateRunes(s.displayName+command.text, 16)
+		}
+	}
+	if len(s.inputRunes) > 0 {
+		var b strings.Builder
+		b.WriteString(s.displayName)
+		for _, r := range s.inputRunes {
+			if len([]rune(b.String())) < 16 {
+				b.WriteRune(r)
+			}
+		}
+		s.displayName = b.String()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
+		s.displayName = trimLastRune(s.displayName)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
+		s.finishDisplayNameInput()
+	}
+}
+
+func (s *onlineScene) finishDisplayNameInput() {
+	if !s.nameFocused {
+		return
+	}
+	s.nameFocused = false
+	name := strings.TrimSpace(s.displayName)
+	if name == "" {
+		name = texts().GameDefaultPlayerName
+	}
+	s.displayName = truncateRunes(name, 16)
+	s.client.id.DisplayName = s.displayName
+	saveOnlineIdentity(s.client.id)
+	s.client.Send(protocol.TypeHello, protocol.Hello{
+		ProtocolVersion: protocol.ProtocolVersion,
+		PlayerID:        s.client.id.PlayerID,
+		PlayerToken:     s.client.id.PlayerToken,
+		DisplayName:     s.displayName,
+	})
+}
+
+func (s *onlineScene) syncOnlineTextInputActive() {
+	setPlayerNameInputActive(s.nameFocused)
+}
+
+func (s *onlineScene) drawFocusedNameOverlay(screen *ebiten.Image) {
+	if !showPlayerNameInputOverlay() || !s.nameFocused {
+		return
+	}
+	r := image.Rect(184, 116, 840, 194)
+	drawFrame(screen, r, color.RGBA{R: 255, G: 255, B: 245, A: 255}, color.RGBA{R: 40, G: 50, B: 60, A: 255})
+	drawTextFace(screen, texts().OnlineDisplayName, dialogTextFace, r.Min.X+20, r.Min.Y+27, colornames.Black)
+	value := s.displayName
+	if s.tick/24%2 == 0 {
+		value += "|"
+	}
+	drawTextFace(screen, value, overlayTextFace, r.Min.X+20, r.Min.Y+68, color.RGBA{R: 20, G: 25, B: 30, A: 255})
 }
 
 func (s *onlineScene) copyJoinInput() {
@@ -316,13 +411,35 @@ func joinInputRect() image.Rectangle {
 	return image.Rect(72, 278, 952, 308)
 }
 
+func onlineNameInputRect() image.Rectangle {
+	return image.Rect(180, 84, 420, 118)
+}
+
 func inviteLinkRect() image.Rectangle {
 	return image.Rect(72, 704, 952, 736)
 }
 
 func (s *onlineScene) back() error {
+	s.nameFocused = false
+	s.syncOnlineTextInputActive()
 	if s.client != nil {
 		s.client.Close()
 	}
 	return s.g.SetNewScene(NewPlayerSelectionScene)
+}
+
+func truncateRunes(value string, max int) string {
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max])
+}
+
+func trimLastRune(value string) string {
+	runes := []rune(value)
+	if len(runes) == 0 {
+		return value
+	}
+	return string(runes[:len(runes)-1])
 }

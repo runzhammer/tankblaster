@@ -1865,8 +1865,7 @@ func (s *GameScene) Update() error {
 		s.updateZeroPowerEffects()
 		s.syncBattleEffectLoops()
 		if s.roundTransitionDelay > 0 || s.roundSeriesComplete {
-			s.updateRoundTransition()
-			return nil
+			return s.updateRoundTransition()
 		}
 		if s.allTanksLanded() {
 			if s.projectilesActive() {
@@ -7984,21 +7983,35 @@ func (s *GameScene) drawRoundTransitionBanner(screen *ebiten.Image) {
 	drawCenteredText(screen, textValue, r, colornames.White)
 }
 
-func (s *GameScene) updateRoundTransition() {
+func (s *GameScene) updateRoundTransition() error {
 	if s.roundSeriesComplete {
-		return
+		return s.g.SetNewScene(NewHallOfFameScene(s.hallOfFameScores()))
 	}
 	s.roundTransitionDelay--
 	if s.roundTransitionDelay > 0 {
-		return
+		return nil
 	}
 	s.roundTransitionDelay = 0
 	if s.roundNumber >= maxInt(1, s.g.rounds) {
 		s.roundSeriesComplete = true
-		return
+		return s.g.SetNewScene(NewHallOfFameScene(s.hallOfFameScores()))
 	}
 	s.roundNumber++
 	s.beginShop()
+	return nil
+}
+
+func (s *GameScene) hallOfFameScores() []hallOfFameScore {
+	rows := make([]hallOfFameScore, 0, len(s.players))
+	for i, player := range s.players {
+		rows = append(rows, hallOfFameScore{
+			Name:  player.Name,
+			Score: s.scoreForPlayer(i),
+			Color: player.Color,
+			Index: i,
+		})
+	}
+	return rows
 }
 
 func drawScaledImage(screen, img *ebiten.Image, r image.Rectangle) {

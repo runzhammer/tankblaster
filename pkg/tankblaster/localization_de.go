@@ -73,6 +73,7 @@ var germanStrings = localizedStrings{
 	GameScorePlayer:                      "Spieler",
 	GameScoreSuccess:                     "Erfolg",
 	GameScoreStatus:                      "Status",
+	HallOfFameBack:                       "Zurück",
 	GameStatusActive:                     "aktiv",
 	GameStatusOut:                        "aus",
 	GameStatusEliminated:                 "ausgeschieden",

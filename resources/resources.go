@@ -103,6 +103,12 @@ var DejaVuSansMono []byte
 //go:embed images/store_background.png
 var StoreBackground []byte
 
+//go:embed images/hall-of-fame-background.png
+var HallOfFameBackground []byte
+
+//go:embed images/hall-of-fame.png
+var HallOfFameTitle []byte
+
 //go:embed images/store_main_left.png
 var StoreMainLeft []byte
 

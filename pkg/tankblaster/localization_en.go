@@ -73,6 +73,7 @@ var englishStrings = localizedStrings{
 	GameScorePlayer:                      "Player",
 	GameScoreSuccess:                     "Score",
 	GameScoreStatus:                      "Status",
+	HallOfFameBack:                       "Back",
 	GameStatusActive:                     "active",
 	GameStatusOut:                        "out",
 	GameStatusEliminated:                 "eliminated",
