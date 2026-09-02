@@ -59,7 +59,7 @@ func NewOnlineScene(game *GameLoop) (core.Scene, error) {
 		g:           game,
 		displayName: id.DisplayName,
 		status:      texts().OnlineConnecting,
-		rounds:      normalizedOnlineRounds(game.rounds),
+		rounds:      loadOnlineRounds(normalizedOnlineRounds(game.rounds)),
 		autoJoin:    autoJoin || autoPlay,
 		autoPlay:    autoPlay,
 		readySent:   map[string]bool{},
@@ -311,12 +311,14 @@ func (s *onlineScene) handleRoundsClick(p image.Point) bool {
 	if p.In(onlineRoundsMinusRect()) {
 		if s.rounds > 1 {
 			s.rounds--
+			saveOnlineRounds(s.rounds)
 		}
 		return true
 	}
 	if p.In(onlineRoundsPlusRect()) {
 		if s.rounds < 99 {
 			s.rounds++
+			saveOnlineRounds(s.rounds)
 		}
 		return true
 	}
@@ -651,4 +653,38 @@ func normalizedOnlineRounds(rounds int) int {
 		return 99
 	}
 	return rounds
+}
+
+func loadOnlineRounds(fallback int) int {
+	path, err := userConfigPath()
+	if err != nil {
+		return normalizedOnlineRounds(fallback)
+	}
+	return loadOnlineRoundsFromPath(path, fallback)
+}
+
+func loadOnlineRoundsFromPath(path string, fallback int) int {
+	cfg, err := readUserConfigFile(path)
+	if err != nil || cfg.OnlineRounds == nil {
+		return normalizedOnlineRounds(fallback)
+	}
+	return normalizedOnlineRounds(*cfg.OnlineRounds)
+}
+
+func saveOnlineRounds(rounds int) {
+	path, err := userConfigPath()
+	if err != nil {
+		return
+	}
+	_ = saveOnlineRoundsToPath(path, rounds)
+}
+
+func saveOnlineRoundsToPath(path string, rounds int) error {
+	cfg, err := readUserConfigFile(path)
+	if err != nil {
+		cfg = userConfigFile{}
+	}
+	normalized := normalizedOnlineRounds(rounds)
+	cfg.OnlineRounds = &normalized
+	return writeUserConfigFile(path, cfg)
 }

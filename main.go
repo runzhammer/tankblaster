@@ -16,12 +16,11 @@ import (
 )
 
 func main() {
-
 	applyRuntimeConfig()
 
 	ebiten.SetWindowSize(int((*core.Config()).Screen.Width), int((*core.Config()).Screen.Height))
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	ebiten.SetWindowTitle("Tank Blaster 3.0")
+	ebiten.SetWindowTitle("Tank Blaster")
 	ebiten.SetWindowIcon(windowIcons())
 
 	var err error

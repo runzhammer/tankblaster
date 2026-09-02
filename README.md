@@ -29,6 +29,9 @@ make live-test-auto LIVE_TEST_ROUNDS=3
 
 ## Build
 
+Die Release-Version steht in [VERSION](VERSION). Desktop-Binaries, Server-Binaries und die Android-App betten diese Version zusammen mit Git-Commit und Build-Zeit ein.
+Fuer Android muss `tankblasterVersionCode` in [android/gradle.properties](android/gradle.properties) bei jedem veroeffentlichten APK monoton erhoeht werden.
+
 Linux/Desktop:
 
 ```sh
@@ -55,11 +58,30 @@ make android
 make android-release
 ```
 
+Version pruefen:
+
+```sh
+bin/tankblaster-server --version
+```
+
+Das Desktop-Spiel zeigt die Version im Fenstertitel. Die eingebetteten Go-Buildinformationen lassen sich ausserdem mit `go version -m bin/tankblaster` auslesen.
+
 Falls die Android-Toolchain zickt:
 
 ```sh
 make android-env
 ```
+
+## Lokale Einstellungen
+
+Tank Blaster speichert die zuletzt gewaehlte lokale Rundenzahl, die zuletzt gewaehlte Online-Rundenzahl, die Optionen aus dem Optionsdialog und die Online-Identitaet gemeinsam in `tank.cfg`.
+
+OS-spezifische Ablageorte:
+
+- Linux/FreeBSD: `$XDG_CONFIG_HOME/tankblaster/tank.cfg`, sonst `~/.config/tankblaster/tank.cfg`
+- Windows: `%AppData%\tankblaster\tank.cfg`
+- macOS: `~/Library/Application Support/tankblaster/tank.cfg`
+- Android: app-interner Speicher, typischerweise `/data/user/0/com.runzhammer.tankblaster.android/files/tank.cfg`
 
 ## Server
 

@@ -25,6 +25,18 @@ export CGO_LDFLAGS="${CGO_LDFLAGS:-$GO_CGO_LDFLAGS -Wl,-z,max-page-size=16384 -W
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$GOBIN:/home/reznor/.local/share/vscodium-distrobox-bin:$PATH"
 
 EBITEN_VERSION="$(go list -m -f '{{.Version}}' github.com/hajimehoshi/ebiten/v2)"
+VERSION="$(sed -n '1p' "$ROOT_DIR/VERSION" 2>/dev/null || printf dev)"
+VERSION="$(printf '%s' "$VERSION" | tr -d '[:space:]')"
+if [ -z "$VERSION" ]; then
+	VERSION=dev
+fi
+COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || printf unknown)"
+DIRTY=
+if ! git -C "$ROOT_DIR" diff --quiet 2>/dev/null; then
+	DIRTY=-dirty
+fi
+BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+GO_BUILD_LDFLAGS="-X github.com/runzhammer/gamedemo/pkg/buildinfo.Version=$VERSION -X github.com/runzhammer/gamedemo/pkg/buildinfo.Commit=$COMMIT$DIRTY -X github.com/runzhammer/gamedemo/pkg/buildinfo.BuildTime=$BUILD_TIME"
 if ! command -v ebitenmobile >/dev/null 2>&1; then
 	go install "github.com/hajimehoshi/ebiten/v2/cmd/ebitenmobile@${EBITEN_VERSION}"
 fi
@@ -41,14 +53,16 @@ if [ -z "${CONTAINER_ID:-}" ] && [ -x /app/bin/host-spawn ]; then
 		ANDROID_HOME="$ANDROID_HOME" \
 		ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
 		CGO_LDFLAGS="$CGO_LDFLAGS" \
+		GO_BUILD_LDFLAGS="$GO_BUILD_LDFLAGS" \
 		PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$GOBIN:/usr/bin:/usr/sbin:/bin:/sbin:/usr/local/bin:/usr/local/sbin" \
-		sh -c 'cd "$1" && ebitenmobile bind -target android -javapkg com.runzhammer.tankblaster -o "$2" ./mobile' \
+		sh -c 'cd "$1" && ebitenmobile bind -target android -javapkg com.runzhammer.tankblaster -ldflags "$GO_BUILD_LDFLAGS" -o "$2" ./mobile' \
 		sh "$ROOT_DIR" "$ANDROID_DIR/app/libs/tankblaster.aar"
 else
 	cd "$ROOT_DIR"
 	ebitenmobile bind \
 		-target android \
 		-javapkg com.runzhammer.tankblaster \
+		-ldflags "$GO_BUILD_LDFLAGS" \
 		-o "$ANDROID_DIR/app/libs/tankblaster.aar" \
 		./mobile
 fi

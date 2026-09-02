@@ -1,5 +1,12 @@
 APP_NAME ?= tankblaster
 MODULE ?= github.com/runzhammer/gamedemo
+VERSION ?= $(shell sed -n '1p' VERSION 2>/dev/null || printf dev)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
+DIRTY ?= $(shell git diff --quiet 2>/dev/null || printf '%s' -dirty)
+BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+BUILDINFO_PKG ?= $(MODULE)/pkg/buildinfo
+LD_FLAGS ?= -X $(BUILDINFO_PKG).Version=$(VERSION) -X $(BUILDINFO_PKG).Commit=$(COMMIT)$(DIRTY) -X $(BUILDINFO_PKG).BuildTime=$(BUILD_TIME)
+GO_BUILD_FLAGS ?= -trimpath -ldflags "$(LD_FLAGS)"
 BUILD_DIR ?= bin
 DESKTOP_BIN ?= $(BUILD_DIR)/$(APP_NAME)
 SERVER_BIN ?= $(BUILD_DIR)/$(APP_NAME)-server
@@ -83,19 +90,19 @@ build: linux
 
 linux:
 	mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(DESKTOP_BIN) .
+	$(GO) build $(GO_BUILD_FLAGS) -o $(DESKTOP_BIN) .
 
 server:
 	mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 $(GO) build -o $(SERVER_BIN) ./cmd/tankblaster-server
+	CGO_ENABLED=0 $(GO) build $(GO_BUILD_FLAGS) -o $(SERVER_BIN) ./cmd/tankblaster-server
 
 server-docker:
 	@if [ -n "$${DISTROBOX_ENTER_PATH:-}" ] && command -v distrobox-host-exec >/dev/null 2>&1; then \
-		distrobox-host-exec podman build -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
+		distrobox-host-exec podman build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT)$(DIRTY) --build-arg BUILD_TIME=$(BUILD_TIME) -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
 	elif command -v docker >/dev/null 2>&1; then \
-		docker build -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
+		docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT)$(DIRTY) --build-arg BUILD_TIME=$(BUILD_TIME) -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
 	elif command -v podman >/dev/null 2>&1; then \
-		podman build -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
+		podman build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT)$(DIRTY) --build-arg BUILD_TIME=$(BUILD_TIME) -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
 	else \
 		printf '%s\n' 'Neither docker nor podman was found in PATH.' >&2; \
 		exit 1; \
@@ -104,7 +111,7 @@ server-docker:
 windows:
 	mkdir -p $(BUILD_DIR)
 	$(RSRC) -ico $(WINDOWS_ICON) -o $(WINDOWS_ICON_SYSO)
-	GOOS=windows GOARCH=amd64 $(GO) build -o $(WINDOWS_BIN) .
+	GOOS=windows GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o $(WINDOWS_BIN) .
 	rm -f $(WINDOWS_ICON_SYSO)
 
 android: android-debug

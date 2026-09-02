@@ -2,10 +2,7 @@ package tankblaster
 
 import (
 	"context"
-	"encoding/json"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,9 +13,9 @@ import (
 )
 
 type onlineIdentity struct {
-	PlayerID    string `json:"player_id"`
-	PlayerToken string `json:"player_token"`
-	DisplayName string `json:"display_name"`
+	PlayerID    string `json:"player_id" yaml:"player_id,omitempty"`
+	PlayerToken string `json:"player_token" yaml:"player_token,omitempty"`
+	DisplayName string `json:"display_name" yaml:"display_name,omitempty"`
 }
 
 type onlineClient struct {
@@ -122,36 +119,36 @@ func (c *onlineClient) report(err error) {
 }
 
 func loadOnlineIdentity() onlineIdentity {
-	path := onlineIdentityPath()
-	data, err := os.ReadFile(path)
+	path, err := userConfigPath()
 	if err != nil {
 		return onlineIdentity{DisplayName: texts().GameDefaultPlayerName}
 	}
-	var id onlineIdentity
-	if json.Unmarshal(data, &id) != nil {
+	return loadOnlineIdentityFromPath(path)
+}
+
+func loadOnlineIdentityFromPath(path string) onlineIdentity {
+	cfg, err := readUserConfigFile(path)
+	if err != nil || cfg.OnlineIdentity == nil {
 		return onlineIdentity{DisplayName: texts().GameDefaultPlayerName}
 	}
-	return id
+	return *cfg.OnlineIdentity
 }
 
 func saveOnlineIdentity(id onlineIdentity) {
-	path := onlineIdentityPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return
-	}
-	data, err := json.MarshalIndent(id, "", "  ")
+	path, err := userConfigPath()
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(path, data, 0o600)
+	_ = saveOnlineIdentityToPath(path, id)
 }
 
-func onlineIdentityPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = "."
+func saveOnlineIdentityToPath(path string, id onlineIdentity) error {
+	cfg, err := readUserConfigFile(path)
+	if err != nil {
+		cfg = userConfigFile{}
 	}
-	return filepath.Join(dir, "tankblaster", "online_identity.json")
+	cfg.OnlineIdentity = &id
+	return writeUserConfigFile(path, cfg)
 }
 
 func inviteTokenFromInput(value string) string {

@@ -35,3 +35,13 @@ dist/tankblaster-release.apk
 ```bash
 /home/reznor/Android/Sdk/platform-tools/adb install -r dist/tankblaster-debug.apk
 ```
+
+## Lokale Einstellungen
+
+Unter Android liegt die gemeinsame YAML-Datei `tank.cfg` fuer lokale Einstellungen und Online-Identitaet im app-internen Dateispeicher:
+
+```text
+/data/user/0/com.runzhammer.tankblaster.android/files/tank.cfg
+```
+
+Der Pfad ist privat fuer die App, braucht keine Storage-Permission und wird bei Deinstallation der App entfernt.

@@ -44,6 +44,10 @@ func ClearPendingClipboardText(value string) {
 	tankblaster.ClearPendingClipboardText(value)
 }
 
+func SetUserConfigDir(dir string) {
+	tankblaster.SetUserConfigDir(dir)
+}
+
 type lazyGame struct {
 	game ebiten.Game
 	err  error

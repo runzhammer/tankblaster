@@ -306,12 +306,14 @@ func (s *playerSelectionScene) handleSelectionShortcuts() (bool, error) {
 		if s.rounds < 99 {
 			s.rounds++
 			s.playRoundCountChangeSound(1)
+			s.saveUserConfig()
 		}
 		return true, nil
 	case inpututil.IsKeyJustPressed(ebiten.KeyMinus) || inpututil.IsKeyJustPressed(ebiten.KeyKPSubtract):
 		if s.rounds > 1 {
 			s.rounds--
 			s.playRoundCountChangeSound(-1)
+			s.saveUserConfig()
 		}
 		return true, nil
 	default:
@@ -401,12 +403,14 @@ func (s *playerSelectionScene) handleRoundsClick(x, y int) bool {
 		if s.rounds > 1 {
 			s.rounds--
 			s.playRoundCountChangeSound(-1)
+			s.saveUserConfig()
 		}
 		return true
 	case p.In(plus):
 		if s.rounds < 99 {
 			s.rounds++
 			s.playRoundCountChangeSound(1)
+			s.saveUserConfig()
 		}
 		return true
 	default:
@@ -524,6 +528,7 @@ func (s *playerSelectionScene) releaseDialogButton(x, y int) {
 	case "options_ok":
 		s.g.options = s.optionsDraft
 		s.optionsOpen = false
+		s.saveUserConfig()
 	case "options_cancel":
 		s.optionsOpen = false
 	case "options_close":
@@ -534,6 +539,7 @@ func (s *playerSelectionScene) releaseDialogButton(x, y int) {
 	case "language_ok":
 		currentLanguage = s.languageDraft
 		s.languageOpen = false
+		s.saveUserConfig()
 	case "language_close":
 		s.languageOpen = false
 	case "selection_help_ok":
@@ -549,6 +555,7 @@ func (s *playerSelectionScene) handleOptionsDialogClick(x, y int) {
 	if p.In(image.Rect(r.Max.X-88, r.Min.Y+56, r.Max.X-16, r.Min.Y+77)) {
 		s.g.options = s.optionsDraft
 		s.optionsOpen = false
+		s.saveUserConfig()
 		return
 	}
 	if p.In(image.Rect(r.Max.X-88, r.Min.Y+86, r.Max.X-16, r.Min.Y+107)) {
@@ -605,6 +612,17 @@ func (s *playerSelectionScene) handleLanguageDialogClick(x, y int) {
 	case p.In(image.Rect(r.Min.X+88, r.Min.Y+120, r.Min.X+162, r.Min.Y+141)):
 		currentLanguage = s.languageDraft
 		s.languageOpen = false
+		s.saveUserConfig()
+	}
+}
+
+func (s *playerSelectionScene) saveUserConfig() {
+	if s == nil || s.g == nil {
+		return
+	}
+	s.g.rounds = s.rounds
+	if err := s.g.saveUserConfig(); err != nil {
+		log.Printf("save %s: %v", userConfigFileName, err)
 	}
 }
 
@@ -722,6 +740,7 @@ func (s *playerSelectionScene) startGame() error {
 
 	s.g.rounds = s.rounds
 	s.g.players = players
+	s.saveUserConfig()
 	return s.g.SetNewScene(NewGameScene)
 }
 

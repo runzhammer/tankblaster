@@ -3,17 +3,24 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/runzhammer/gamedemo/pkg/buildinfo"
 	"github.com/runzhammer/gamedemo/pkg/server"
 )
 
 func main() {
 	configPath := flag.String("config", "config/server.example.yaml", "path to external YAML server config")
+	showVersion := flag.Bool("version", false, "print version information")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String())
+		return
+	}
 
 	cfg, err := server.LoadConfig(*configPath)
 	if err != nil {

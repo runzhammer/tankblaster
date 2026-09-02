@@ -3,9 +3,11 @@ package tankblaster
 import (
 	"errors"
 	"image/color"
+	"log"
 	"strconv"
 	"strings"
 
+	"github.com/runzhammer/gamedemo/pkg/buildinfo"
 	"github.com/runzhammer/gamedemo/pkg/core"
 	"github.com/runzhammer/gamedemo/pkg/engine"
 	"github.com/runzhammer/gamedemo/pkg/gamecore"
@@ -94,6 +96,10 @@ func NewGame() (core.Game, error) {
 		rounds:  10,
 		options: defaultGameOptions(),
 		sounds:  newSoundPlayer(),
+	}
+	log.Printf("tankblaster version: %s", buildinfo.String())
+	if err := game.loadUserConfig(); err != nil {
+		log.Printf("load %s: %v", userConfigFileName, err)
 	}
 
 	if core.Config().Debug.Enabled {

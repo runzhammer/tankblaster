@@ -26,6 +26,7 @@ public final class TankBlasterView extends EbitenView {
 
     public TankBlasterView(Context context) {
         super(context);
+        Mobile.setUserConfigDir(context.getFilesDir().getAbsolutePath());
         setFocusable(true);
         setFocusableInTouchMode(true);
         post(keyboardSync);
