@@ -125,6 +125,11 @@ const (
 	largeCrumblerFunnelSpread = 320.0
 	largeCrumblerJitter       = 4.8
 	largeCrumblerWobble       = 3.2
+	crumblerOpeningFrames     = 18
+	crumblerOpeningChipSize   = 3
+	crumblerOpeningDepthScale = 0.24
+	crumblerOpeningLipLift    = 9.0
+	crumblerEntryJitter       = 9.0
 	mosquitoPreviewFrames     = 10
 	mosquitoTouchFrames       = 8
 	mosquitoRiseFrames        = 20
@@ -436,13 +441,15 @@ type moleStarLine struct {
 }
 
 type smallCrumblerImpact struct {
-	start     engine.Vec
-	crumbs    []smallCrumb
-	cfg       crumblerConfig
-	age       int
-	frozen    bool
-	freezeAge int
-	editArea  image.Rectangle
+	start      engine.Vec
+	crumbs     []smallCrumb
+	cfg        crumblerConfig
+	age        int
+	openingAge int
+	opening    bool
+	frozen     bool
+	freezeAge  int
+	editArea   image.Rectangle
 }
 
 type crumblerConfig struct {
@@ -4644,8 +4651,9 @@ func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig)
 		}
 		startX := pos.X + (s.rng.Float64()-0.5)*cfg.startWidth
 		startX = math.Max(0, math.Min(s.worldWidth-1, startX))
+		startOffset := cfg.hiddenStart*0.32 + s.rng.Float64()*cfg.hiddenStart*0.18
 		crumbs[i] = smallCrumb{
-			pos:    engine.V(startX, pos.Y-cfg.hiddenStart),
+			pos:    engine.V(startX, pos.Y-startOffset),
 			fan:    fan,
 			speed:  cfg.minSpeed + s.rng.Float64()*(cfg.maxSpeed-cfg.minSpeed),
 			drift:  fan*0.34 + (s.rng.Float64()-0.5)*0.7,
@@ -4654,12 +4662,15 @@ func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig)
 	}
 
 	impact := &smallCrumblerImpact{
-		start:  pos,
-		crumbs: crumbs,
-		cfg:    cfg,
+		start:   pos,
+		crumbs:  crumbs,
+		cfg:     cfg,
+		opening: true,
 	}
-	impact.editArea = s.ground.ClearRects(s.smallCrumblerAreas(impact))
-	s.refillWaterBelowArea(impact.editArea)
+	if area := s.ground.ClearRects(s.crumblerOpeningAreas(impact)); !area.Empty() {
+		impact.editArea = area
+		s.refillWaterBelowArea(area)
+	}
 	s.smallCrumblerImpacts = append(s.smallCrumblerImpacts, impact)
 	s.crumblerCameraFocus = &impact.start
 }
@@ -5132,6 +5143,16 @@ func (s *GameScene) updateSmallCrumblerImpacts() {
 		if impact == nil {
 			continue
 		}
+		if impact.opening {
+			if area := s.ground.ClearRects(s.crumblerOpeningAreas(impact)); !area.Empty() {
+				s.refillWaterBelowArea(area)
+				impact.editArea = unionRect(impact.editArea, area)
+			}
+			impact.openingAge++
+			if impact.openingAge >= crumblerOpeningFrames {
+				impact.opening = false
+			}
+		}
 		if impact.frozen {
 			impact.freezeAge++
 			if impact.freezeAge >= impact.cfg.freezeFrames {
@@ -5211,16 +5232,64 @@ func (s *GameScene) smallCrumblerAreas(impact *smallCrumblerImpact) []image.Rect
 		if crumb.stopped && !impact.frozen {
 			continue
 		}
-		if crumb.pos.Y < impact.start.Y {
+		entryY := crumblerEntryY(impact, crumb)
+		if crumb.pos.Y+float64(impact.cfg.height) < entryY {
 			continue
 		}
 		area := crumb.lastArea
 		if area.Empty() {
 			area = smallCrumblerArea(crumb.pos, impact.cfg)
 		}
+		minY := int(math.Floor(entryY))
+		if area.Min.Y < minY {
+			area.Min.Y = minY
+		}
 		areas = append(areas, area)
 	}
 	return areas
+}
+
+func crumblerEntryY(impact *smallCrumblerImpact, crumb *smallCrumb) float64 {
+	if impact == nil || crumb == nil {
+		return 0
+	}
+	wideRipple := math.Sin(crumb.wobble*1.31+crumb.fan*5.9) * crumblerEntryJitter
+	fineRipple := math.Sin(crumb.wobble+crumb.fan*13.0) * 3.0
+	return impact.start.Y + wideRipple + fineRipple
+}
+
+func (s *GameScene) crumblerOpeningAreas(impact *smallCrumblerImpact) []image.Rectangle {
+	if impact == nil {
+		return nil
+	}
+	progress := easeOut(float64(impact.openingAge+1) / float64(crumblerOpeningFrames))
+	width := impact.cfg.startWidth * (0.45 + progress*0.75)
+	depth := math.Max(float64(impact.cfg.height)*4, impact.cfg.maxDepth*crumblerOpeningDepthScale*progress)
+	count := maxInt(8, impact.cfg.count/3)
+	areas := make([]image.Rectangle, 0, count)
+	for i := 0; i < count; i++ {
+		xBias := (s.rng.Float64()*2 - 1)
+		x := impact.start.X + math.Copysign(math.Pow(math.Abs(xBias), 0.72), xBias)*width/2
+		x += (s.rng.Float64()*2 - 1) * impact.cfg.jitter
+		y := impact.start.Y + math.Pow(s.rng.Float64(), 1.65)*depth
+		if s.rng.Float64() < 0.42 {
+			lipLift := crumblerOpeningLipLift * (0.45 + progress*0.75)
+			y = impact.start.Y - s.rng.Float64()*lipLift + s.rng.Float64()*float64(impact.cfg.height+2)
+		}
+		size := crumblerOpeningChipSize
+		if s.rng.Float64() < 0.35 {
+			size++
+		}
+		areas = append(areas, centeredCrumblerChip(x, y, size))
+	}
+	return areas
+}
+
+func centeredCrumblerChip(x, y float64, size int) image.Rectangle {
+	half := size / 2
+	cx := int(math.Round(x))
+	cy := int(math.Round(y))
+	return image.Rect(cx-half, cy-half, cx-half+size, cy-half+size)
 }
 
 func smallCrumblerArea(pos engine.Vec, cfg crumblerConfig) image.Rectangle {

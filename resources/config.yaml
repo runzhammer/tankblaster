@@ -97,7 +97,7 @@ gameplay:
       points: 1
       credit_per_remaining_energy: 15
 debug:
-  enabled: false
+  enabled: true
   start_scene: game # game / shop / score
   start_shop: false
   # Optional im Debug-Modus: leere/fehlende Liste erlaubt alle Todesanimationen.
@@ -113,7 +113,7 @@ debug:
   zero_power_animations: []
   game:
     rounds: 10
-    players: *computer_players
+    players: *human_players
 online:
   enabled: true
   server_url: "wss://server.tankblaster.de/game"
