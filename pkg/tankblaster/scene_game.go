@@ -677,6 +677,7 @@ type GameScene struct {
 	spawnIndex           int
 	spawnPauseFrames     int
 	activePlayerIndex    int
+	turnOrder            []int
 	wind                 int
 	windDirection        int
 	projectileReentry    bool
@@ -998,6 +999,7 @@ func (s *GameScene) startRound() {
 	gr := models.NewRandomGroundWithSize(s.worldWidth, battlefieldHeight, s.rng.Int63())
 	s.ground = gr
 	s.tanks = nil
+	s.turnOrder = nil
 	s.palms = nil
 	s.clouds = nil
 	s.animatedImpacts = nil
@@ -1011,6 +1013,7 @@ func (s *GameScene) startRound() {
 	s.airStrikeImpacts = nil
 	s.stopBattleEffectLoops()
 
+	spawnLaneOrder := shuffledIndexes(s.rng, len(s.players))
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
 		if s.playerHasXMV12(tankIndex) {
@@ -1027,7 +1030,11 @@ func (s *GameScene) startRound() {
 		}
 		tankBody := tank.Body()
 		if tankBody != nil {
-			tankBody.Pos = randomTankDropPosition(s.rng, tankIndex, len(s.players), tankBody.Size, s.worldWidth, battlefieldHeight)
+			spawnLane := tankIndex
+			if tankIndex < len(spawnLaneOrder) {
+				spawnLane = spawnLaneOrder[tankIndex]
+			}
+			tankBody.Pos = randomTankDropPosition(s.rng, spawnLane, len(s.players), tankBody.Size, s.worldWidth, battlefieldHeight)
 			tankBody.Velocity = engine.Vec{Y: 2 + s.rng.Float64()*4}
 			battleTank.body = tankBody
 		}
@@ -1046,12 +1053,18 @@ func (s *GameScene) startRound() {
 		s.tanks = append(s.tanks, battleTank)
 		s.layers[layerTanks] = engine.AddSprites(s.layers[layerTanks], tank.Sprites)
 	}
+	s.setTurnOrderLeftToRight()
 	s.createClouds(battlefieldHeight)
 	s.createPalms()
 	if s.g.options.quickRoundStart {
 		s.placeTanksOnGroundForQuickStart()
 	}
-	s.cameraGoal = s.cameraTargetForTank(0)
+	s.chooseStartingPlayerAfterLanding()
+	if s.activePlayerIndex >= 0 {
+		s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+	} else {
+		s.cameraGoal = s.cameraTargetForTank(0)
+	}
 	s.cameraGoalY = 0
 	s.layers[layerGround] = engine.AddSprites(s.layers[layerGround], gr.Sprites)
 	s.layers[layerPalms] = engine.AddSprites(s.layers[layerPalms], s.palmSprites())
@@ -1795,6 +1808,51 @@ func worldWidthForPlayers(playerCount int) float64 {
 		playerCount = 1
 	}
 	return screen.Width + float64(playerCount)*screen.Width*0.75
+}
+
+func shuffledIndexes(rng *rand.Rand, count int) []int {
+	indexes := sequentialIndexes(count)
+	if rng == nil {
+		return indexes
+	}
+	rng.Shuffle(len(indexes), func(i, j int) {
+		indexes[i], indexes[j] = indexes[j], indexes[i]
+	})
+	return indexes
+}
+
+func sequentialIndexes(count int) []int {
+	indexes := make([]int, count)
+	for i := range indexes {
+		indexes[i] = i
+	}
+	return indexes
+}
+
+func (s *GameScene) setTurnOrderLeftToRight() {
+	s.turnOrder = turnOrderLeftToRight(s.tanks)
+}
+
+func turnOrderLeftToRight(tanks []*battleTank) []int {
+	order := sequentialIndexes(len(tanks))
+	sort.SliceStable(order, func(i, j int) bool {
+		left := order[i]
+		right := order[j]
+		leftX := tankCenterXForTurnOrder(tanks[left], left)
+		rightX := tankCenterXForTurnOrder(tanks[right], right)
+		if leftX == rightX {
+			return left < right
+		}
+		return leftX < rightX
+	})
+	return order
+}
+
+func tankCenterXForTurnOrder(tank *battleTank, fallbackIndex int) float64 {
+	if tank == nil || tank.body == nil || tank.body.Pos == nil || tank.body.Size == nil {
+		return math.Inf(1) + float64(fallbackIndex)
+	}
+	return tank.body.Pos.X + tank.body.Size.X/2
 }
 
 func randomTankDropPosition(rng *rand.Rand, index, count int, size *engine.Vec, worldWidth, battlefieldHeight float64) *engine.Vec {
@@ -4136,9 +4194,22 @@ func (s *GameScene) nextActivePlayerIndex() int {
 	if len(s.tanks) == 0 {
 		return -1
 	}
-	start := s.activePlayerIndex
-	for offset := 1; offset <= len(s.tanks); offset++ {
-		index := (start + offset) % len(s.tanks)
+	order := s.turnOrder
+	if len(order) != len(s.tanks) {
+		order = sequentialIndexes(len(s.tanks))
+	}
+	start := -1
+	for position, index := range order {
+		if index == s.activePlayerIndex {
+			start = position
+			break
+		}
+	}
+	for offset := 1; offset <= len(order); offset++ {
+		index := order[(start+offset)%len(order)]
+		if index < 0 || index >= len(s.tanks) {
+			continue
+		}
 		if s.tankCanAct(s.tanks[index]) {
 			return index
 		}
@@ -8586,6 +8657,14 @@ func (s *GameScene) tankCanAct(tank *battleTank) bool {
 }
 
 func (s *GameScene) ensureActivePlayerCanAct() bool {
+	if s.activePlayerIndex < 0 && s.allTanksLanded() {
+		s.chooseStartingPlayerAfterLanding()
+		if s.activePlayerIndex >= 0 {
+			s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
+			s.cameraGoalY = 0
+			return true
+		}
+	}
 	if s.activePlayerIndex >= 0 && s.activePlayerIndex < len(s.tanks) && s.tankCanAct(s.tanks[s.activePlayerIndex]) {
 		return true
 	}
