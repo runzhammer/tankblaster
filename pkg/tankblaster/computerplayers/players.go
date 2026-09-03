@@ -160,6 +160,18 @@ func NextID(id ID) ID {
 	return DoedelID
 }
 
+func StrongerID(id ID) ID {
+	for i, candidate := range orderedIDs {
+		if candidate == id {
+			if i >= len(orderedIDs)-1 {
+				return candidate
+			}
+			return orderedIDs[i+1]
+		}
+	}
+	return DoedelID
+}
+
 func RandomMisterXID(rng *rand.Rand) ID {
 	choices := []ID{DoedelID, FrederikID, DrNukeID, HaraldID}
 	if rng == nil {

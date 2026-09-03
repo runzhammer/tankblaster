@@ -227,6 +227,7 @@ type battlePalm struct {
 	grinning             bool
 	grinHideAt           int
 	aggression           float64
+	initialAggression    float64
 	aggressionMultiplier float64
 }
 
@@ -241,12 +242,13 @@ const (
 )
 
 type battleCloud struct {
-	sprite        *engine.Sprite
-	speed         float64
-	kind          cloudKind
-	image         *ebiten.Image
-	revengeActive bool
-	aggression    float64
+	sprite            *engine.Sprite
+	speed             float64
+	kind              cloudKind
+	image             *ebiten.Image
+	revengeActive     bool
+	aggression        float64
+	initialAggression float64
 }
 
 type cloudSearchEffect struct {
@@ -664,83 +666,84 @@ type GameScene struct {
 	clouds                  []*battleCloud
 	cloudAssets             []cloudAsset
 
-	tanks                []*battleTank
-	palms                []*battlePalm
-	players              []PlayerConfig
-	scores               []int
-	roundScores          []int
-	credits              []int
-	inventories          []shopInventory
-	computerMemories     []computerplayers.Memory
-	effectiveComputerIDs []computerplayers.ID
-	roundNumber          int
-	spawnIndex           int
-	spawnPauseFrames     int
-	activePlayerIndex    int
-	turnOrder            []int
-	wind                 int
-	windDirection        int
-	projectileReentry    bool
-	reentryAnimation     *projectileReentryAnimation
-	projectile           *projectile
-	projectiles          []*projectile
-	impacts              []impactAnimation
-	animatedImpacts      []animatedImpact
-	waterFills           []waterFill
-	waterBlubbers        []*waterBlubberEffect
-	waterBlotches        []*waterSurfaceImpact
-	moleImpacts          []*moleImpact
-	smallCrumblerImpacts []*smallCrumblerImpact
-	moskitoEffects       []*moskitoEffect
-	shockwaveImpacts     []*shockwaveImpact
-	airStrikeImpacts     []*airStrikeImpact
-	laserEffects         []*laserEffect
-	sandFalls            []sandFallAnimation
-	palmLeafFalls        []palmLeafFall
-	cloudSearchEffects   []*cloudSearchEffect
-	palmRevenge          *palmRevengeEvent
-	palmRevengeRemoval   *battleTank
-	zeroPowerEffects     []zeroPowerAnimation
-	zeroPowerAnimations  []spriteAnimation
-	zeroPowerNames       []string
-	shop                 shopAssets
-	turnAdvanceDelay     int
-	roundTransitionDelay int
-	roundSeriesComplete  bool
-	showScoreTable       bool
-	showPlayerNames      bool
-	gameHelpOpen         bool
-	playerInfoOpen       bool
-	playerInfoIndex      int
-	pressedDialogButton  string
-	confirmDialog        gameConfirmDialog
-	abortRoundFlashAge   int
-	abortRoundFlashing   bool
-	gamePaused           bool
-	lastDamageSource     *battleTank
-	shopPlayerOrder      []int
-	shopPlayerCursor     int
-	shopHoverClass       int
-	shopMode             shopMode
-	shopSelectedIndex    int
-	shopClassAStock      []int
-	shopClassBStock      []int
-	shopClassBItems      []int
-	shopComputerPlan     *shopComputerPlan
-	shopAwaitingOnline   bool
-	shopTouchScroll      shopTouchScrollState
-	scrollBarDragging    bool
-	zeroPowerStartDelay  int
-	lastComputerShot     computerShotRecord
-	palmCameraFocus      *battlePalm
-	waterCameraFocus     *waterBlubberEffect
-	waterBlotchFocus     *waterSurfaceImpact
-	crumblerCameraFocus  *engine.Vec
-	moskitoCameraFocus   *engine.Vec
-	xmV12DriveMode       bool
-	xmV12DriveDirection  int
-	xmV12EngineOffDelay  int
-	xmV12IdleOffset      engine.Vec
+	tanks                        []*battleTank
+	palms                        []*battlePalm
+	players                      []PlayerConfig
+	scores                       []int
+	roundScores                  []int
+	credits                      []int
+	inventories                  []shopInventory
+	computerMemories             []computerplayers.Memory
+	effectiveComputerIDs         []computerplayers.ID
+	roundNumber                  int
+	spawnIndex                   int
+	spawnPauseFrames             int
+	activePlayerIndex            int
+	turnOrder                    []int
+	nextRoundStartingPlayerIndex int
+	wind                         int
+	windDirection                int
+	projectileReentry            bool
+	reentryAnimation             *projectileReentryAnimation
+	projectile                   *projectile
+	projectiles                  []*projectile
+	impacts                      []impactAnimation
+	animatedImpacts              []animatedImpact
+	waterFills                   []waterFill
+	waterBlubbers                []*waterBlubberEffect
+	waterBlotches                []*waterSurfaceImpact
+	moleImpacts                  []*moleImpact
+	smallCrumblerImpacts         []*smallCrumblerImpact
+	moskitoEffects               []*moskitoEffect
+	shockwaveImpacts             []*shockwaveImpact
+	airStrikeImpacts             []*airStrikeImpact
+	laserEffects                 []*laserEffect
+	sandFalls                    []sandFallAnimation
+	palmLeafFalls                []palmLeafFall
+	cloudSearchEffects           []*cloudSearchEffect
+	palmRevenge                  *palmRevengeEvent
+	palmRevengeRemoval           *battleTank
+	zeroPowerEffects             []zeroPowerAnimation
+	zeroPowerAnimations          []spriteAnimation
+	zeroPowerNames               []string
+	shop                         shopAssets
+	turnAdvanceDelay             int
+	roundTransitionDelay         int
+	roundSeriesComplete          bool
+	showScoreTable               bool
+	showPlayerNames              bool
+	gameHelpOpen                 bool
+	playerInfoOpen               bool
+	playerInfoIndex              int
+	pressedDialogButton          string
+	confirmDialog                gameConfirmDialog
+	abortRoundFlashAge           int
+	abortRoundFlashing           bool
+	gamePaused                   bool
+	lastDamageSource             *battleTank
+	shopPlayerOrder              []int
+	shopPlayerCursor             int
+	shopHoverClass               int
+	shopMode                     shopMode
+	shopSelectedIndex            int
+	shopClassAStock              []int
+	shopClassBStock              []int
+	shopClassBItems              []int
+	shopComputerPlan             *shopComputerPlan
+	shopAwaitingOnline           bool
+	shopTouchScroll              shopTouchScrollState
+	scrollBarDragging            bool
+	zeroPowerStartDelay          int
+	lastComputerShot             computerShotRecord
+	palmCameraFocus              *battlePalm
+	waterCameraFocus             *waterBlubberEffect
+	waterBlotchFocus             *waterSurfaceImpact
+	crumblerCameraFocus          *engine.Vec
+	moskitoCameraFocus           *engine.Vec
+	xmV12DriveMode               bool
+	xmV12DriveDirection          int
+	xmV12EngineOffDelay          int
+	xmV12IdleOffset              engine.Vec
 }
 
 func NewGameScene(game *GameLoop) (core.Scene, error) {
@@ -751,18 +754,19 @@ func NewGameScene(game *GameLoop) (core.Scene, error) {
 	}
 
 	s := &GameScene{
-		g:                 game,
-		phase:             phaseBattle,
-		rng:               rand.New(rand.NewSource(rngSeed)),
-		activePlayerIndex: -1,
-		roundNumber:       1,
-		showPlayerNames:   false,
-		playerInfoIndex:   -1,
-		reentrySymbol:     mustImageFromPNG(r.SymbolReentry),
-		reentryEarth:      mustImageFromPNG(r.EarthReentry),
-		fuelGaugeImage:    mustImageFromPNG(r.FuelGaugePNG),
-		slopeMeterImage:   mustImageFromPNG(r.SlopeMeterPNG),
-		humanPortrait:     mustImageFromPNG(r.PlayerHuman),
+		g:                            game,
+		phase:                        phaseBattle,
+		rng:                          rand.New(rand.NewSource(rngSeed)),
+		activePlayerIndex:            -1,
+		nextRoundStartingPlayerIndex: -1,
+		roundNumber:                  1,
+		showPlayerNames:              false,
+		playerInfoIndex:              -1,
+		reentrySymbol:                mustImageFromPNG(r.SymbolReentry),
+		reentryEarth:                 mustImageFromPNG(r.EarthReentry),
+		fuelGaugeImage:               mustImageFromPNG(r.FuelGaugePNG),
+		slopeMeterImage:              mustImageFromPNG(r.SlopeMeterPNG),
+		humanPortrait:                mustImageFromPNG(r.PlayerHuman),
 		computerPortraits: map[computerplayers.ID]*ebiten.Image{
 			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
 			computerplayers.FrederikID: mustImageFromPNG(r.PlayerComputerFrederik),
@@ -2692,6 +2696,7 @@ func (s *GameScene) handleComputerTurn() {
 		return
 	}
 	if tank.computerPlan == nil {
+		s.increaseComputerIntelligenceIfOnlyComputersRemain(tank)
 		decisionRNG := s.rng
 		if s.g.online != nil {
 			decisionRNG = rand.New(rand.NewSource(s.onlineComputerDecisionSeed(tank)))
@@ -2705,6 +2710,25 @@ func (s *GameScene) handleComputerTurn() {
 		}
 	}
 	s.updateComputerTurnPlan(tank)
+}
+
+func (s *GameScene) increaseComputerIntelligenceIfOnlyComputersRemain(tank *battleTank) {
+	if tank == nil || tank.player.Kind != PlayerComputer || s.anyHumanPlayerCanAct() {
+		return
+	}
+	if tank.playerIndex < 0 || tank.playerIndex >= len(s.effectiveComputerIDs) {
+		return
+	}
+	s.effectiveComputerIDs[tank.playerIndex] = computerplayers.StrongerID(s.effectiveComputerIDs[tank.playerIndex])
+}
+
+func (s *GameScene) anyHumanPlayerCanAct() bool {
+	for _, tank := range s.tanks {
+		if tank != nil && tank.player.Kind == PlayerHuman && s.tankCanAct(tank) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GameScene) updateComputerTurnPlan(tank *battleTank) {
@@ -5953,6 +5977,7 @@ func (s *GameScene) finishPalmRevenge(event *palmRevengeEvent) {
 		return
 	}
 	if event.target != nil && event.target.power <= 0 {
+		s.resetRevengeAggression(event)
 		s.palmRevengeRemoval = event.target
 	}
 	if event.cloud != nil {
@@ -5962,6 +5987,19 @@ func (s *GameScene) finishPalmRevenge(event *palmRevengeEvent) {
 		}
 	}
 	s.palmRevenge = nil
+}
+
+func (s *GameScene) resetRevengeAggression(event *palmRevengeEvent) {
+	if event == nil {
+		return
+	}
+	if event.palm != nil {
+		event.palm.aggression = event.palm.initialAggression
+		return
+	}
+	if event.cloud != nil {
+		event.cloud.aggression = event.cloud.initialAggression
+	}
 }
 
 func (s *GameScene) removeZeroPowerEffectsForTank(tank *battleTank) {
@@ -8619,6 +8657,11 @@ func (s *GameScene) chooseStartingPlayerAfterLanding() {
 			return
 		}
 	}
+	if s.roundNumber > 1 && s.nextRoundStartingPlayerIndex >= 0 && s.nextRoundStartingPlayerIndex < len(s.tanks) && s.tankCanAct(s.tanks[s.nextRoundStartingPlayerIndex]) {
+		s.activePlayerIndex = s.nextRoundStartingPlayerIndex
+		s.resetComputerTurnPlans()
+		return
+	}
 	s.activePlayerIndex = living[s.rng.Intn(len(living))]
 	s.resetComputerTurnPlans()
 }
@@ -8709,6 +8752,7 @@ func (s *GameScene) endRoundIfOnlyOneTankRemains() bool {
 	if len(s.tanks) <= 1 || s.livingTankCount() > 1 {
 		return false
 	}
+	s.nextRoundStartingPlayerIndex = s.roundLoserIndex()
 	s.playEventSound(soundEventRoundEnd)
 	if winner := s.roundWinner(); winner != nil {
 		s.rewardRoundWinner(winner)
@@ -8729,6 +8773,43 @@ func (s *GameScene) roundWinner() *battleTank {
 		winner = tank
 	}
 	return winner
+}
+
+func (s *GameScene) roundLoserIndex() int {
+	if len(s.tanks) == 0 {
+		return -1
+	}
+	loser := -1
+	for index, tank := range s.tanks {
+		if tank == nil {
+			continue
+		}
+		if loser < 0 || s.tankLostRoundWorse(index, loser) {
+			loser = index
+		}
+	}
+	return loser
+}
+
+func (s *GameScene) tankLostRoundWorse(left, right int) bool {
+	leftScore := s.roundScoreForPlayer(left)
+	rightScore := s.roundScoreForPlayer(right)
+	if leftScore != rightScore {
+		return leftScore < rightScore
+	}
+	leftPower := s.tankPowerForRoundLoss(left)
+	rightPower := s.tankPowerForRoundLoss(right)
+	if leftPower != rightPower {
+		return leftPower < rightPower
+	}
+	return left < right
+}
+
+func (s *GameScene) tankPowerForRoundLoss(index int) int {
+	if index < 0 || index >= len(s.tanks) || s.tanks[index] == nil {
+		return 0
+	}
+	return s.tanks[index].power
 }
 
 func (s *GameScene) rewardRoundWinner(winner *battleTank) {
