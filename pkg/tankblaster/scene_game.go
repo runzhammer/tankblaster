@@ -1417,7 +1417,7 @@ func (s *GameScene) addLightningCloudAggressionForProjectile(p *projectile) bool
 	if p == nil || p.shooter == nil || s.palmRevenge != nil {
 		return false
 	}
-	increase := float64(maxInt(0, s.g.options.cloudAggression))
+	increase := lightningCloudAggressionIncrease(s.g.options.cloudAggression)
 	if increase <= 0 {
 		return false
 	}
@@ -1500,12 +1500,17 @@ func projectilePassesLightningCloud(pos engine.Vec, projectileRadius float64, cl
 	return engine.Collision(zone, projectileBounds)
 }
 
+func lightningCloudAggressionIncrease(aggression int) float64 {
+	normalized := float64(maxInt(0, minInt(100, aggression))) / 100.0
+	return palmRevengeTrigger * normalized * normalized
+}
+
 func (s *GameScene) startLightningCloudRevenge(cloud *battleCloud, palm *battlePalm, target *battleTank) {
 	if cloud == nil || cloud.sprite == nil || cloud.sprite.Pos == nil || cloud.sprite.Size == nil || target == nil || target.body == nil {
 		return
 	}
-	s.playEventSound(soundEventPalmRevenge)
 	if palm != nil {
+		s.playEventSound(soundEventPalmRevenge)
 		palm.eyesOn = false
 		palm.screaming = true
 		palm.screamAge = 0
@@ -5841,7 +5846,9 @@ func (s *GameScene) damagePalmRevengeTank(event *palmRevengeEvent) {
 	tank.power = maxInt(0, tank.power-appliedDamage)
 	tank.shotStrength = minInt(tank.shotStrength, maxInt(0, tank.power))
 	if previousPower > 0 && tank.power == 0 {
-		s.playEventSound(soundEventRevengeTankBroken)
+		if event.palm != nil {
+			s.playEventSound(soundEventRevengeTankBroken)
+		}
 		s.applySuicidePenalty(tank)
 		tank.zeroPowerShown = true
 	}

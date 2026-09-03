@@ -87,7 +87,7 @@ const (
 	PalmRevenge            = SoundBaumschrei
 	CloudSearch            = None
 	CloudLightning         = SoundBlitz
-	RevengeTankBroken      = None
+	RevengeTankBroken      = SoundHahaha
 	WaterFill              = None
 	WaterBlubber           = SoundBlubber
 	WaterBlotch            = SoundBlotsch

@@ -100,7 +100,8 @@ func TestOriginalEventSoundMappings(t *testing.T) {
 		soundEventSplitterBombSplit:  soundpaths.SoundClusterblast,
 		soundEventLaserSmoke:         soundpaths.SoundDampf,
 		soundEventDudImpact:          soundpaths.SoundSchnaeppchen,
-		soundEventRevengeTankBroken:  soundpaths.None,
+		soundEventPalmRevenge:        soundpaths.SoundBaumschrei,
+		soundEventRevengeTankBroken:  soundpaths.SoundHahaha,
 		soundEventShopBuy:            soundpaths.SoundKasse,
 		soundEventShopNotEnoughMoney: soundpaths.SoundMoney,
 	}

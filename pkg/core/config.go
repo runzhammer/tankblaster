@@ -202,7 +202,7 @@ func init() {
 	if s.Gameplay.PalmCount < -1 || s.Gameplay.PalmCount > 2 {
 		s.Gameplay.PalmCount = -1
 	}
-	s.Gameplay.CloudAggression = 10
+	s.Gameplay.CloudAggression = 35
 	if fs.Gameplay.CloudAggression != nil {
 		s.Gameplay.CloudAggression = *fs.Gameplay.CloudAggression
 	}

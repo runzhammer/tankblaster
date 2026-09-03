@@ -74,7 +74,7 @@ gameplay:
   palm_hit_pause_seconds: 2
   projectile_reentry: 1
   palm_count: -1
-  cloud_aggression: 10
+  cloud_aggression: 35
   quick_round_start: true
   palms:
     min_count: 1

@@ -214,7 +214,7 @@ func TestLoadUserConfigKeepsDefaultsForMissingFile(t *testing.T) {
 		options: gameOptions{
 			projectileReentry: 1,
 			palmCount:         -1,
-			cloudAggression:   10,
+			cloudAggression:   35,
 			quickRoundStart:   true,
 		},
 	}
@@ -226,7 +226,7 @@ func TestLoadUserConfigKeepsDefaultsForMissingFile(t *testing.T) {
 	if got, want := game.rounds, 10; got != want {
 		t.Fatalf("rounds = %d, want %d", got, want)
 	}
-	if got, want := game.options.cloudAggression, 10; got != want {
+	if got, want := game.options.cloudAggression, 35; got != want {
 		t.Fatalf("cloudAggression = %d, want %d", got, want)
 	}
 }

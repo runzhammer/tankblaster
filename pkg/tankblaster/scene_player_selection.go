@@ -649,7 +649,7 @@ func (s *playerSelectionScene) handleSlotClick(x, y int) bool {
 		r := slotRect(i)
 		titleRect := image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+38)
 		nameRect := nameInputRectForSlot(i, s.slots[i].Kind)
-		swatchRect := image.Rect(r.Max.X-34, r.Min.Y+42, r.Max.X-12, r.Min.Y+66)
+		swatchRect := colorSwatchRectForSlot(i)
 		portraitRect := portraitRectForSlot(i, s.slots[i].Kind)
 
 		switch {
@@ -664,14 +664,14 @@ func (s *playerSelectionScene) handleSlotClick(x, y int) bool {
 			SetPlayerNameText("")
 			s.openPaletteFor = -1
 			return true
+		case s.slots[i].Kind != PlayerNone && p.In(swatchRect):
+			s.openPaletteFor = i
+			s.focusedName = -1
+			return true
 		case s.slots[i].Kind == PlayerComputer && p.In(portraitRect):
 			s.cycleComputerPlayer(i)
 			s.focusedName = -1
 			s.openPaletteFor = -1
-			return true
-		case s.slots[i].Kind != PlayerNone && p.In(swatchRect):
-			s.openPaletteFor = i
-			s.focusedName = -1
 			return true
 		}
 	}
@@ -875,8 +875,7 @@ func (s *playerSelectionScene) drawSlot(screen *ebiten.Image, index int) {
 	portraitRect := portraitRectForSlot(index, slot.Kind)
 	drawScaledImage(screen, portrait, portraitRect)
 
-	swatch := image.Rect(r.Max.X-34, r.Min.Y+42, r.Max.X-12, r.Min.Y+66)
-	drawPaintSwatch(screen, swatch, slot.Color)
+	drawPaintSwatch(screen, colorSwatchRectForSlot(index), slot.Color)
 
 	nameRect := nameInputRectForSlot(index, slot.Kind)
 	drawText(screen, slot.Name, nameRect.Min.X+6, nameRect.Min.Y+20, colornames.Black)
@@ -921,6 +920,11 @@ func portraitRectForSlot(index int, kind PlayerKind) image.Rectangle {
 		return image.Rect(r.Min.X+4, r.Min.Y+40, r.Max.X-4, r.Max.Y-4)
 	}
 	return image.Rectangle{}
+}
+
+func colorSwatchRectForSlot(index int) image.Rectangle {
+	r := slotRect(index)
+	return image.Rect(r.Max.X-34, r.Min.Y+42, r.Max.X-12, r.Min.Y+66)
 }
 
 func nameInputRectForSlot(index int, kind PlayerKind) image.Rectangle {
