@@ -27,6 +27,21 @@ GO ?= go
 ZIP ?= zip
 RSRC ?= $(GO) run github.com/akavel/rsrc@latest
 HOST_SPAWN ?= /app/bin/host-spawn
+RELEASE_CONFIG ?= resources/config.yaml
+
+define with_release_config
+@set -eu; \
+	cfg="$(RELEASE_CONFIG)"; \
+	backup=$$(mktemp); \
+	cp "$$cfg" "$$backup"; \
+	restore() { cp "$$backup" "$$cfg"; rm -f "$$backup"; }; \
+	trap restore EXIT INT TERM; \
+	perl -0pi -e 's/(^debug:\n(?:[ \t].*\n)*?[ \t]+enabled:\s*)[^\n]*/$${1}false/m' "$$cfg"; \
+	if ! cmp -s "$$backup" "$$cfg"; then \
+		printf '%s\n' 'Temporarily set resources/config.yaml debug.enabled: false for release build'; \
+	fi; \
+	$(1)
+endef
 
 .PHONY: all test run run-server live-test live-test-auto live-test-cp build linux server server-docker server-docker-tar windows android android-debug android-release android-env package-linux package-windows package-android clean help
 
@@ -98,8 +113,7 @@ live-test-cp:
 build: linux
 
 linux:
-	mkdir -p $(BUILD_DIR)
-	$(GO) build $(GO_BUILD_FLAGS) -o $(DESKTOP_BIN) .
+	$(call with_release_config,mkdir -p $(BUILD_DIR); $(GO) build $(GO_BUILD_FLAGS) -o $(DESKTOP_BIN) .)
 
 server:
 	mkdir -p $(BUILD_DIR)
@@ -135,10 +149,7 @@ server-docker-tar: server-docker
 	fi
 
 windows:
-	mkdir -p $(BUILD_DIR)
-	$(RSRC) -ico $(WINDOWS_ICON) -o $(WINDOWS_ICON_SYSO)
-	GOOS=windows GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o $(WINDOWS_BIN) .
-	rm -f $(WINDOWS_ICON_SYSO)
+	$(call with_release_config,mkdir -p $(BUILD_DIR); $(RSRC) -ico $(WINDOWS_ICON) -o $(WINDOWS_ICON_SYSO); GOOS=windows GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o $(WINDOWS_BIN) .; rm -f $(WINDOWS_ICON_SYSO))
 
 package-linux: linux
 	mkdir -p $(DIST_DIR)
@@ -161,7 +172,7 @@ android-debug:
 	$(ANDROID_SCRIPT) debug
 
 android-release:
-	$(ANDROID_SCRIPT) release
+	$(call with_release_config,$(ANDROID_SCRIPT) release)
 
 android-env:
 	@printf 'ANDROID_HOME=%s\n' "$${ANDROID_HOME:-}"
