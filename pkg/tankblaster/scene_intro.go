@@ -182,8 +182,8 @@ func (s *introScene) drawColorWash(screen *ebiten.Image) {
 		s.drawIntroOverlay(screen, color.RGBA{R: 255, G: uint8(255 * local / introColorStageFrames), A: 150})
 	case colorFrame < introColorStageFrames*3:
 		local := colorFrame - introColorStageFrames*2
-		alpha := uint8(150 + 105*local/introColorStageFrames)
-		s.drawIntroOverlay(screen, color.RGBA{A: alpha})
+		s.drawIntroOverlay(screen, color.RGBA{R: 255, G: 255, A: 150})
+		s.drawIntroOverlay(screen, color.RGBA{A: uint8(255 * local / introColorStageFrames)})
 	default:
 		s.drawIntroOverlay(screen, color.RGBA{A: 255})
 	}
