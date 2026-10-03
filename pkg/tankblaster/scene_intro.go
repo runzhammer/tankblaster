@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/runzhammer/gamedemo/pkg/core"
 	r "github.com/runzhammer/gamedemo/resources"
 	"golang.org/x/image/bmp"
@@ -28,6 +29,9 @@ const (
 	introBlackHoldFrames     = 30
 	introTextScale           = 1.8
 	introTextYOffset         = 100
+	introRemageMarginX       = 24
+	introRemageMarginY       = 70
+	introRemageAngle         = 40 * math.Pi / 180
 )
 
 type introScene struct {
@@ -38,6 +42,7 @@ type introScene struct {
 	started    bool
 	blastSound bool
 	overlay    *ebiten.Image
+	remage     *ebiten.Image
 }
 
 func NewIntroScene(game *GameLoop) (core.Scene, error) {
@@ -52,6 +57,7 @@ func NewIntroScene(game *GameLoop) (core.Scene, error) {
 			mustIntroImage("intro/Intro_Text_5.png"),
 			mustIntroImage("intro/Intro_Text_6.png"),
 		},
+		remage: renderIntroRemageLogo(),
 	}
 	return s, nil
 }
@@ -107,8 +113,29 @@ func (s *introScene) updateMusicFade() {
 
 func (s *introScene) Draw(screen *ebiten.Image) {
 	drawScaledImage(screen, s.background, image.Rect(0, 0, ScreenWidth, ScreenHeight))
+	s.drawRemage(screen)
 	s.drawText(screen)
 	s.drawColorWash(screen)
+}
+
+func (s *introScene) drawRemage(screen *ebiten.Image) {
+	if s.remage == nil {
+		return
+	}
+	bounds := s.remage.Bounds()
+	w := float64(bounds.Dx())
+	h := float64(bounds.Dy())
+	t := float64(s.tick)
+	scale := 1.0 + math.Sin(t*0.12)*0.07
+	x := float64(ScreenWidth-int(w*scale)-introRemageMarginX) + math.Sin(t*0.047)*7
+	y := float64(introRemageMarginY) + math.Sin(t*0.073+0.8)*5
+
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(-w/2, -h/2)
+	op.GeoM.Scale(scale, scale)
+	op.GeoM.Rotate(introRemageAngle + math.Sin(t*0.036)*0.035)
+	op.GeoM.Translate(x+w*scale/2, y+h*scale/2)
+	screen.DrawImage(s.remage, op)
 }
 
 func (s *introScene) drawText(screen *ebiten.Image) {
@@ -149,14 +176,14 @@ func (s *introScene) drawColorWash(screen *ebiten.Image) {
 	}
 	switch {
 	case colorFrame < introColorStageFrames:
-		s.drawIntroOverlay(screen, color.RGBA{R: 255, A: uint8(255 * colorFrame / introColorStageFrames)})
+		s.drawIntroOverlay(screen, color.RGBA{R: 255, A: uint8(150 * colorFrame / introColorStageFrames)})
 	case colorFrame < introColorStageFrames*2:
 		local := colorFrame - introColorStageFrames
-		s.drawIntroOverlay(screen, color.RGBA{R: 255, G: uint8(255 * local / introColorStageFrames), A: 255})
+		s.drawIntroOverlay(screen, color.RGBA{R: 255, G: uint8(255 * local / introColorStageFrames), A: 150})
 	case colorFrame < introColorStageFrames*3:
 		local := colorFrame - introColorStageFrames*2
-		value := uint8(255 - 255*local/introColorStageFrames)
-		s.drawIntroOverlay(screen, color.RGBA{R: value, G: value, A: 255})
+		alpha := uint8(150 + 105*local/introColorStageFrames)
+		s.drawIntroOverlay(screen, color.RGBA{A: alpha})
 	default:
 		s.drawIntroOverlay(screen, color.RGBA{A: 255})
 	}
@@ -213,6 +240,32 @@ func decodeIntroImage(path string, data []byte) (image.Image, error) {
 		img, _, err := image.Decode(bytes.NewReader(data))
 		return img, err
 	}
+}
+
+func renderIntroRemageLogo() *ebiten.Image {
+	const label = "remake"
+	face := loadUIFont(38)
+	bounds := text.BoundString(face, label)
+	img := ebiten.NewImage(bounds.Dx()+42, bounds.Dy()+36)
+	x := 20 - bounds.Min.X
+	y := 15 - bounds.Min.Y
+
+	for depth := 9; depth >= 1; depth-- {
+		shade := uint8(80 + depth*7)
+		text.Draw(img, label, face, x+depth, y+depth, color.RGBA{R: shade, G: 0, B: 0, A: 255})
+	}
+	for ox := -3; ox <= 3; ox++ {
+		for oy := -3; oy <= 3; oy++ {
+			if ox*ox+oy*oy <= 10 {
+				text.Draw(img, label, face, x+ox, y+oy, color.RGBA{R: 95, G: 0, B: 0, A: 255})
+			}
+		}
+	}
+	text.Draw(img, label, face, x+2, y+2, color.RGBA{R: 120, G: 0, B: 0, A: 255})
+	text.Draw(img, label, face, x, y, color.RGBA{R: 235, G: 18, B: 24, A: 255})
+	text.Draw(img, label, face, x-2, y-3, color.RGBA{R: 255, G: 170, B: 170, A: 210})
+	text.Draw(img, label, face, x-4, y-6, color.RGBA{R: 255, G: 235, B: 235, A: 135})
+	return img
 }
 
 func (s *introScene) drawIntroOverlay(screen *ebiten.Image, c color.RGBA) {
