@@ -1,6 +1,18 @@
 server:
   address: "127.0.0.1:8765"
   public_url: "https://tankblaster.example"
+  # Empty keeps browser WebSocket origin checks strict; native clients without Origin still work.
+  # Add explicit browser origins if needed, for example: ["https://tankblaster.example"]
+  allowed_origins: []
+  read_header_timeout: "5s"
+  read_timeout: "15s"
+  write_timeout: "15s"
+  idle_timeout: "60s"
+  websocket_read_limit: 65536
+  max_connections: 256
+  max_sessions: 128
+  max_queue_length: 256
+  error_channel_timeout: "250ms"
 
 database:
   driver: "sqlite"

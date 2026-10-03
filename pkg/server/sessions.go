@@ -75,6 +75,9 @@ func NewHub(cfg Config, store *Store) *Hub {
 func (h *Hub) CreateSession(kind SessionType, player SessionPlayer, rounds int) (*Session, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if len(h.sessions) >= h.cfg.Server.MaxSessions {
+		return nil, errProtocol("server_busy", "too many open sessions")
+	}
 	now := time.Now().UTC()
 	rounds = normalizedRounds(rounds)
 	s := &Session{
@@ -196,10 +199,13 @@ func (h *Hub) QuickMatch(player SessionPlayer) (*Session, bool, error) {
 	if !h.cfg.Matchmaking.Enabled {
 		return nil, false, errProtocol("matchmaking_disabled", "matchmaking is disabled")
 	}
+	if len(h.sessions) >= h.cfg.Server.MaxSessions {
+		return nil, false, errProtocol("server_busy", "too many open sessions")
+	}
 	now := time.Now().UTC()
 	for i, queued := range h.queue {
 		if queued.Player.PlayerID == player.PlayerID {
-			continue
+			return nil, false, nil
 		}
 		ratingRange := h.ratingRange(queued, now)
 		diff := queued.Player.Rating - player.Rating
@@ -222,6 +228,9 @@ func (h *Hub) QuickMatch(player SessionPlayer) (*Session, bool, error) {
 			h.sessions[s.ID] = s
 			return s, true, nil
 		}
+	}
+	if len(h.queue) >= h.cfg.Server.MaxQueueLength {
+		return nil, false, errProtocol("server_busy", "matchmaking queue is full")
 	}
 	h.queue = append(h.queue, queuedPlayer{Player: player, QueuedAt: now})
 	return nil, false, nil

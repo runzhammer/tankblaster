@@ -77,3 +77,35 @@ func TestCompleteMatchFinishesWithScoreWinner(t *testing.T) {
 		t.Fatalf("session status = %s, want %s", sess.Status, SessionFinished)
 	}
 }
+
+func TestCreateSessionRespectsMaxSessions(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Server.MaxSessions = 1
+	h := NewHub(cfg, nil)
+
+	if _, err := h.CreateSession(SessionPublic, SessionPlayer{PlayerID: "p1", DisplayName: "Player 1"}, 1); err != nil {
+		t.Fatalf("first CreateSession() error = %v", err)
+	}
+	if _, err := h.CreateSession(SessionPublic, SessionPlayer{PlayerID: "p2", DisplayName: "Player 2"}, 1); err == nil {
+		t.Fatal("second CreateSession() error = nil, want server_busy")
+	}
+}
+
+func TestQuickMatchRespectsMaxQueueLength(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Server.MaxQueueLength = 1
+	cfg.Matchmaking.InitialRatingRange = 0
+	cfg.Matchmaking.RatingRangeStep = 0
+	cfg.Matchmaking.MaximumRatingRange = 0
+	h := NewHub(cfg, nil)
+
+	if _, matched, err := h.QuickMatch(SessionPlayer{PlayerID: "p1", DisplayName: "Player 1", Rating: 1000}); err != nil || matched {
+		t.Fatalf("first QuickMatch() matched=%t error=%v, want queued", matched, err)
+	}
+	if _, matched, err := h.QuickMatch(SessionPlayer{PlayerID: "p1", DisplayName: "Player 1", Rating: 1000}); err != nil || matched {
+		t.Fatalf("duplicate QuickMatch() matched=%t error=%v, want queued no-op", matched, err)
+	}
+	if _, _, err := h.QuickMatch(SessionPlayer{PlayerID: "p2", DisplayName: "Player 2", Rating: 2000}); err == nil {
+		t.Fatal("full queue QuickMatch() error = nil, want server_busy")
+	}
+}

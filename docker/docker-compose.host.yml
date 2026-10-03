@@ -1,23 +1,19 @@
 services:
   tankblaster-server:
-    build:
-      context: ..
-      dockerfile: docker/server.Dockerfile
-    image: ${TANKBLASTER_SERVER_IMAGE:-tankblaster-server:latest}
+    image: ${TANKBLASTER_SERVER_IMAGE:-localhost/tankblaster-server:latest}
     container_name: ${TANKBLASTER_SERVER_CONTAINER:-tankblaster-server}
     restart: unless-stopped
-    ports:
-      - "${TANKBLASTER_SERVER_PORT:-8765}:8765"
+    network_mode: host
     environment:
       TANKBLASTER_SERVER_ADDRESS: "0.0.0.0:8765"
-      TANKBLASTER_SERVER_PUBLIC_URL: "${TANKBLASTER_SERVER_PUBLIC_URL:-http://127.0.0.1:8765}"
+      TANKBLASTER_SERVER_PUBLIC_URL: "${TANKBLASTER_SERVER_PUBLIC_URL:-https://server.tankblaster.de}"
       TANKBLASTER_SERVER_DB: "/data/tankblaster.db"
       TANKBLASTER_SERVER_ALLOWED_ORIGINS: "${TANKBLASTER_SERVER_ALLOWED_ORIGINS:-}"
       TANKBLASTER_SERVER_MAX_CONNECTIONS: "${TANKBLASTER_SERVER_MAX_CONNECTIONS:-256}"
       TANKBLASTER_SERVER_MAX_SESSIONS: "${TANKBLASTER_SERVER_MAX_SESSIONS:-128}"
       TANKBLASTER_SERVER_MAX_QUEUE_LENGTH: "${TANKBLASTER_SERVER_MAX_QUEUE_LENGTH:-256}"
     volumes:
-      - tankblaster-data:/data
+      - ${TANKBLASTER_SERVER_DATA_DIR:-/root/docker/tankblaster/data}:/data
     read_only: true
     tmpfs:
       - /tmp:noexec,nosuid,nodev,size=16m
@@ -25,9 +21,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    pids_limit: 128
+    pids_limit: ${TANKBLASTER_SERVER_PIDS_LIMIT:-128}
     mem_limit: ${TANKBLASTER_SERVER_MEM_LIMIT:-256m}
-    cpus: ${TANKBLASTER_SERVER_CPUS:-1.0}
-
-volumes:
-  tankblaster-data:
+    cpus: ${TANKBLASTER_SERVER_CPUS:-0.2}

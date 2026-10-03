@@ -9,8 +9,18 @@ import (
 
 type Config struct {
 	Server struct {
-		Address   string `yaml:"address"`
-		PublicURL string `yaml:"public_url"`
+		Address             string        `yaml:"address"`
+		PublicURL           string        `yaml:"public_url"`
+		AllowedOrigins      []string      `yaml:"allowed_origins"`
+		ReadHeaderTimeout   time.Duration `yaml:"read_header_timeout"`
+		ReadTimeout         time.Duration `yaml:"read_timeout"`
+		WriteTimeout        time.Duration `yaml:"write_timeout"`
+		IdleTimeout         time.Duration `yaml:"idle_timeout"`
+		WebSocketReadLimit  int64         `yaml:"websocket_read_limit"`
+		MaxConnections      int           `yaml:"max_connections"`
+		MaxSessions         int           `yaml:"max_sessions"`
+		MaxQueueLength      int           `yaml:"max_queue_length"`
+		ErrorChannelTimeout time.Duration `yaml:"error_channel_timeout"`
 	} `yaml:"server"`
 	Database struct {
 		Driver string `yaml:"driver"`
@@ -66,6 +76,15 @@ func DefaultConfig() Config {
 	var cfg Config
 	cfg.Server.Address = "127.0.0.1:8765"
 	cfg.Server.PublicURL = "http://127.0.0.1:8765"
+	cfg.Server.ReadHeaderTimeout = 5 * time.Second
+	cfg.Server.ReadTimeout = 15 * time.Second
+	cfg.Server.WriteTimeout = 15 * time.Second
+	cfg.Server.IdleTimeout = 60 * time.Second
+	cfg.Server.WebSocketReadLimit = 64 * 1024
+	cfg.Server.MaxConnections = 256
+	cfg.Server.MaxSessions = 128
+	cfg.Server.MaxQueueLength = 256
+	cfg.Server.ErrorChannelTimeout = 250 * time.Millisecond
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.Path = "tankblaster.db"
 	cfg.Sessions.MaxPlayers = 2
@@ -99,6 +118,33 @@ func (cfg *Config) applyDefaults() {
 	}
 	if cfg.Server.PublicURL == "" {
 		cfg.Server.PublicURL = def.Server.PublicURL
+	}
+	if cfg.Server.ReadHeaderTimeout <= 0 {
+		cfg.Server.ReadHeaderTimeout = def.Server.ReadHeaderTimeout
+	}
+	if cfg.Server.ReadTimeout <= 0 {
+		cfg.Server.ReadTimeout = def.Server.ReadTimeout
+	}
+	if cfg.Server.WriteTimeout <= 0 {
+		cfg.Server.WriteTimeout = def.Server.WriteTimeout
+	}
+	if cfg.Server.IdleTimeout <= 0 {
+		cfg.Server.IdleTimeout = def.Server.IdleTimeout
+	}
+	if cfg.Server.WebSocketReadLimit <= 0 {
+		cfg.Server.WebSocketReadLimit = def.Server.WebSocketReadLimit
+	}
+	if cfg.Server.MaxConnections <= 0 {
+		cfg.Server.MaxConnections = def.Server.MaxConnections
+	}
+	if cfg.Server.MaxSessions <= 0 {
+		cfg.Server.MaxSessions = def.Server.MaxSessions
+	}
+	if cfg.Server.MaxQueueLength <= 0 {
+		cfg.Server.MaxQueueLength = def.Server.MaxQueueLength
+	}
+	if cfg.Server.ErrorChannelTimeout <= 0 {
+		cfg.Server.ErrorChannelTimeout = def.Server.ErrorChannelTimeout
 	}
 	if cfg.Database.Driver == "" {
 		cfg.Database.Driver = def.Database.Driver

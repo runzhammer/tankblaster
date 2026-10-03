@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,9 +16,10 @@ import (
 )
 
 type Server struct {
-	cfg   Config
-	store *Store
-	hub   *Hub
+	cfg       Config
+	store     *Store
+	hub       *Hub
+	connSlots chan struct{}
 }
 
 type protocolError struct {
@@ -33,16 +36,19 @@ func (e protocolError) Error() string {
 }
 
 type Client struct {
-	player PlayerRecord
-	conn   *websocket.Conn
-	send   chan protocol.Envelope
+	player      PlayerRecord
+	conn        *websocket.Conn
+	send        chan protocol.Envelope
+	done        chan struct{}
+	sendTimeout time.Duration
 }
 
 func New(cfg Config, store *Store) *Server {
 	return &Server{
-		cfg:   cfg,
-		store: store,
-		hub:   NewHub(cfg, store),
+		cfg:       cfg,
+		store:     store,
+		hub:       NewHub(cfg, store),
+		connSlots: make(chan struct{}, cfg.Server.MaxConnections),
 	}
 }
 
@@ -54,7 +60,15 @@ func (s *Server) Run(ctx context.Context) error {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	srv := &http.Server{Addr: s.cfg.Server.Address, Handler: mux}
+	srv := &http.Server{
+		Addr:              s.cfg.Server.Address,
+		Handler:           mux,
+		ReadHeaderTimeout: s.cfg.Server.ReadHeaderTimeout,
+		ReadTimeout:       s.cfg.Server.ReadTimeout,
+		WriteTimeout:      s.cfg.Server.WriteTimeout,
+		IdleTimeout:       s.cfg.Server.IdleTimeout,
+		MaxHeaderBytes:    8 * 1024,
+	}
 	go s.cleanupLoop(ctx)
 	go func() {
 		<-ctx.Done()
@@ -71,17 +85,24 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) handleGame(w http.ResponseWriter, r *http.Request) {
+	if !s.acquireConnectionSlot() {
+		http.Error(w, "too many connections", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.releaseConnectionSlot()
+
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+		OriginPatterns: s.cfg.Server.AllowedOrigins,
 	})
 	if err != nil {
 		return
 	}
-	client := &Client{conn: conn, send: make(chan protocol.Envelope, 32)}
+	conn.SetReadLimit(s.cfg.Server.WebSocketReadLimit)
+	client := &Client{conn: conn, send: make(chan protocol.Envelope, 32), done: make(chan struct{}), sendTimeout: s.cfg.Server.ErrorChannelTimeout}
 	ctx := r.Context()
 	go client.writeLoop(ctx)
 	defer func() {
-		close(client.send)
+		close(client.done)
 		_ = conn.Close(websocket.StatusNormalClosure, "")
 		if client.player.PlayerID != "" {
 			s.hub.CancelQuickMatch(client.player.PlayerID)
@@ -96,6 +117,28 @@ func (s *Server) handleGame(w http.ResponseWriter, r *http.Request) {
 		if err := s.handleEnvelope(ctx, client, env); err != nil {
 			client.enqueueError(err)
 		}
+	}
+}
+
+func (s *Server) acquireConnectionSlot() bool {
+	if s == nil || s.connSlots == nil {
+		return true
+	}
+	select {
+	case s.connSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) releaseConnectionSlot() {
+	if s == nil || s.connSlots == nil {
+		return
+	}
+	select {
+	case <-s.connSlots:
+	default:
 	}
 }
 
@@ -324,6 +367,7 @@ func (s *Server) broadcast(sess *Session, typ protocol.MessageType, payload any)
 		}
 		select {
 		case p.Client.send <- env:
+		case <-p.Client.done:
 		default:
 		}
 	}
@@ -333,6 +377,8 @@ func (s *Server) broadcast(sess *Session, typ protocol.MessageType, payload any)
 func (c *Client) writeLoop(ctx context.Context) {
 	for {
 		select {
+		case <-c.done:
+			return
 		case <-ctx.Done():
 			return
 		case env, ok := <-c.send:
@@ -351,7 +397,16 @@ func (c *Client) sendMessage(typ protocol.MessageType, payload any) error {
 	if err != nil {
 		return err
 	}
-	c.send <- env
+	if c.sendTimeout <= 0 {
+		c.sendTimeout = 250 * time.Millisecond
+	}
+	select {
+	case c.send <- env:
+	case <-c.done:
+		return errProtocol("client_closed", "client connection is closed")
+	case <-time.After(c.sendTimeout):
+		return errProtocol("client_slow", "client is not reading messages")
+	}
 	return nil
 }
 
@@ -435,6 +490,8 @@ func (s *Server) cleanupLoop(ctx context.Context) {
 
 func (s *Server) handleJoinPage(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimPrefix(r.URL.Path, "/join/")
+	tokenHTML := html.EscapeString(token)
+	tokenURL := html.EscapeString(url.PathEscape(token))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(`<!doctype html><html><head><meta charset="utf-8"><title>Tank Blaster Invite</title></head><body><h1>Tank Blaster</h1><p>Open Tank Blaster and paste this invite token in Join Session.</p><pre>` + token + `</pre><p><a href="tankblaster://join/` + token + `">Open in Tank Blaster</a></p></body></html>`))
+	_, _ = w.Write([]byte(`<!doctype html><html><head><meta charset="utf-8"><title>Tank Blaster Invite</title></head><body><h1>Tank Blaster</h1><p>Open Tank Blaster and paste this invite token in Join Session.</p><pre>` + tokenHTML + `</pre><p><a href="tankblaster://join/` + tokenURL + `">Open in Tank Blaster</a></p></body></html>`))
 }

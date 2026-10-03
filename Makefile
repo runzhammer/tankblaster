@@ -8,9 +8,15 @@ BUILDINFO_PKG ?= $(MODULE)/pkg/buildinfo
 LD_FLAGS ?= -X $(BUILDINFO_PKG).Version=$(VERSION) -X $(BUILDINFO_PKG).Commit=$(COMMIT)$(DIRTY) -X $(BUILDINFO_PKG).BuildTime=$(BUILD_TIME)
 GO_BUILD_FLAGS ?= -trimpath -ldflags "$(LD_FLAGS)"
 BUILD_DIR ?= bin
+DIST_DIR ?= dist
 DESKTOP_BIN ?= $(BUILD_DIR)/$(APP_NAME)
 SERVER_BIN ?= $(BUILD_DIR)/$(APP_NAME)-server
 WINDOWS_BIN ?= $(BUILD_DIR)/$(APP_NAME).exe
+ANDROID_APK ?= $(DIST_DIR)/$(APP_NAME)-debug.apk
+LINUX_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-linux.zip
+WINDOWS_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-windows.zip
+ANDROID_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-android.zip
+SERVER_IMAGE_TAR ?= $(DIST_DIR)/$(APP_NAME)-server-$(VERSION)-linux.tar
 WINDOWS_ICON ?= resources/images/tankblaster.ico
 WINDOWS_ICON_SYSO ?= tankblaster_windows.syso
 ANDROID_SCRIPT ?= ./scripts/build-android.sh
@@ -18,11 +24,12 @@ LIVE_TEST_DB ?= .live-test/tankblaster.db
 LIVE_TEST_ROUNDS ?= 5
 SERVER_DOCKER_IMAGE ?= tankblaster-server:latest
 GO ?= go
+ZIP ?= zip
 RSRC ?= $(GO) run github.com/akavel/rsrc@latest
 
-.PHONY: all test run run-server live-test live-test-auto live-test-cp build linux server server-docker windows android android-debug android-release android-env clean help
+.PHONY: all test run run-server live-test live-test-auto live-test-cp build linux server server-docker server-docker-tar windows android android-debug android-release android-env package-linux package-windows package-android clean help
 
-all: clean linux
+all: clean package-linux package-windows package-android server-docker-tar
 
 help:
 	@printf '%s\n' \
@@ -37,6 +44,7 @@ help:
 		'  make build        Build the desktop binary' \
 		'  make server       Build the headless multiplayer server' \
 		'  make server-docker Build the headless multiplayer server image with Docker or Podman' \
+		'  make server-docker-tar Build and save the server image as dist/tankblaster-server-VERSION-linux.tar' \
 		'  make windows      Build a Windows EXE with app icon' \
 		'  make android      Build Android debug APK' \
 		'  make android-debug Build Android debug APK' \
@@ -108,11 +116,39 @@ server-docker:
 		exit 1; \
 	fi
 
+server-docker-tar: server-docker
+	mkdir -p $(DIST_DIR)
+	@if [ -n "$${DISTROBOX_ENTER_PATH:-}" ] && command -v distrobox-host-exec >/dev/null 2>&1; then \
+		distrobox-host-exec podman save -o "$(CURDIR)/$(SERVER_IMAGE_TAR)" $(SERVER_DOCKER_IMAGE); \
+	elif command -v docker >/dev/null 2>&1; then \
+		docker save -o "$(SERVER_IMAGE_TAR)" $(SERVER_DOCKER_IMAGE); \
+	elif command -v podman >/dev/null 2>&1; then \
+		podman save -o "$(SERVER_IMAGE_TAR)" $(SERVER_DOCKER_IMAGE); \
+	else \
+		printf '%s\n' 'Neither docker nor podman was found in PATH.' >&2; \
+		exit 1; \
+	fi
+
 windows:
 	mkdir -p $(BUILD_DIR)
 	$(RSRC) -ico $(WINDOWS_ICON) -o $(WINDOWS_ICON_SYSO)
 	GOOS=windows GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o $(WINDOWS_BIN) .
 	rm -f $(WINDOWS_ICON_SYSO)
+
+package-linux: linux
+	mkdir -p $(DIST_DIR)
+	rm -f $(LINUX_ZIP)
+	cd $(BUILD_DIR) && $(ZIP) -9 ../$(LINUX_ZIP) $(APP_NAME)
+
+package-windows: windows
+	mkdir -p $(DIST_DIR)
+	rm -f $(WINDOWS_ZIP)
+	cd $(BUILD_DIR) && $(ZIP) -9 ../$(WINDOWS_ZIP) $(APP_NAME).exe
+
+package-android: android-debug
+	mkdir -p $(DIST_DIR)
+	rm -f $(ANDROID_ZIP)
+	cd $(DIST_DIR) && $(ZIP) -9 $(APP_NAME)-$(VERSION)-android.zip $(APP_NAME)-debug.apk
 
 android: android-debug
 
