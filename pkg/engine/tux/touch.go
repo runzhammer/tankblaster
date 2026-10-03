@@ -2,7 +2,7 @@ package tux
 
 import (
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/runzhammer/gamedemo/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/engine"
 )
 
 // TouchState describes the state of a touch pointer

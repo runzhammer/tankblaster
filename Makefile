@@ -1,5 +1,5 @@
 APP_NAME ?= tankblaster
-MODULE ?= github.com/runzhammer/gamedemo
+MODULE ?= github.com/runzhammer/tankblaster
 VERSION ?= $(shell sed -n '1p' VERSION 2>/dev/null || printf dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
 DIRTY ?= $(shell git diff --quiet 2>/dev/null || printf '%s' -dirty)

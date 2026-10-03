@@ -8,7 +8,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"github.com/runzhammer/gamedemo/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/core"
 )
 
 var lastPrimaryTouchPosition image.Point

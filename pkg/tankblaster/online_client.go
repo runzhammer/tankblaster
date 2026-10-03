@@ -8,8 +8,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/protocol"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
 )
 
 type onlineIdentity struct {

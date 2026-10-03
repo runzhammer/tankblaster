@@ -17,8 +17,8 @@ import (
 	_ "codeberg.org/rabenauge/soundsetgo/formats/mod"
 	"github.com/hajimehoshi/ebiten/v2/audio"
 	"github.com/hajimehoshi/ebiten/v2/audio/wav"
-	weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
-	r "github.com/runzhammer/gamedemo/resources"
+	weaponspkg "github.com/runzhammer/tankblaster/pkg/tankblaster/weapons"
+	r "github.com/runzhammer/tankblaster/resources"
 )
 
 type soundPlayer struct {

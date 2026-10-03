@@ -8,8 +8,8 @@ import (
 	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/engine"
 )
 
 type Ground struct {

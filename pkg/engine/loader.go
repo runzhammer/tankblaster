@@ -13,7 +13,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/audio/mp3"
 	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 	"github.com/pkg/errors"
-	"github.com/runzhammer/gamedemo/pkg/engine/tinge"
+	"github.com/runzhammer/tankblaster/pkg/engine/tinge"
 	"golang.org/x/image/font"
 )
 

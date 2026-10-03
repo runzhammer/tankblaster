@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/runzhammer/gamedemo/pkg/buildinfo"
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/engine"
-	"github.com/runzhammer/gamedemo/pkg/gamecore"
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
+	"github.com/runzhammer/tankblaster/pkg/buildinfo"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
 )
 
 var _ core.Game = (*GameLoop)(nil)

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/runzhammer/gamedemo/pkg/gamecore"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
 )
 
 const ProtocolVersion = 1

@@ -8,8 +8,8 @@ import (
 	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/runzhammer/gamedemo/pkg/engine"
-	r "github.com/runzhammer/gamedemo/resources"
+	"github.com/runzhammer/tankblaster/pkg/engine"
+	r "github.com/runzhammer/tankblaster/resources"
 )
 
 type Tank struct {

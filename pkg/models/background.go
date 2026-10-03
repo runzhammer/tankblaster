@@ -3,9 +3,9 @@ package models
 import (
 	_ "embed"
 
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/engine"
-	r "github.com/runzhammer/gamedemo/resources"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/engine"
+	r "github.com/runzhammer/tankblaster/resources"
 )
 
 type Background struct {

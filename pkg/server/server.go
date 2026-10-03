@@ -10,7 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/runzhammer/gamedemo/pkg/protocol"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
 )
 
 type Server struct {

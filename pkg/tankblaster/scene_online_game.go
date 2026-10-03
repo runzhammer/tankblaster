@@ -3,9 +3,9 @@ package tankblaster
 import (
 	"image/color"
 
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/gamecore"
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
 )
 
 func NewOnlineGameScene(game *GameLoop, client *onlineClient, state gamecore.MatchState, autoPlay bool) (core.Scene, error) {

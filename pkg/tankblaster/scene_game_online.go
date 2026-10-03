@@ -4,8 +4,8 @@ import (
 	"hash/fnv"
 	"strconv"
 
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/protocol"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
 )
 
 func (s *GameScene) consumeOnlineGameCommands() {

@@ -1,6 +1,6 @@
 package weapons
 
-import "github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
+import "github.com/runzhammer/tankblaster/pkg/tankblaster/soundpaths"
 
 const (
 	splitterBombFragmentScale = grenadeScale * 0.65

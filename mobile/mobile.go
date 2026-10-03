@@ -6,7 +6,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/mobile"
-	"github.com/runzhammer/gamedemo/pkg/tankblaster"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster"
 )
 
 func init() {

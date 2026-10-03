@@ -10,7 +10,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
-    -ldflags="-s -w -X github.com/runzhammer/gamedemo/pkg/buildinfo.Version=${VERSION} -X github.com/runzhammer/gamedemo/pkg/buildinfo.Commit=${COMMIT} -X github.com/runzhammer/gamedemo/pkg/buildinfo.BuildTime=${BUILD_TIME}" \
+    -ldflags="-s -w -X github.com/runzhammer/tankblaster/pkg/buildinfo.Version=${VERSION} -X github.com/runzhammer/tankblaster/pkg/buildinfo.Commit=${COMMIT} -X github.com/runzhammer/tankblaster/pkg/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/tankblaster-server \
     ./cmd/tankblaster-server
 RUN mkdir -p /out/data && touch /out/data/.keep

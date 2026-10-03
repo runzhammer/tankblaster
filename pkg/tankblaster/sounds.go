@@ -1,6 +1,6 @@
 package tankblaster
 
-import "github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
+import "github.com/runzhammer/tankblaster/pkg/tankblaster/soundpaths"
 
 type soundEvent string
 

@@ -9,8 +9,8 @@ import (
 	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2/text"
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/engine"
 	"golang.org/x/image/colornames"
 )
 

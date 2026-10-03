@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
 )
 
 func TestColorSwatchClickOpensPaletteForComputerSlot(t *testing.T) {

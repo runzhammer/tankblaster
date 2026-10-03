@@ -3,9 +3,9 @@ package tankblaster
 import (
 	"testing"
 
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
-	weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
-	r "github.com/runzhammer/gamedemo/resources"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster/soundpaths"
+	weaponspkg "github.com/runzhammer/tankblaster/pkg/tankblaster/weapons"
+	r "github.com/runzhammer/tankblaster/resources"
 )
 
 func TestOriginalSoundFilesExist(t *testing.T) {

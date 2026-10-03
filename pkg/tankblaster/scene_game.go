@@ -19,14 +19,14 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/engine"
-	"github.com/runzhammer/gamedemo/pkg/models"
-	"github.com/runzhammer/gamedemo/pkg/protocol"
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
-	weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
-	r "github.com/runzhammer/gamedemo/resources"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/models"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster/soundpaths"
+	weaponspkg "github.com/runzhammer/tankblaster/pkg/tankblaster/weapons"
+	r "github.com/runzhammer/tankblaster/resources"
 	"golang.org/x/image/colornames"
 )
 

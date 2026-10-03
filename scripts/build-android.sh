@@ -36,7 +36,7 @@ if ! git -C "$ROOT_DIR" diff --quiet 2>/dev/null; then
 	DIRTY=-dirty
 fi
 BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-GO_BUILD_LDFLAGS="-X github.com/runzhammer/gamedemo/pkg/buildinfo.Version=$VERSION -X github.com/runzhammer/gamedemo/pkg/buildinfo.Commit=$COMMIT$DIRTY -X github.com/runzhammer/gamedemo/pkg/buildinfo.BuildTime=$BUILD_TIME"
+GO_BUILD_LDFLAGS="-X github.com/runzhammer/tankblaster/pkg/buildinfo.Version=$VERSION -X github.com/runzhammer/tankblaster/pkg/buildinfo.Commit=$COMMIT$DIRTY -X github.com/runzhammer/tankblaster/pkg/buildinfo.BuildTime=$BUILD_TIME"
 if ! command -v ebitenmobile >/dev/null 2>&1; then
 	go install "github.com/hajimehoshi/ebiten/v2/cmd/ebitenmobile@${EBITEN_VERSION}"
 fi

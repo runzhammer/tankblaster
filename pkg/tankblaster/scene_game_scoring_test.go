@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/runzhammer/gamedemo/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/engine"
 )
 
 func newScoringTestScene(powers ...int) *GameScene {

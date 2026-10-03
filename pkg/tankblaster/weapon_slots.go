@@ -1,6 +1,6 @@
 package tankblaster
 
-import weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
+import weaponspkg "github.com/runzhammer/tankblaster/pkg/tankblaster/weapons"
 
 func gameWeapons() []weaponspkg.Weapon {
 	return weaponspkg.List()

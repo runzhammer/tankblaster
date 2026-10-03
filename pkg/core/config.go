@@ -4,8 +4,8 @@ import (
 	"image/color"
 	"log"
 
-	"github.com/runzhammer/gamedemo/pkg/engine"
-	r "github.com/runzhammer/gamedemo/resources"
+	"github.com/runzhammer/tankblaster/pkg/engine"
+	r "github.com/runzhammer/tankblaster/resources"
 
 	"gopkg.in/yaml.v2"
 )

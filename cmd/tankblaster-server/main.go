@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/runzhammer/gamedemo/pkg/buildinfo"
-	"github.com/runzhammer/gamedemo/pkg/server"
+	"github.com/runzhammer/tankblaster/pkg/buildinfo"
+	"github.com/runzhammer/tankblaster/pkg/server"
 )
 
 func main() {

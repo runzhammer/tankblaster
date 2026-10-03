@@ -3,8 +3,8 @@ package tankblaster
 import (
 	"testing"
 
-	"github.com/runzhammer/gamedemo/pkg/gamecore"
-	"github.com/runzhammer/gamedemo/pkg/protocol"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
 )
 
 func newOnlineTurnTestScene() *GameScene {

@@ -4,7 +4,7 @@ import (
 	"image"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/runzhammer/gamedemo/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/core"
 )
 
 func Begin() bool {

@@ -3,7 +3,7 @@ package weapons
 import (
 	"image/color"
 
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster/soundpaths"
 )
 
 const (

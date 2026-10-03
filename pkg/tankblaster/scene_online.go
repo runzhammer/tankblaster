@@ -12,9 +12,9 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/gamecore"
-	"github.com/runzhammer/gamedemo/pkg/protocol"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
 	"golang.org/x/image/colornames"
 )
 

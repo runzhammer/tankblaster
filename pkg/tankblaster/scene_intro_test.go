@@ -6,7 +6,7 @@ import (
 
 	"codeberg.org/rabenauge/soundsetgo"
 	"github.com/hajimehoshi/ebiten/v2"
-	r "github.com/runzhammer/gamedemo/resources"
+	r "github.com/runzhammer/tankblaster/resources"
 )
 
 func TestIntroAssetsDecode(t *testing.T) {

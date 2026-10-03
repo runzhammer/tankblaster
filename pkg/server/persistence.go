@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/runzhammer/gamedemo/pkg/protocol"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
 	_ "modernc.org/sqlite"
 )
 

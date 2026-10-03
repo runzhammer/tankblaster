@@ -4,8 +4,8 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/runzhammer/gamedemo/pkg/engine"
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/computerplayers"
+	"github.com/runzhammer/tankblaster/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
 )
 
 func TestLightningCloudAggressionIncrease(t *testing.T) {

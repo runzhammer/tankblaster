@@ -3,7 +3,7 @@ package server
 import (
 	"sort"
 
-	"github.com/runzhammer/gamedemo/pkg/protocol"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
 )
 
 func sortSessions(sessions []protocol.SessionSummary, playerRating int) {

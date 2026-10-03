@@ -1,4 +1,4 @@
-module github.com/runzhammer/gamedemo
+module github.com/runzhammer/tankblaster
 
 go 1.26.5
 

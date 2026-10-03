@@ -11,8 +11,8 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"github.com/runzhammer/gamedemo/pkg/core"
-	r "github.com/runzhammer/gamedemo/resources"
+	"github.com/runzhammer/tankblaster/pkg/core"
+	r "github.com/runzhammer/tankblaster/resources"
 )
 
 var _ core.Scene = (*hallOfFameScene)(nil)
