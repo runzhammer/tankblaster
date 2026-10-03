@@ -12,13 +12,15 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/runzhammer/gamedemo/pkg/core"
-	"github.com/runzhammer/gamedemo/pkg/tankblaster/soundpaths"
 	r "github.com/runzhammer/gamedemo/resources"
 )
 
 var _ core.Scene = (*hallOfFameScene)(nil)
 
-const hallOfFameMusicLoopKey = "hall_of_fame_music"
+const (
+	hallOfFameMusicLoopKey = "hall_of_fame_music"
+	hallOfFameMusicPath    = "intro/RIFF_RFF.MOD"
+)
 
 type hallOfFameScore struct {
 	Name  string
@@ -111,10 +113,11 @@ func (s *hallOfFameScene) startMusic() {
 		return
 	}
 	s.musicLive = true
-	opts := configuredSoundOptions(soundpaths.None)
-	opts.Loop = true
-	opts.Volume = 0.32
-	s.g.playSoundLoopWithOptions(hallOfFameMusicLoopKey, soundpaths.None, opts)
+	s.g.playSoundLoopWithOptions(hallOfFameMusicLoopKey, hallOfFameMusicPath, soundOptions{
+		Loop:               true,
+		Volume:             0.32,
+		KeepSilenceForLoop: true,
+	})
 }
 
 func (s *hallOfFameScene) back() error {

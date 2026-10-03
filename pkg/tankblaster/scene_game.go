@@ -161,7 +161,7 @@ const (
 	laserSmokeSpacing         = 12.0
 	laserMaxSmokeCount        = 3
 	humanCannonRepeatStart    = 16
-	humanCannonRepeatFrames   = 6
+	humanCannonRepeatFrames   = 4
 	humanCannonStepDegrees    = 1.0
 	xmV12EngineOffDelayFrames = 30
 	xmV12OutOfBoundsDelay     = 1.0

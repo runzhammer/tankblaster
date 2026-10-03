@@ -2,15 +2,19 @@ package tankblaster
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"math/rand"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"codeberg.org/rabenauge/soundsetgo"
+	_ "codeberg.org/rabenauge/soundsetgo/formats/mod"
 	"github.com/hajimehoshi/ebiten/v2/audio"
 	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 	weaponspkg "github.com/runzhammer/gamedemo/pkg/tankblaster/weapons"
@@ -208,6 +212,20 @@ func (p *soundPlayer) StopLoop(key string) {
 	}
 }
 
+func (p *soundPlayer) SetLoopVolume(key string, volume float64) {
+	key = strings.TrimSpace(key)
+	if key == "" || p == nil {
+		return
+	}
+	p.mu.Lock()
+	player := p.loops[key]
+	p.mu.Unlock()
+	if player == nil {
+		return
+	}
+	player.SetVolume(math.Max(0, math.Min(1, volume)))
+}
+
 func (p *soundPlayer) StopAllLoops() {
 	if p == nil {
 		return
@@ -272,6 +290,16 @@ func (p *soundPlayer) samples(path string, speed float64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if strings.EqualFold(filepath.Ext(path), ".mod") {
+		samples, err := modSamples(path, data)
+		if err != nil {
+			return nil, err
+		}
+		p.mu.Lock()
+		p.cache[cacheKey] = samples
+		p.mu.Unlock()
+		return samples, nil
+	}
 	stream, err := wav.Decode(p.context, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
@@ -292,6 +320,25 @@ func (p *soundPlayer) samples(path string, speed float64) ([]byte, error) {
 	p.cache[cacheKey] = samples
 	p.mu.Unlock()
 	return samples, nil
+}
+
+func modSamples(path string, data []byte) ([]byte, error) {
+	snd, err := soundsetgo.Decode(path, data, soundsetgo.Options{
+		SampleRate:      AudioSampleRate,
+		DurationSeconds: 60,
+	})
+	if err != nil {
+		return nil, err
+	}
+	pcm, err := soundsetgo.RenderAll(snd)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, pcm); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (g *GameLoop) playSound(path string) {
@@ -329,6 +376,13 @@ func (g *GameLoop) stopSoundLoop(key string) {
 		return
 	}
 	g.sounds.StopLoop(key)
+}
+
+func (g *GameLoop) setSoundLoopVolume(key string, volume float64) {
+	if g == nil || g.sounds == nil {
+		return
+	}
+	g.sounds.SetLoopVolume(key, volume)
 }
 
 func (s *GameScene) playSound(path string) {

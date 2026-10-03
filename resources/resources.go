@@ -13,6 +13,9 @@ var GameConfig []byte
 //go:embed sounds/*.wav
 var Sounds embed.FS
 
+//go:embed intro/*
+var Intro embed.FS
+
 //go:embed images/tank.png
 var TankSprite []byte
 
@@ -236,8 +239,25 @@ func SoundBytes(path string) ([]byte, error) {
 	}
 	name = filepath.ToSlash(name)
 	name = strings.TrimPrefix(name, "resources/")
-	if !strings.HasPrefix(name, "sounds/") {
-		return nil, fmt.Errorf("sound path must be under resources/sounds: %s", path)
+	switch {
+	case strings.HasPrefix(name, "sounds/"):
+		return Sounds.ReadFile(name)
+	case strings.HasPrefix(name, "intro/"):
+		return Intro.ReadFile(name)
+	default:
+		return nil, fmt.Errorf("sound path must be under resources/sounds or resources/intro: %s", path)
 	}
-	return Sounds.ReadFile(name)
+}
+
+func IntroBytes(path string) ([]byte, error) {
+	name := strings.TrimSpace(path)
+	if name == "" {
+		return nil, nil
+	}
+	name = filepath.ToSlash(name)
+	name = strings.TrimPrefix(name, "resources/")
+	if !strings.HasPrefix(name, "intro/") {
+		return nil, fmt.Errorf("intro asset path must be under resources/intro: %s", path)
+	}
+	return Intro.ReadFile(name)
 }

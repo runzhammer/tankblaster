@@ -13,6 +13,7 @@ require (
 )
 
 require (
+	codeberg.org/rabenauge/soundsetgo v0.0.0-20260722140813-98b0e7283e6b // indirect
 	github.com/davecgh/go-spew v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/gomobile v0.0.0-20250923094054-ea854a63cce1 // indirect

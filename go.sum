@@ -1,3 +1,5 @@
+codeberg.org/rabenauge/soundsetgo v0.0.0-20260722140813-98b0e7283e6b h1:94F5ySQIWCN6+x8m+DnS53HlO2/Xt+bA3jG5SiHmP54=
+codeberg.org/rabenauge/soundsetgo v0.0.0-20260722140813-98b0e7283e6b/go.mod h1:MH1epXTvmOTA0WJbcjHozDmbjuvyus1n5hwNGADVagw=
 github.com/cevaris/ordered_map v0.0.0-20190319150403-3adeae072e73 h1:q1g9lSyo/nOIC3W5E3FK3Unrz8b9LdLXCyuC+ZcpPC0=
 github.com/cevaris/ordered_map v0.0.0-20190319150403-3adeae072e73/go.mod h1:507vXsotcZop7NZfBWdhPmVeOse4ko2R7AagJYrpoEg=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=

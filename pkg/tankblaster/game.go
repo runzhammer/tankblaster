@@ -114,7 +114,7 @@ func NewGame() (core.Game, error) {
 		return game, nil
 	}
 
-	if err := game.SetNewScene(NewPlayerSelectionScene); err != nil {
+	if err := game.SetNewScene(NewIntroScene); err != nil {
 		return nil, err
 	}
 
@@ -202,6 +202,8 @@ func debugStartSceneFactory(scene string) func(*GameLoop) (core.Scene, error) {
 	switch strings.ToLower(strings.TrimSpace(scene)) {
 	case "title", "title_scene":
 		return NewTitleScene
+	case "intro", "intro_scene", "vorspann":
+		return NewIntroScene
 	case "player_selection", "selection", "spieler_auswahl":
 		return NewPlayerSelectionScene
 	case "game", "battle", "spielmodus", "":
