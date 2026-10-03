@@ -12,7 +12,7 @@ DIST_DIR ?= dist
 DESKTOP_BIN ?= $(BUILD_DIR)/$(APP_NAME)
 SERVER_BIN ?= $(BUILD_DIR)/$(APP_NAME)-server
 WINDOWS_BIN ?= $(BUILD_DIR)/$(APP_NAME).exe
-ANDROID_APK ?= $(DIST_DIR)/$(APP_NAME)-debug.apk
+ANDROID_APK ?= $(DIST_DIR)/$(APP_NAME)-release.apk
 LINUX_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-linux.zip
 WINDOWS_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-windows.zip
 ANDROID_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-android.zip
@@ -26,6 +26,7 @@ SERVER_DOCKER_IMAGE ?= tankblaster-server:latest
 GO ?= go
 ZIP ?= zip
 RSRC ?= $(GO) run github.com/akavel/rsrc@latest
+HOST_SPAWN ?= /app/bin/host-spawn
 
 .PHONY: all test run run-server live-test live-test-auto live-test-cp build linux server server-docker server-docker-tar windows android android-debug android-release android-env package-linux package-windows package-android clean help
 
@@ -46,7 +47,7 @@ help:
 		'  make server-docker Build the headless multiplayer server image with Docker or Podman' \
 		'  make server-docker-tar Build and save the server image as dist/tankblaster-server-VERSION-linux.tar' \
 		'  make windows      Build a Windows EXE with app icon' \
-		'  make android      Build Android debug APK' \
+		'  make android      Build Android release APK' \
 		'  make android-debug Build Android debug APK' \
 		'  make android-release Build Android release APK' \
 		'  make android-env  Print required Android build environment' \
@@ -111,6 +112,8 @@ server-docker:
 		docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT)$(DIRTY) --build-arg BUILD_TIME=$(BUILD_TIME) -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
 	elif command -v podman >/dev/null 2>&1; then \
 		podman build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT)$(DIRTY) --build-arg BUILD_TIME=$(BUILD_TIME) -f docker/server.Dockerfile -t $(SERVER_DOCKER_IMAGE) .; \
+	elif [ -x "$(HOST_SPAWN)" ]; then \
+		$(HOST_SPAWN) -no-pty sh -lc 'cd "$$1" && podman build --build-arg VERSION="$$2" --build-arg COMMIT="$$3" --build-arg BUILD_TIME="$$4" -f docker/server.Dockerfile -t "$$5" .' sh "$(CURDIR)" "$(VERSION)" "$(COMMIT)$(DIRTY)" "$(BUILD_TIME)" "$(SERVER_DOCKER_IMAGE)"; \
 	else \
 		printf '%s\n' 'Neither docker nor podman was found in PATH.' >&2; \
 		exit 1; \
@@ -124,6 +127,8 @@ server-docker-tar: server-docker
 		docker save -o "$(SERVER_IMAGE_TAR)" $(SERVER_DOCKER_IMAGE); \
 	elif command -v podman >/dev/null 2>&1; then \
 		podman save -o "$(SERVER_IMAGE_TAR)" $(SERVER_DOCKER_IMAGE); \
+	elif [ -x "$(HOST_SPAWN)" ]; then \
+		$(HOST_SPAWN) -no-pty sh -lc 'cd "$$1" && podman save -o "$$2" "$$3"' sh "$(CURDIR)" "$(CURDIR)/$(SERVER_IMAGE_TAR)" "$(SERVER_DOCKER_IMAGE)"; \
 	else \
 		printf '%s\n' 'Neither docker nor podman was found in PATH.' >&2; \
 		exit 1; \
@@ -145,12 +150,12 @@ package-windows: windows
 	rm -f $(WINDOWS_ZIP)
 	cd $(BUILD_DIR) && $(ZIP) -9 ../$(WINDOWS_ZIP) $(APP_NAME).exe
 
-package-android: android-debug
+package-android: android-release
 	mkdir -p $(DIST_DIR)
 	rm -f $(ANDROID_ZIP)
-	cd $(DIST_DIR) && $(ZIP) -9 $(APP_NAME)-$(VERSION)-android.zip $(APP_NAME)-debug.apk
+	cd $(DIST_DIR) && $(ZIP) -9 $(APP_NAME)-$(VERSION)-android.zip $(APP_NAME)-release.apk
 
-android: android-debug
+android: android-release
 
 android-debug:
 	$(ANDROID_SCRIPT) debug
