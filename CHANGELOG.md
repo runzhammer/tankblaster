@@ -4,7 +4,15 @@ All notable changes to Tank Blaster will be documented in this file.
 
 The format is inspired by Keep a Changelog, and the project uses the version in `VERSION` for release builds.
 
+## [Unreleased]
+
+### Notes
+
+- Public issue and pull request workflow will start after the repository is published on GitHub.
+
 ## [1.0.0] - 2026-10-04
+
+Initial public release candidate.
 
 ### Added
 

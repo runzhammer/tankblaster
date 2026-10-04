@@ -3,38 +3,40 @@
 ![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)
 ![AI-assisted development: about 90%](https://img.shields.io/badge/AI--assisted%20development-about%2090%25-purple)
 
-Tank Blaster ist ein kleines Artillerie-Spiel mit großem Selbstbewusstsein: Panzer, Wind, krumme Flugbahnen, fragwürdige Kaufentscheidungen im Shop und genau genug Chaos, damit der perfekte Schuss sich wie Wissenschaft anfühlt.
+Tank Blaster is a small artillery game with an unreasonable amount of confidence: tanks, wind, awkward trajectories, questionable shopping decisions, and just enough chaos to make a perfect shot feel like science.
 
-Kurz gesagt: Spieler wählen Panzer, kaufen Zeug, zielen sorgfältig und machen danach so, als sei die Physik schuld gewesen.
+In short: players pick tanks, buy weapons, aim carefully, and then blame physics.
 
-Dieses Repository ist die Go-/Ebiten-Neuimplementierung von Tank Blaster mit Desktop-, Android- und Online-Multiplayer-Builds.
+This repository contains the Go/Ebiten remake of Tank Blaster with desktop, Android, and online multiplayer builds.
 
 > **AI-assisted development**
 >
-> Etwa 90% der Entwicklung dieses Remakes entstanden mit KI-Unterstützung. Architektur, Entscheidungen, Tests, Review und Veröffentlichung bleiben menschlich verantwortet.
+> About 90% of this remake was developed with AI assistance. Architecture, decisions, testing, review, and publication remain human-owned and human-accountable.
 
 ## Repository
 
-- Lizenz: [GPL-3.0](LICENSE)
-- Änderungen: [CHANGELOG.md](CHANGELOG.md)
-- Beiträge: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Security Policy: [SECURITY.md](SECURITY.md)
+- License: [GPL-3.0](LICENSE)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security policy: [SECURITY.md](SECURITY.md)
 
 ## Assets
 
-Die ursprünglichen Tank-Blaster-Grafiken und Sounds sind mit Erlaubnis des Originalautors Axel Lauer enthalten. Die enthaltenen Musikstücke stammen aus Public-Domain-Bibliotheksmaterial aus den 1990er-/2000er-Jahren.
+The original Tank Blaster graphics and sounds are included with permission from the original author, Axel Lauer. The bundled music tracks come from public-domain library material from the 1990s/2000s.
 
-Neue Assets sollen nur aufgenommen werden, wenn Herkunft und Lizenz eindeutig dokumentiert und mit diesem Repository vereinbar sind.
+Please do not add new third-party graphics, sounds, fonts, or music unless their origin and license are clear and compatible with this repository.
 
-## Entwicklung
+## Development
 
-Voraussetzung: Go gemäß [go.mod](go.mod). Für Windows-Builds wird `rsrc` automatisch über `go run` genutzt. Für Android siehe [docs/android.md](docs/android.md).
+Requirement: the Go version declared in [go.mod](go.mod). Windows builds use `rsrc` automatically through `go run`. For Android setup, see [docs/android.md](docs/android.md).
+
+Run the desktop game locally:
 
 ```sh
 make run
 ```
 
-Nützliche Dev-Kommandos:
+Useful development commands:
 
 ```sh
 make test
@@ -43,44 +45,45 @@ make live-test-auto
 make live-test-cp
 ```
 
-Die Live-Tests starten lokal einen Multiplayer-Server und zwei Clients. Standardmäßig laufen sie über 5 Runden:
+The live-test targets start a local multiplayer server and two clients. They use 5 rounds by default:
 
 ```sh
 make live-test-auto LIVE_TEST_ROUNDS=3
 ```
 
-Nützliche Debug-Overrides:
+Useful debug overrides:
 
 ```sh
 TANKBLASTER_DEBUG_ENABLED=1 TANKBLASTER_DEBUG_START_SCENE=intro make run
 TANKBLASTER_DEBUG_ENABLED=1 TANKBLASTER_DEBUG_START_SCENE=online make run
 ```
 
-Der normale Spielstart läuft über die Intro-Scene. Die dafür verwendeten Assets liegen unter `resources/intro/`.
+The normal game flow starts with the intro scene. Its assets live in `resources/intro/`.
 
 ## Build
 
-Die Release-Version steht in [VERSION](VERSION). Desktop-Binaries, Server-Binaries und die Android-App betten diese Version zusammen mit Git-Commit und Build-Zeit ein.
-Fuer Android muss `tankblasterVersionCode` in [android/gradle.properties](android/gradle.properties) bei jedem veroeffentlichten APK monoton erhoeht werden.
+The release version is stored in [VERSION](VERSION). Desktop binaries, server binaries, and the Android app embed that version together with the Git commit and build time.
 
-Release-Builds stellen vor dem Bauen sicher, dass `resources/config.yaml` mit `debug.enabled: false` eingebettet wird. Falls die Datei dafuer temporaer geaendert werden muss, meldet Make das transparent und stellt den vorherigen Inhalt danach wieder her.
+For Android releases, `tankblasterVersionCode` in [android/gradle.properties](android/gradle.properties) must be increased monotonically for every published APK.
 
-Alles fuer ein Release bauen:
+Release builds make sure that `resources/config.yaml` is embedded with `debug.enabled: false`. If Make has to change the file temporarily, it prints a notice and restores the previous contents after the build.
+
+Build everything for a release:
 
 ```sh
 make all
 ```
 
-`make all` erzeugt:
+`make all` creates:
 
 - `dist/tankblaster-VERSION-linux.zip`
 - `dist/tankblaster-VERSION-windows.zip`
 - `dist/tankblaster-VERSION-android.zip`
 - `dist/tankblaster-server-VERSION-linux.tar`
 
-Android wird dabei ausschliesslich als Release-APK gebaut. Debug-APKs entstehen nur mit `make android-debug`.
+Android is built as a release APK for `make all` and `make android`. Debug APKs are only built explicitly with `make android-debug`.
 
-Einzelziele:
+Individual targets:
 
 ```sh
 make
@@ -91,21 +94,22 @@ make android
 make server
 ```
 
-Version pruefen:
+Check embedded version information:
 
 ```sh
 bin/tankblaster-server --version
+go version -m bin/tankblaster
 ```
 
-Das Desktop-Spiel zeigt die Version im Fenstertitel. Die eingebetteten Go-Buildinformationen lassen sich ausserdem mit `go version -m bin/tankblaster` auslesen.
+The desktop game window title is simply `Tank Blaster`.
 
-Falls die Android-Toolchain zickt:
+If the Android toolchain is misbehaving:
 
 ```sh
 make android-env
 ```
 
-Vor einem öffentlichen Release sinnvoll:
+Recommended before a public release:
 
 ```sh
 make test
@@ -113,31 +117,31 @@ make -n all
 make all
 ```
 
-## Lokale Einstellungen
+## Local Configuration
 
-Tank Blaster speichert die zuletzt gewaehlte lokale Rundenzahl, die zuletzt gewaehlte Online-Rundenzahl, die Optionen aus dem Optionsdialog und die Online-Identitaet gemeinsam in `tank.cfg`.
+Tank Blaster stores the last selected local round count, the last selected online round count, the options dialog settings, and the online identity together in `tank.cfg`.
 
-OS-spezifische Ablageorte:
+OS-specific locations:
 
-- Linux/FreeBSD: `$XDG_CONFIG_HOME/tankblaster/tank.cfg`, sonst `~/.config/tankblaster/tank.cfg`
+- Linux/FreeBSD: `$XDG_CONFIG_HOME/tankblaster/tank.cfg`, otherwise `~/.config/tankblaster/tank.cfg`
 - Windows: `%AppData%\tankblaster\tank.cfg`
 - macOS: `~/Library/Application Support/tankblaster/tank.cfg`
-- Android: app-interner Speicher, typischerweise `/data/user/0/com.runzhammer.tankblaster.android/files/tank.cfg`
+- Android: app-internal storage, typically `/data/user/0/com.runzhammer.tankblaster.android/files/tank.cfg`
 
 ## Server
 
-Lokal starten:
+Run the multiplayer server locally:
 
 ```sh
 make run-server
 ```
 
-Server-Konfiguration:
+Server configuration:
 
-- Beispiel: [config/server.example.yaml](config/server.example.yaml)
-- Docker-Konfiguration: [docker/server.yaml](docker/server.yaml)
+- Example config: [config/server.example.yaml](config/server.example.yaml)
+- Docker config: [docker/server.yaml](docker/server.yaml)
 
-Wichtige Runtime-Overrides:
+Important runtime overrides:
 
 ```sh
 TANKBLASTER_SERVER_ADDRESS=0.0.0.0:8765
@@ -149,23 +153,23 @@ TANKBLASTER_SERVER_MAX_SESSIONS=128
 TANKBLASTER_SERVER_MAX_QUEUE_LENGTH=256
 ```
 
-`TANKBLASTER_SERVER_ALLOWED_ORIGINS` ist eine kommagetrennte Liste fuer Browser-WebSocket-Origins. Fuer native Clients kann sie leer bleiben. Der Server hat ausserdem HTTP-Timeouts, WebSocket-Read-Limits, Session-/Queue-Limits und escaped die Invite-Seite.
+`TANKBLASTER_SERVER_ALLOWED_ORIGINS` is a comma-separated list of browser WebSocket origins. It can stay empty for native clients. The server also uses HTTP timeouts, WebSocket read limits, connection/session/queue limits, and escaped invite pages.
 
 ## Docker / Podman
 
-Image bauen:
+Build the server image:
 
 ```sh
 make server-docker
 ```
 
-Image als Tar fuer Deployment exportieren:
+Export the server image as a deployment tarball:
 
 ```sh
 make server-docker-tar
 ```
 
-Die Docker-Targets nutzen automatisch Docker, Podman, `distrobox-host-exec podman` oder in dieser Distrobox Host-Podman via `/app/bin/host-spawn`.
+The Docker targets automatically use Docker, Podman, `distrobox-host-exec podman`, or host Podman through `/app/bin/host-spawn` when running inside this Distrobox setup.
 
 Docker Compose:
 
@@ -175,7 +179,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Host-Network-Deployment, passend fuer einen Root-Server mit vorgeschaltetem TLS/Reverse-Proxy oder Firewall:
+Host-network deployment, suitable for a root server with TLS/reverse proxy or firewall in front:
 
 ```sh
 cd docker
@@ -183,4 +187,4 @@ cp .env.example .env
 docker compose -f docker-compose.host.yml up -d
 ```
 
-Die Compose-Dateien laufen mit reduzierten Rechten, read-only Root-Dateisystem, `cap_drop: ALL`, `no-new-privileges`, tmpfs fuer `/tmp` und persistentem SQLite-Speicher. Die Host-Network-Variante nutzt standardmaessig `/root/docker/tankblaster/data` als Datenverzeichnis.
+The Compose files run the server with reduced privileges, a read-only root filesystem, `cap_drop: ALL`, `no-new-privileges`, tmpfs for `/tmp`, and persistent SQLite storage. The host-network variant uses `/root/docker/tankblaster/data` as the default data directory.
