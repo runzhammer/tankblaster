@@ -19,7 +19,7 @@ var _ core.Scene = (*hallOfFameScene)(nil)
 
 const (
 	hallOfFameMusicLoopKey = "hall_of_fame_music"
-	hallOfFameMusicPath    = "intro/RIFF_RFF.MOD"
+	hallOfFameMusicPath    = "intro/RIFF_RFF.wav"
 )
 
 type hallOfFameScore struct {

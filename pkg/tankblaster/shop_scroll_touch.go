@@ -1,5 +1,4 @@
-//go:build android || ios
-// +build android ios
+//go:build android || ios || js
 
 package tankblaster
 
@@ -14,6 +13,9 @@ type shopTouchScrollState struct {
 }
 
 func (s *GameScene) handleMobileShopListScroll(count int) bool {
+	if !mobileControlsEnabled() {
+		return false
+	}
 	if count <= 0 {
 		s.shopTouchScroll = shopTouchScrollState{}
 		return false

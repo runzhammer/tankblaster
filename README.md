@@ -7,7 +7,7 @@ Tank Blaster is a small artillery game with an unreasonable amount of confidence
 
 In short: players pick tanks, buy weapons, aim carefully, and then blame physics.
 
-This repository contains the Go/Ebiten remake of Tank Blaster with desktop, Android, and online multiplayer builds.
+This repository contains the Go/Ebiten remake of Tank Blaster with desktop, Android, WebAssembly, and online multiplayer builds.
 
 > **AI-assisted development**
 >
@@ -79,6 +79,7 @@ make all
 - `dist/tankblaster-VERSION-linux.zip`
 - `dist/tankblaster-VERSION-windows.zip`
 - `dist/tankblaster-VERSION-android.zip`
+- `dist/tankblaster-VERSION-web.zip`
 - `dist/tankblaster-server-VERSION-linux.tar`
 
 Android is built as a release APK for `make all` and `make android`. Debug APKs are only built explicitly with `make android-debug`.
@@ -91,6 +92,7 @@ make build
 make linux
 make windows
 make android
+make web
 make server
 ```
 
@@ -108,6 +110,48 @@ If the Android toolchain is misbehaving:
 ```sh
 make android-env
 ```
+
+## WebAssembly
+
+Build the browser version:
+
+```sh
+make web
+```
+
+This creates the files needed by a static web server:
+
+- `web/index.html`
+- `web/wasm_exec.js`
+- `web/tankblaster.wasm`
+
+Package those files as a release archive:
+
+```sh
+make package-web
+```
+
+Test it locally with any static HTTP server. Opening `index.html` directly from the filesystem is not enough in most browsers because the `.wasm` file is fetched by JavaScript:
+
+```sh
+cd web
+python3 -m http.server 8080
+```
+
+Then open `http://localhost:8080/`.
+
+To embed Tank Blaster in an existing website, copy the three generated files into a public directory and use an iframe:
+
+```html
+<iframe
+  src="/games/tankblaster/index.html"
+  width="1024"
+  height="768"
+  allow="fullscreen"
+  title="Tank Blaster"></iframe>
+```
+
+Make sure your web server serves `.wasm` files with the `application/wasm` MIME type. The included loader also falls back when that header is missing, but the correct MIME type is faster and avoids browser warnings.
 
 Recommended before a public release:
 

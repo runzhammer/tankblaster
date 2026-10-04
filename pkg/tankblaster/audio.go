@@ -2,7 +2,6 @@ package tankblaster
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -13,8 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"codeberg.org/rabenauge/soundsetgo"
-	_ "codeberg.org/rabenauge/soundsetgo/formats/mod"
 	"github.com/hajimehoshi/ebiten/v2/audio"
 	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 	weaponspkg "github.com/runzhammer/tankblaster/pkg/tankblaster/weapons"
@@ -320,25 +317,6 @@ func (p *soundPlayer) samples(path string, speed float64) ([]byte, error) {
 	p.cache[cacheKey] = samples
 	p.mu.Unlock()
 	return samples, nil
-}
-
-func modSamples(path string, data []byte) ([]byte, error) {
-	snd, err := soundsetgo.Decode(path, data, soundsetgo.Options{
-		SampleRate:      AudioSampleRate,
-		DurationSeconds: 60,
-	})
-	if err != nil {
-		return nil, err
-	}
-	pcm, err := soundsetgo.RenderAll(snd)
-	if err != nil {
-		return nil, err
-	}
-	var buf bytes.Buffer
-	if err := binary.Write(&buf, binary.LittleEndian, pcm); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }
 
 func (g *GameLoop) playSound(path string) {

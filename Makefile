@@ -16,10 +16,14 @@ ANDROID_APK ?= $(DIST_DIR)/$(APP_NAME)-release.apk
 LINUX_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-linux.zip
 WINDOWS_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-windows.zip
 ANDROID_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-android.zip
+WEB_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-web.zip
 SERVER_IMAGE_TAR ?= $(DIST_DIR)/$(APP_NAME)-server-$(VERSION)-linux.tar
 WINDOWS_ICON ?= resources/images/tankblaster.ico
 WINDOWS_ICON_SYSO ?= tankblaster_windows.syso
 ANDROID_SCRIPT ?= ./scripts/build-android.sh
+WEB_DIR ?= web
+WEB_WASM ?= $(WEB_DIR)/$(APP_NAME).wasm
+WASM_EXEC ?=
 LIVE_TEST_DB ?= .live-test/tankblaster.db
 LIVE_TEST_ROUNDS ?= 5
 SERVER_DOCKER_IMAGE ?= tankblaster-server:latest
@@ -43,9 +47,9 @@ define with_release_config
 	$(1)
 endef
 
-.PHONY: all test run run-server live-test live-test-auto live-test-cp build linux server server-docker server-docker-tar windows android android-debug android-release android-env package-linux package-windows package-android clean help
+.PHONY: all test run run-server live-test live-test-auto live-test-cp build linux server server-docker server-docker-tar windows android android-debug android-release android-env web package-linux package-windows package-android package-web clean help
 
-all: clean package-linux package-windows package-android server-docker-tar
+all: clean package-linux package-windows package-android package-web server-docker-tar
 
 help:
 	@printf '%s\n' \
@@ -66,6 +70,7 @@ help:
 		'  make android-debug Build Android debug APK' \
 		'  make android-release Build Android release APK' \
 		'  make android-env  Print required Android build environment' \
+		'  make web          Build browser WebAssembly files in web/' \
 		'  make clean        Remove build artifacts'
 
 test:
@@ -181,6 +186,14 @@ android-env:
 	@printf 'JAVA_HOME=%s\n' "$${JAVA_HOME:-}"
 	@printf 'Debug APK: dist/tankblaster-debug.apk\n'
 	@printf 'Release APK: dist/tankblaster-release.apk\n'
+
+web:
+	$(call with_release_config,mkdir -p $(WEB_DIR); GOOS=js GOARCH=wasm $(GO) build $(GO_BUILD_FLAGS) -o $(WEB_WASM) .; if [ -n "$(WASM_EXEC)" ]; then cp "$(WASM_EXEC)" "$(WEB_DIR)/wasm_exec.js"; else $(GO) run ./tools/copy_wasm_exec "$(WEB_DIR)/wasm_exec.js"; fi)
+
+package-web: web
+	mkdir -p $(DIST_DIR)
+	rm -f $(WEB_ZIP)
+	cd $(WEB_DIR) && $(ZIP) -9 ../$(WEB_ZIP) index.html wasm_exec.js $(APP_NAME).wasm
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050505">
+  <title>Tank Blaster</title>
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #050505;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    canvas {
+      display: block;
+      max-width: 100vw;
+      max-height: 100vh;
+      outline: none;
+    }
+
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: #e8e1c4;
+      font: 16px/1.4 system-ui, sans-serif;
+      background: #050505;
+    }
+
+    #loading button {
+      min-height: 46px;
+      border: 0;
+      border-radius: 8px;
+      background: #ffd35a;
+      color: #171206;
+      padding: 11px 18px;
+      font: inherit;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    body.running #loading {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading" aria-live="polite">Loading Tank Blaster...</div>
+  <script src="wasm_exec.js"></script>
+  <script>
+    const go = new Go();
+    const loading = document.getElementById("loading");
+
+    let wasmResult;
+    let started = false;
+
+    async function loadWasm() {
+      const response = await fetch("tankblaster.wasm");
+      if (!response.ok) {
+        throw new Error(`failed to load tankblaster.wasm: ${response.status}`);
+      }
+
+      if (WebAssembly.instantiateStreaming) {
+        try {
+          return await WebAssembly.instantiateStreaming(response.clone(), go.importObject);
+        } catch (err) {
+          if (!String(err).includes("MIME")) {
+            throw err;
+          }
+        }
+      }
+
+      const bytes = await response.arrayBuffer();
+      return await WebAssembly.instantiate(bytes, go.importObject);
+    }
+
+    function showStartButton() {
+      loading.innerHTML = "";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Start Tank Blaster";
+      button.addEventListener("click", startGame, { once: true });
+      loading.append(button);
+      button.focus();
+    }
+
+    function startGame() {
+      if (started || !wasmResult) {
+        return;
+      }
+      started = true;
+      document.body.classList.remove("ready");
+      document.body.classList.add("running");
+      go.run(wasmResult.instance);
+    }
+
+    loadWasm()
+      .then((result) => {
+        wasmResult = result;
+        document.body.classList.add("ready");
+        showStartButton();
+      })
+      .catch((err) => {
+        console.error(err);
+        loading.textContent = "Tank Blaster could not be loaded.";
+      });
+  </script>
+</body>
+</html>
