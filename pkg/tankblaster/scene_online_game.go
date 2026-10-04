@@ -10,10 +10,11 @@ import (
 
 func NewOnlineGameScene(game *GameLoop, client *onlineClient, state gamecore.MatchState, autoPlay bool) (core.Scene, error) {
 	game.online = &onlineGameRuntime{
-		client:   client,
-		playerID: client.id.PlayerID,
-		state:    state,
-		autoPlay: autoPlay,
+		client:                   client,
+		playerID:                 client.id.PlayerID,
+		state:                    state,
+		autoPlay:                 autoPlay,
+		receivedCommandSequences: make(map[string]int),
 	}
 	game.rounds = normalizedOnlineRounds(state.TotalRounds)
 	game.players = onlinePlayerConfigs(state, client.id.PlayerID, autoPlay)

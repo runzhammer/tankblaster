@@ -108,21 +108,31 @@ type FireCommand struct {
 }
 
 type OnlineGameCommand struct {
-	MatchID        string  `json:"match_id"`
-	PlayerID       string  `json:"player_id"`
-	PlayerIndex    int     `json:"player_index"`
-	Kind           string  `json:"kind"`
-	TurnSequence   int     `json:"turn_sequence,omitempty"`
-	WeaponSlot     int     `json:"weapon_slot,omitempty"`
-	ShotStrength   int     `json:"shot_strength,omitempty"`
-	CannonRotation float64 `json:"cannon_rotation,omitempty"`
-	CameraX        float64 `json:"camera_x,omitempty"`
-	XMV12Mode      bool    `json:"xm_v12_mode,omitempty"`
-	XMV12Direction int     `json:"xm_v12_direction,omitempty"`
-	XMV12MotorOff  bool    `json:"xm_v12_motor_off,omitempty"`
-	ShopMode       int     `json:"shop_mode,omitempty"`
-	ShopHoverClass int     `json:"shop_hover_class,omitempty"`
-	ShopListIndex  int     `json:"shop_list_index,omitempty"`
+	MatchID         string             `json:"match_id"`
+	PlayerID        string             `json:"player_id"`
+	PlayerIndex     int                `json:"player_index"`
+	Kind            string             `json:"kind"`
+	CommandSequence int                `json:"command_sequence,omitempty"`
+	TurnSequence    int                `json:"turn_sequence,omitempty"`
+	WeaponSlot      int                `json:"weapon_slot,omitempty"`
+	ShotStrength    int                `json:"shot_strength,omitempty"`
+	CannonRotation  float64            `json:"cannon_rotation,omitempty"`
+	CameraX         float64            `json:"camera_x,omitempty"`
+	XMV12Mode       bool               `json:"xm_v12_mode,omitempty"`
+	XMV12Direction  int                `json:"xm_v12_direction,omitempty"`
+	XMV12MotorOff   bool               `json:"xm_v12_motor_off,omitempty"`
+	ShopMode        int                `json:"shop_mode,omitempty"`
+	ShopHoverClass  int                `json:"shop_hover_class,omitempty"`
+	ShopListIndex   int                `json:"shop_list_index,omitempty"`
+	Clouds          []OnlineCloudState `json:"clouds,omitempty"`
+}
+
+type OnlineCloudState struct {
+	Kind       int     `json:"kind"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Speed      float64 `json:"speed"`
+	Aggression float64 `json:"aggression"`
 }
 
 type Reconnect struct {

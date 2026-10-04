@@ -1209,19 +1209,18 @@ func (s *GameScene) behaviorDriftCloud(cloud *battleCloud) engine.Behavior {
 		}
 		source.Pos.X += float64(direction) * cloud.speed
 
-		screenWidth := core.Config().Screen.Width
-		leftEdge := s.cameraX - source.Size.X
-		rightEdge := s.cameraX + screenWidth + source.Size.X
+		leftEdge := -source.Size.X
+		rightEdge := s.worldWidth + source.Size.X
 		if direction > 0 && source.Pos.X > rightEdge {
 			source.Pos.X = leftEdge
 		}
-		if direction > 0 && source.Pos.X+source.Size.X < s.cameraX-screenWidth {
-			source.Pos.X = s.cameraX + screenWidth
+		if direction > 0 && source.Pos.X+source.Size.X < leftEdge {
+			source.Pos.X = s.worldWidth
 		}
-		if direction < 0 && source.Pos.X+source.Size.X < s.cameraX {
-			source.Pos.X = s.cameraX + screenWidth
+		if direction < 0 && source.Pos.X+source.Size.X < leftEdge {
+			source.Pos.X = rightEdge
 		}
-		if direction < 0 && source.Pos.X > s.cameraX+screenWidth*2 {
+		if direction < 0 && source.Pos.X > rightEdge {
 			source.Pos.X = leftEdge
 		}
 	}

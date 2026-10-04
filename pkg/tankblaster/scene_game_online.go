@@ -2,6 +2,7 @@ package tankblaster
 
 import (
 	"hash/fnv"
+	"math"
 	"strconv"
 
 	"github.com/runzhammer/tankblaster/pkg/core"
@@ -45,8 +46,10 @@ func (s *GameScene) sendOnlineGameCommand(cmd protocol.OnlineGameCommand) {
 	if s.g.online == nil || s.g.online.client == nil {
 		return
 	}
+	s.g.online.commandSequence++
 	cmd.MatchID = s.g.online.state.MatchID
 	cmd.PlayerID = s.g.online.playerID
+	cmd.CommandSequence = s.g.online.commandSequence
 	s.g.online.client.Send(protocol.TypeOnlineGameCommand, cmd)
 }
 
@@ -82,11 +85,17 @@ func (s *GameScene) applyOnlineShopHoverCommand(cmd protocol.OnlineGameCommand) 
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
+	if cmd.PlayerID == s.g.online.playerID {
+		return
+	}
 	s.shopHoverClass = maxInt(0, minInt(2, cmd.ShopHoverClass))
 }
 
 func (s *GameScene) applyOnlineShopModeCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	if cmd.PlayerID == s.g.online.playerID {
 		return
 	}
 	s.withRemoteOnlineCommand(func() {
@@ -102,6 +111,9 @@ func (s *GameScene) applyOnlineShopSelectCommand(cmd protocol.OnlineGameCommand)
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
+	if cmd.PlayerID == s.g.online.playerID {
+		return
+	}
 	s.withRemoteOnlineCommand(func() {
 		s.setShopSelectedIndex(cmd.ShopListIndex)
 	})
@@ -109,6 +121,9 @@ func (s *GameScene) applyOnlineShopSelectCommand(cmd protocol.OnlineGameCommand)
 
 func (s *GameScene) applyOnlineShopBuyCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	if cmd.PlayerID == s.g.online.playerID {
 		return
 	}
 	s.withRemoteOnlineCommand(func() {
@@ -120,6 +135,9 @@ func (s *GameScene) applyOnlineShopBackCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
+	if cmd.PlayerID == s.g.online.playerID {
+		return
+	}
 	s.withRemoteOnlineCommand(func() {
 		s.shopMode = shopModeEntry
 		s.shopHoverClass = 0
@@ -128,6 +146,9 @@ func (s *GameScene) applyOnlineShopBackCommand(cmd protocol.OnlineGameCommand) {
 
 func (s *GameScene) applyOnlineShopContinueCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineShopCommandAllowed(cmd) {
+		return
+	}
+	if cmd.PlayerID == s.g.online.playerID {
 		return
 	}
 	s.withRemoteOnlineCommand(func() {
@@ -181,6 +202,12 @@ func (s *GameScene) applyOnlineFireCommand(cmd protocol.OnlineGameCommand) {
 
 func (s *GameScene) applyOnlineAimCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineCommandIsCurrentTurn(cmd) {
+		return
+	}
+	if cmd.PlayerID == s.g.online.playerID {
+		return
+	}
+	if !s.onlineCommandSequenceIsFresh(cmd) {
 		return
 	}
 	s.g.online.applyingRemoteCmd = true
@@ -253,6 +280,7 @@ func (s *GameScene) applyOnlineTurnCommand(cmd protocol.OnlineGameCommand) {
 	}
 	s.g.online.turnSequence = cmd.TurnSequence
 	s.activePlayerIndex = playerIndex
+	s.applyOnlineCloudStates(cmd.Clouds)
 	s.resetComputerTurnPlans()
 	s.clampActiveShotStrength()
 	s.cameraGoal = s.cameraTargetForTank(s.activePlayerIndex)
@@ -265,6 +293,19 @@ func (s *GameScene) syncOnlineAim(tank *battleTank) {
 	if s.g.online == nil || s.g.online.applyingRemoteCmd || tank == nil || tank.cannon == nil || !s.onlineCanControlPlayer(tank.playerIndex) {
 		return
 	}
+	state := onlineAimState{
+		valid:          true,
+		playerIndex:    tank.playerIndex,
+		turnSequence:   s.g.online.turnSequence,
+		weaponSlot:     tank.selectedWeapon,
+		shotStrength:   tank.shotStrength,
+		cannonRotation: tank.cannon.Rot,
+		cameraX:        s.cameraX,
+	}
+	if s.onlineAimStateUnchanged(state) {
+		return
+	}
+	s.g.online.lastAim = state
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:           "aim",
 		PlayerIndex:    tank.playerIndex,
@@ -333,6 +374,7 @@ func (s *GameScene) syncOnlineTurn(previousPlayerIndex int) {
 		PlayerIndex:  s.activePlayerIndex,
 		TurnSequence: s.g.online.turnSequence,
 		CameraX:      s.cameraX,
+		Clouds:       s.onlineCloudStates(),
 	})
 }
 
@@ -340,9 +382,11 @@ func (s *GameScene) syncOnlineShopHover(hoverClass int) {
 	if s.g.online == nil || s.g.online.applyingRemoteCmd || !s.onlineCanControlPlayer(s.currentShopPlayerIndex()) {
 		return
 	}
+	playerIndex := s.currentShopPlayerIndex()
+	s.shopHoverClass = maxInt(0, minInt(2, hoverClass))
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:           "shop_hover",
-		PlayerIndex:    s.currentShopPlayerIndex(),
+		PlayerIndex:    playerIndex,
 		ShopHoverClass: maxInt(0, minInt(2, hoverClass)),
 	})
 }
@@ -351,10 +395,11 @@ func (s *GameScene) syncOnlineShopMode(mode shopMode) {
 	if !s.canSendOnlineShopCommand() {
 		return
 	}
-	s.shopAwaitingOnline = true
+	playerIndex := s.currentShopPlayerIndex()
+	s.setShopMode(mode)
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:        "shop_mode",
-		PlayerIndex: s.currentShopPlayerIndex(),
+		PlayerIndex: playerIndex,
 		ShopMode:    int(mode),
 	})
 }
@@ -363,10 +408,11 @@ func (s *GameScene) syncOnlineShopSelect(index int) {
 	if !s.canSendOnlineShopCommand() {
 		return
 	}
-	s.shopAwaitingOnline = true
+	playerIndex := s.currentShopPlayerIndex()
+	s.setShopSelectedIndex(index)
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:          "shop_select",
-		PlayerIndex:   s.currentShopPlayerIndex(),
+		PlayerIndex:   playerIndex,
 		ShopListIndex: index,
 	})
 }
@@ -375,10 +421,11 @@ func (s *GameScene) syncOnlineShopBuy() {
 	if !s.canSendOnlineShopCommand() {
 		return
 	}
-	s.shopAwaitingOnline = true
+	playerIndex := s.currentShopPlayerIndex()
+	s.buySelectedShopItem()
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:        "shop_buy",
-		PlayerIndex: s.currentShopPlayerIndex(),
+		PlayerIndex: playerIndex,
 	})
 }
 
@@ -386,10 +433,12 @@ func (s *GameScene) syncOnlineShopBack() {
 	if !s.canSendOnlineShopCommand() {
 		return
 	}
-	s.shopAwaitingOnline = true
+	playerIndex := s.currentShopPlayerIndex()
+	s.shopMode = shopModeEntry
+	s.shopHoverClass = 0
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:        "shop_back",
-		PlayerIndex: s.currentShopPlayerIndex(),
+		PlayerIndex: playerIndex,
 	})
 }
 
@@ -397,19 +446,91 @@ func (s *GameScene) syncOnlineShopContinue() {
 	if !s.canSendOnlineShopCommand() {
 		return
 	}
-	s.shopAwaitingOnline = true
+	playerIndex := s.currentShopPlayerIndex()
+	s.continueShop()
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:        "shop_continue",
-		PlayerIndex: s.currentShopPlayerIndex(),
+		PlayerIndex: playerIndex,
 	})
 }
 
 func (s *GameScene) canSendOnlineShopCommand() bool {
 	return s.g.online != nil &&
 		!s.g.online.applyingRemoteCmd &&
-		!s.shopAwaitingOnline &&
 		s.phase == phaseShop &&
 		s.onlineCanControlPlayer(s.currentShopPlayerIndex())
+}
+
+func (s *GameScene) onlineAimStateUnchanged(next onlineAimState) bool {
+	prev := s.g.online.lastAim
+	if !prev.valid {
+		return false
+	}
+	const epsilon = 0.000001
+	return prev.playerIndex == next.playerIndex &&
+		prev.turnSequence == next.turnSequence &&
+		prev.weaponSlot == next.weaponSlot &&
+		prev.shotStrength == next.shotStrength &&
+		math.Abs(prev.cannonRotation-next.cannonRotation) <= epsilon &&
+		math.Abs(prev.cameraX-next.cameraX) <= epsilon
+}
+
+func (s *GameScene) onlineCommandSequenceIsFresh(cmd protocol.OnlineGameCommand) bool {
+	if cmd.CommandSequence <= 0 {
+		return true
+	}
+	if s.g.online.receivedCommandSequences == nil {
+		s.g.online.receivedCommandSequences = make(map[string]int)
+	}
+	key := cmd.PlayerID + ":" + cmd.Kind
+	if cmd.CommandSequence <= s.g.online.receivedCommandSequences[key] {
+		return false
+	}
+	s.g.online.receivedCommandSequences[key] = cmd.CommandSequence
+	return true
+}
+
+func (s *GameScene) onlineCloudStates() []protocol.OnlineCloudState {
+	if len(s.clouds) == 0 {
+		return nil
+	}
+	states := make([]protocol.OnlineCloudState, 0, len(s.clouds))
+	for _, cloud := range s.clouds {
+		if cloud == nil || cloud.sprite == nil || cloud.sprite.Pos == nil {
+			continue
+		}
+		states = append(states, protocol.OnlineCloudState{
+			Kind:       int(cloud.kind),
+			X:          cloud.sprite.Pos.X,
+			Y:          cloud.sprite.Pos.Y,
+			Speed:      cloud.speed,
+			Aggression: cloud.aggression,
+		})
+	}
+	return states
+}
+
+func (s *GameScene) applyOnlineCloudStates(states []protocol.OnlineCloudState) {
+	if len(states) == 0 || len(s.clouds) == 0 {
+		return
+	}
+	count := minInt(len(states), len(s.clouds))
+	for i := 0; i < count; i++ {
+		cloud := s.clouds[i]
+		if cloud == nil || cloud.sprite == nil || cloud.sprite.Pos == nil {
+			continue
+		}
+		state := states[i]
+		if int(cloud.kind) != state.Kind {
+			continue
+		}
+		cloud.sprite.Pos.X = state.X
+		cloud.sprite.Pos.Y = state.Y
+		if state.Speed > 0 {
+			cloud.speed = state.Speed
+		}
+		cloud.aggression = state.Aggression
+	}
 }
 
 func (s *GameScene) onlineCommandIsCurrentTurn(cmd protocol.OnlineGameCommand) bool {

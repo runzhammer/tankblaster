@@ -66,13 +66,26 @@ type GameLoop struct {
 }
 
 type onlineGameRuntime struct {
-	client            *onlineClient
-	playerID          string
-	state             gamecore.MatchState
-	autoPlay          bool
-	applyingRemoteCmd bool
-	turnSequence      int
-	matchResultSent   bool
+	client                   *onlineClient
+	playerID                 string
+	state                    gamecore.MatchState
+	autoPlay                 bool
+	applyingRemoteCmd        bool
+	turnSequence             int
+	commandSequence          int
+	receivedCommandSequences map[string]int
+	lastAim                  onlineAimState
+	matchResultSent          bool
+}
+
+type onlineAimState struct {
+	valid          bool
+	playerIndex    int
+	turnSequence   int
+	weaponSlot     int
+	shotStrength   int
+	cannonRotation float64
+	cameraX        float64
 }
 
 type gameOptions struct {
