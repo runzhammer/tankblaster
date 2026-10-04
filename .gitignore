@@ -2,17 +2,21 @@
 bin/**
 build/**
 tmp_tools/
+dist/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+*.tar
+*.zip
 
 # Test binary, built with `go test -c`
 *.test
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+coverage.*
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
@@ -23,7 +27,19 @@ android/local.properties
 android/app/build/
 android/app/libs/*.aar
 android/app/libs/*-sources.jar
-dist/
+
+# Local runtime data
+tankblaster.db
+*.db
+*.sqlite
+*.sqlite3
 .live-test/
 .tmp
 .vscode
+
+# Local environment files
+.env
+docker/.env
+
+# Temporary source asset staging
+original_assets/
