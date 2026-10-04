@@ -65,7 +65,7 @@ func NewIntroScene(game *GameLoop) (core.Scene, error) {
 func (s *introScene) Update() error {
 	if !s.started {
 		s.started = true
-		s.g.playSoundLoopWithOptions(introMusicLoopKey, "intro/TECHNOMN.MOD", soundOptions{
+		s.g.playSoundLoopWithOptions(introMusicLoopKey, "intro/TECHNOMN.wav", soundOptions{
 			Loop:               true,
 			Volume:             introMusicVolume,
 			KeepSilenceForLoop: true,

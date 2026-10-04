@@ -1,11 +1,14 @@
 package tankblaster
 
 import (
+	"bytes"
 	"io"
 	"testing"
 
 	"codeberg.org/rabenauge/soundsetgo"
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/audio"
+	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 	r "github.com/runzhammer/tankblaster/resources"
 )
 
@@ -35,7 +38,7 @@ func TestIntroAssetsDecode(t *testing.T) {
 }
 
 func TestIntroMODRendersPCM(t *testing.T) {
-	for _, path := range []string{"intro/TECHNOMN.MOD", hallOfFameMusicPath} {
+	for _, path := range []string{"intro/TECHNOMN.MOD", "intro/RIFF_RFF.MOD"} {
 		data, err := r.IntroBytes(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -54,6 +57,28 @@ func TestIntroMODRendersPCM(t *testing.T) {
 		}
 		if n == 0 {
 			t.Fatalf("%s rendered no samples", path)
+		}
+	}
+}
+
+func TestIntroMusicWAVsDecode(t *testing.T) {
+	context := audio.NewContext(AudioSampleRate)
+	for _, path := range []string{"intro/TECHNOMN.wav", hallOfFameMusicPath} {
+		data, err := r.IntroBytes(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		stream, err := wav.Decode(context, bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		buf := make([]byte, 4096)
+		n, err := stream.Read(buf)
+		if err != nil && err != io.EOF {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if n == 0 {
+			t.Fatalf("%s decoded no samples", path)
 		}
 	}
 }

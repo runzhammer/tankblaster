@@ -1,5 +1,5 @@
-//go:build (darwin || freebsd || linux || windows || js) && !android && !ios
-// +build darwin freebsd linux windows js
+//go:build (darwin || freebsd || linux || windows) && !android && !ios
+// +build darwin freebsd linux windows
 // +build !android
 // +build !ios
 

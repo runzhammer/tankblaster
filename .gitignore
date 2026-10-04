@@ -28,6 +28,10 @@ android/app/build/
 android/app/libs/*.aar
 android/app/libs/*-sources.jar
 
+# WebAssembly build output
+web/*.wasm
+web/wasm_exec.js
+
 # Local runtime data
 tankblaster.db
 *.db

@@ -1,5 +1,4 @@
-//go:build android || ios
-// +build android ios
+//go:build android || ios || js
 
 package tankblaster
 
@@ -38,6 +37,9 @@ type mobileControlButton struct {
 }
 
 func (s *GameScene) handleMobileSideControls(tank *battleTank, strengthStep int) {
+	if !mobileControlsEnabled() {
+		return
+	}
 	if tank == nil {
 		return
 	}
@@ -69,6 +71,9 @@ func (s *GameScene) handleMobileSideControls(tank *battleTank, strengthStep int)
 }
 
 func (s *GameScene) handleMobileXMV12SideControls(tank *battleTank) {
+	if !mobileControlsEnabled() {
+		return
+	}
 	if tank == nil {
 		return
 	}
@@ -93,6 +98,9 @@ func (s *GameScene) handleMobileXMV12SideControls(tank *battleTank) {
 }
 
 func (s *GameScene) drawMobileSideControls(screen *ebiten.Image, viewport image.Rectangle) {
+	if !mobileControlsEnabled() {
+		return
+	}
 	if s.phase != phaseBattle || s.activeTank() == nil || s.activeTank().player.Kind == PlayerComputer {
 		return
 	}
@@ -189,7 +197,7 @@ func drawMobileControlButton(screen *ebiten.Image, button mobileControlButton) {
 
 func mobileControlJustPressed(r image.Rectangle) bool {
 	for _, id := range inpututil.AppendJustPressedTouchIDs(nil) {
-		x, y := ebiten.TouchPosition(id)
+		x, y := mobileControlTouchPosition(id)
 		if image.Pt(x, y).In(r) {
 			return true
 		}
@@ -199,7 +207,7 @@ func mobileControlJustPressed(r image.Rectangle) bool {
 
 func mobileControlPressed(r image.Rectangle) bool {
 	for _, id := range ebiten.AppendTouchIDs(nil) {
-		x, y := ebiten.TouchPosition(id)
+		x, y := mobileControlTouchPosition(id)
 		if image.Pt(x, y).In(r) {
 			return true
 		}
