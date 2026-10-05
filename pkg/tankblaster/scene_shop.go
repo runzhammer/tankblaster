@@ -222,6 +222,11 @@ func (s *GameScene) handleShopInput() {
 		s.requestShopHover(0)
 	}
 
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
+		s.requestShopContinue()
+		return
+	}
+
 	if !primaryPointerJustPressed() {
 		return
 	}
@@ -1024,7 +1029,7 @@ func (s *GameScene) drawStoreOverlay(screen, img *ebiten.Image, r image.Rectangl
 }
 
 func (s *GameScene) drawShopEntryListHover(screen *ebiten.Image, listRect, titleRect image.Rectangle, title string, c color.Color) {
-	drawCenteredText(screen, title, titleRect, c)
+	drawCenteredBoldTextFace(screen, title, titleRect, shopHeaderFace, c)
 }
 
 func (s *GameScene) drawShopItemIcon(screen *ebiten.Image, itemIndex int, r image.Rectangle, disabled bool) {
@@ -1035,21 +1040,37 @@ func (s *GameScene) drawShopItemIcon(screen *ebiten.Image, itemIndex int, r imag
 	if src == nil {
 		return
 	}
-	iconRect := image.Rect(1124, 324, 1204, 404)
-	if src == s.shop.storeIcons {
-		cell := 32
-		col := itemIndex % 16
-		row := itemIndex / 16
-		iconRect = image.Rect(col*cell, row*cell, col*cell+cell, row*cell+cell)
-		if iconRect.Max.Y > src.Bounds().Dy() {
-			return
-		}
+	iconRect, ok := shopItemIconSourceRect(src, itemIndex)
+	if !ok {
+		return
 	}
 	icon, ok := src.SubImage(iconRect).(*ebiten.Image)
 	if !ok {
 		return
 	}
 	drawScaledImageWithDisabled(screen, icon, r, disabled)
+}
+
+func shopItemIconSourceRect(src *ebiten.Image, itemIndex int) (image.Rectangle, bool) {
+	if src == nil || itemIndex < 0 {
+		return image.Rectangle{}, false
+	}
+	bounds := src.Bounds()
+	cellW := 32
+	cellH := 32
+	columns := 16
+	col := itemIndex % columns
+	row := itemIndex / columns
+	rect := image.Rect(
+		bounds.Min.X+col*cellW,
+		bounds.Min.Y+row*cellH,
+		bounds.Min.X+(col+1)*cellW,
+		bounds.Min.Y+(row+1)*cellH,
+	)
+	if rect.Max.X > bounds.Max.X || rect.Max.Y > bounds.Max.Y {
+		return image.Rectangle{}, false
+	}
+	return rect, true
 }
 
 func drawScaledImageWithDisabled(screen, img *ebiten.Image, r image.Rectangle, disabled bool) {

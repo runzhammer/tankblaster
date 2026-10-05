@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/runzhammer/tankblaster/pkg/core"
 	r "github.com/runzhammer/tankblaster/resources"
@@ -71,7 +72,7 @@ func (s *introScene) Update() error {
 			KeepSilenceForLoop: true,
 		})
 	}
-	if primaryPointerJustPressed() {
+	if primaryPointerJustPressed() || len(inpututil.AppendJustPressedKeys(nil)) > 0 {
 		return s.finish()
 	}
 	s.tick++

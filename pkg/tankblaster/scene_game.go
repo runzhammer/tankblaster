@@ -7913,7 +7913,7 @@ func (s *GameScene) drawScoreTable(screen *ebiten.Image) {
 		if tank.power <= 0 {
 			status = t.GameStatusOut
 		}
-		drawText(screen, tank.player.Name, nameX, y, textColor)
+		drawText(screen, tank.player.Name, nameX, y, tank.player.Color)
 		drawText(screen, strconv.Itoa(s.scoreForPlayer(tank.playerIndex)), scoreX+28, y, textColor)
 		drawText(screen, status, statusX+18, y, textColor)
 	}

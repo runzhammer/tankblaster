@@ -39,11 +39,11 @@ const (
 )
 
 var defaultPlayerColors = []color.RGBA{
-	{R: 11, G: 31, B: 255, A: 255},
 	{R: 230, G: 34, B: 45, A: 255},
+	{R: 11, G: 31, B: 255, A: 255},
 	{R: 20, G: 150, B: 62, A: 255},
 	{R: 255, G: 132, B: 0, A: 255},
-	{R: 135, G: 55, B: 210, A: 255},
+	{R: 145, G: 235, B: 35, A: 255},
 	{R: 240, G: 220, B: 20, A: 255},
 	{R: 0, G: 170, B: 180, A: 255},
 	{R: 185, G: 80, B: 25, A: 255},
@@ -54,6 +54,7 @@ var defaultPlayerColors = []color.RGBA{
 var (
 	uiTextFace      font.Face = loadUIFont(15)
 	dialogTextFace  font.Face = loadUIFont(11)
+	shopHeaderFace  font.Face = loadUIFont(16)
 	overlayTextFace font.Face = loadUIFont(24)
 	paintSplotch    *ebiten.Image
 )
@@ -74,7 +75,7 @@ var paletteColors = []color.RGBA{
 	{R: 230, G: 34, B: 45, A: 255},
 	{R: 20, G: 150, B: 62, A: 255},
 	{R: 255, G: 132, B: 0, A: 255},
-	{R: 135, G: 55, B: 210, A: 255},
+	{R: 145, G: 235, B: 35, A: 255},
 	{R: 240, G: 220, B: 20, A: 255},
 	{R: 0, G: 170, B: 180, A: 255},
 	{R: 235, G: 85, B: 170, A: 255},
@@ -1320,6 +1321,16 @@ func drawCenteredTextFace(screen *ebiten.Image, value string, r image.Rectangle,
 	x := r.Min.X + (r.Dx()-b.Dx())/2
 	y := r.Min.Y + (r.Dy()+b.Dy())/2
 	drawTextFace(screen, value, face, x, y, c)
+}
+
+func drawCenteredBoldTextFace(screen *ebiten.Image, value string, r image.Rectangle, face font.Face, c color.Color) {
+	b := text.BoundString(face, value)
+	x := r.Min.X + (r.Dx()-b.Dx()-1)/2
+	y := r.Min.Y + (r.Dy()+b.Dy())/2
+	drawTextFace(screen, value, face, x+2, y+2, color.RGBA{A: 150})
+	drawTextFace(screen, value, face, x+3, y+2, color.RGBA{A: 150})
+	drawTextFace(screen, value, face, x, y, c)
+	drawTextFace(screen, value, face, x+1, y, c)
 }
 
 func drawPaintSwatch(screen *ebiten.Image, rect image.Rectangle, c color.Color) {
