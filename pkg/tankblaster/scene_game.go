@@ -392,6 +392,7 @@ type waterFill struct {
 	cacheAge   int
 	cacheFrame int
 	hitPlayers map[int]bool
+	source     *battleTank
 }
 
 type waterBlubberEffect struct {
@@ -4304,7 +4305,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 
 	if weapon.FillsWater {
 		s.reportComputerShot(p.pos, -1, false)
-		s.startWaterFill(p.pos)
+		s.startWaterFill(p.pos, p.shooter)
 		return true
 	}
 
@@ -4454,6 +4455,10 @@ func (s *GameScene) startTerrainImpact(pos engine.Vec, weapon weaponspkg.Weapon,
 }
 
 func (s *GameScene) applyCraterAndRefillWater(x, y, radius float64) []models.SandFallPixel {
+	return s.applyCraterAndRefillWaterFrom(x, y, radius, s.lastDamageSource)
+}
+
+func (s *GameScene) applyCraterAndRefillWaterFrom(x, y, radius float64, source *battleTank) []models.SandFallPixel {
 	falls := s.ground.ApplyCrater(x, y, radius)
 	area := image.Rect(
 		int(math.Floor(x-radius))-1,
@@ -4461,11 +4466,15 @@ func (s *GameScene) applyCraterAndRefillWater(x, y, radius float64) []models.San
 		int(math.Ceil(x+radius))+1,
 		int(math.Ceil(y+radius))+1,
 	)
-	s.refillWaterBelowArea(area)
+	s.refillWaterBelowAreaFrom(area, source)
 	return falls
 }
 
 func (s *GameScene) applyRingCraterAndRefillWater(x, y, radius, spacing, thickness float64) []models.SandFallPixel {
+	return s.applyRingCraterAndRefillWaterFrom(x, y, radius, spacing, thickness, s.lastDamageSource)
+}
+
+func (s *GameScene) applyRingCraterAndRefillWaterFrom(x, y, radius, spacing, thickness float64, source *battleTank) []models.SandFallPixel {
 	falls := s.ground.ApplyRingCrater(x, y, radius, spacing, thickness)
 	area := image.Rect(
 		int(math.Floor(x-radius))-1,
@@ -4473,11 +4482,15 @@ func (s *GameScene) applyRingCraterAndRefillWater(x, y, radius, spacing, thickne
 		int(math.Ceil(x+radius))+1,
 		int(math.Ceil(y+radius))+1,
 	)
-	s.refillWaterBelowArea(area)
+	s.refillWaterBelowAreaFrom(area, source)
 	return falls
 }
 
 func (s *GameScene) refillWaterBelowArea(area image.Rectangle) {
+	s.refillWaterBelowAreaFrom(area, s.lastDamageSource)
+}
+
+func (s *GameScene) refillWaterBelowAreaFrom(area image.Rectangle, source *battleTank) {
 	if area.Empty() || len(s.waterFills) == 0 {
 		return
 	}
@@ -4489,6 +4502,9 @@ func (s *GameScene) refillWaterBelowArea(area image.Rectangle) {
 		if s.rebuildWaterFillSurface(fill) {
 			fill.cacheAge = -1
 			fill.image = nil
+			if source != nil {
+				fill.source = source
+			}
 		}
 	}
 }
@@ -4601,7 +4617,7 @@ func (s *GameScene) onZeroPowerScatterGroundImpact(p *projectile) {
 	}
 	duration := s.impactAnimationFramesForWeapon(weaponspkg.Grenade())
 	s.damageTanksInRadialProfile(p.pos, profile, p.shooter)
-	falls := s.applyCraterAndRefillWater(p.pos.X, p.pos.Y, float64(radius))
+	falls := s.applyCraterAndRefillWaterFrom(p.pos.X, p.pos.Y, float64(radius), p.shooter)
 	if len(falls) > 0 {
 		s.sandFalls = append(s.sandFalls, sandFallAnimation{
 			pixels:   falls,
@@ -4622,12 +4638,13 @@ func (s *GameScene) onZeroPowerScatterGroundImpact(p *projectile) {
 	}
 }
 
-func (s *GameScene) startWaterFill(pos engine.Vec) {
+func (s *GameScene) startWaterFill(pos engine.Vec, source *battleTank) {
 	fill, ok := s.waterFillAt(pos)
 	if !ok {
 		s.delayTurnAdvance(s.impactPauseFrames())
 		return
 	}
+	fill.source = source
 	s.playEventSound(soundEventWaterFill)
 	s.waterFills = append(s.waterFills, fill)
 	s.delayTurnAdvance(fill.duration + s.impactPauseFrames())
@@ -5525,12 +5542,23 @@ func (s *GameScene) drownTank(tank *battleTank, fill *waterFill) {
 	if tank == nil || tank.body == nil || tank.power <= 0 {
 		return
 	}
+	attacker := (*battleTank)(nil)
 	if fill != nil {
 		if fill.hitPlayers == nil {
 			fill.hitPlayers = make(map[int]bool)
 		}
 		fill.hitPlayers[tank.playerIndex] = true
+		attacker = fill.source
 	}
+	tank.power = 0
+	tank.shotStrength = 0
+	tank.zeroPowerShown = true
+	tank.zeroPowerGone = true
+	tank.terrainLocked = true
+	s.awardZeroPowerScore(tank, attacker, damageCauseDirect)
+	s.removeZeroPowerEffectsForTank(tank)
+	s.startWaterBlubberForTank(tank, fill)
+	s.removeTankSprites(tank)
 }
 
 func (s *GameScene) removeTankSprites(tank *battleTank) {
@@ -5546,7 +5574,7 @@ func (s *GameScene) removeTankSprites(tank *battleTank) {
 }
 
 func (s *GameScene) startWaterBlubberForTank(tank *battleTank, fill *waterFill) {
-	if tank == nil || tank.body == nil || len(s.waterBlubberAnimation.frames) == 0 {
+	if tank == nil || tank.body == nil || fill == nil || len(s.waterBlubberAnimation.frames) == 0 {
 		return
 	}
 	s.playEventSound(soundEventWaterBlubber)
@@ -5639,7 +5667,7 @@ func (s *GameScene) updateImpacts() {
 			s.damageTanksTouchedByPlasmaImpact(&impact, progress)
 			if !impact.terrainApplied {
 				if progress >= plasmaGreenProgress {
-					falls := s.applyRingCraterAndRefillWater(impact.pos.X, impact.pos.Y, impact.radius, plasmaRingSpacing, plasmaRingThickness)
+					falls := s.applyRingCraterAndRefillWaterFrom(impact.pos.X, impact.pos.Y, impact.radius, plasmaRingSpacing, plasmaRingThickness, impact.attacker)
 					if len(falls) > 0 {
 						s.sandFalls = append(s.sandFalls, sandFallAnimation{
 							pixels:   falls,

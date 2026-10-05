@@ -1,11 +1,14 @@
 package tankblaster
 
 import (
+	"image"
 	"math"
 	"math/rand"
 	"testing"
 
+	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/runzhammer/tankblaster/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/models"
 )
 
 func newScoringTestScene(powers ...int) *GameScene {
@@ -23,6 +26,22 @@ func newScoringTestScene(powers ...int) *GameScene {
 		})
 	}
 	return s
+}
+
+func repeatedWaterSurface(count int, y float64) []float64 {
+	surface := make([]float64, count)
+	for i := range surface {
+		surface[i] = y
+	}
+	return surface
+}
+
+func waterSurfaceFromGround(ground models.Ground, left, right int) []float64 {
+	surface := make([]float64, right-left+1)
+	for x := left; x <= right; x++ {
+		surface[x-left] = ground.SurfaceY(float64(x))
+	}
+	return surface
 }
 
 func TestScoringNormalHitAwardsVictimCredits(t *testing.T) {
@@ -112,6 +131,76 @@ func TestScoringKillAwardsAttackerPointsAndCredits(t *testing.T) {
 	}
 	if got, want := s.credits[0], 3500; got != want {
 		t.Fatalf("attacker credits = %d, want %d", got, want)
+	}
+}
+
+func TestWaterDrownsTankAndAwardsKillToSource(t *testing.T) {
+	s := newScoringTestScene(100, 100)
+	s.tanks[1].body = &engine.Sprite{
+		Pos:  &engine.Vec{X: 48, Y: 50},
+		Size: &engine.Vec{X: 20, Y: 10},
+	}
+	s.waterBlubberAnimation = spriteAnimation{
+		frames:     []*ebiten.Image{nil},
+		totalTicks: 3,
+	}
+	fill := &waterFill{
+		leftX:      0,
+		rightX:     120,
+		topY:       40,
+		surfaceY:   repeatedWaterSurface(121, 100),
+		age:        1,
+		duration:   1,
+		hitPlayers: make(map[int]bool),
+		source:     s.tanks[0],
+	}
+
+	s.damageTanksTouchingWater(fill)
+
+	if got := s.tanks[1].power; got != 0 {
+		t.Fatalf("victim power = %d, want 0", got)
+	}
+	if got, want := s.scores[0], 2; got != want {
+		t.Fatalf("attacker points = %d, want %d", got, want)
+	}
+	if !fill.hitPlayers[1] {
+		t.Fatal("victim should be marked as handled by water fill")
+	}
+	if got := len(s.waterBlubbers); got != 1 {
+		t.Fatalf("water blubber count = %d, want 1", got)
+	}
+}
+
+func TestExpandedWaterAwardsKillToExpandingSource(t *testing.T) {
+	s := newScoringTestScene(100, 100, 100)
+	s.ground = models.NewGroundWithSize(200, 100)
+	s.tanks[2].body = &engine.Sprite{
+		Pos:  &engine.Vec{X: 60, Y: 15},
+		Size: &engine.Vec{X: 20, Y: 10},
+	}
+	fill := waterFill{
+		leftX:      80,
+		rightX:     90,
+		topY:       -1,
+		surfaceY:   waterSurfaceFromGround(s.ground, 80, 90),
+		age:        1,
+		duration:   1,
+		hitPlayers: make(map[int]bool),
+		source:     s.tanks[0],
+	}
+	s.waterFills = []waterFill{fill}
+
+	s.refillWaterBelowAreaFrom(image.Rect(79, 0, 91, 100), s.tanks[1])
+	s.damageTanksTouchingWater(&s.waterFills[0])
+
+	if got := s.tanks[2].power; got != 0 {
+		t.Fatalf("victim power = %d, want 0", got)
+	}
+	if got := s.scores[0]; got != 0 {
+		t.Fatalf("original water source points = %d, want 0", got)
+	}
+	if got, want := s.scores[1], 2; got != want {
+		t.Fatalf("expanding source points = %d, want %d", got, want)
 	}
 }
 
