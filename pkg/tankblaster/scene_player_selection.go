@@ -7,7 +7,9 @@ import (
 	"image/color"
 	"image/draw"
 	"log"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang/freetype/truetype"
@@ -15,6 +17,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text"
+	"github.com/runzhammer/tankblaster/pkg/buildinfo"
 	"github.com/runzhammer/tankblaster/pkg/core"
 	"github.com/runzhammer/tankblaster/pkg/engine/tinge"
 	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
@@ -234,6 +237,7 @@ func (s *playerSelectionScene) Draw(screen *ebiten.Image) {
 		s.drawSlot(target, i)
 	}
 	s.drawFooter(target)
+	s.drawVersion(target)
 	s.drawStartState(target)
 	if s.openPaletteFor >= 0 {
 		s.drawPalette(target, s.openPaletteFor)
@@ -958,6 +962,29 @@ func (s *playerSelectionScene) drawFooter(screen *ebiten.Image) {
 	}
 	drawButton(screen, image.Rect(624, 673, 756, 706), t.PlayerSelectionOptionsButton)
 	drawButton(screen, image.Rect(780, 673, 922, 706), t.PlayerSelectionStartButton)
+}
+
+func (s *playerSelectionScene) drawVersion(screen *ebiten.Image) {
+	bounds := screen.Bounds()
+	drawTextFace(screen, playerSelectionVersionLabel(), dialogTextFace, bounds.Min.X+14, bounds.Max.Y-14, color.RGBA{R: 45, G: 45, B: 45, A: 155})
+}
+
+func playerSelectionVersionLabel() string {
+	version := strings.TrimSpace(buildinfo.Version)
+	if version == "" {
+		version = "dev"
+	}
+	if strings.EqualFold(version, "dev") {
+		if data, err := os.ReadFile("VERSION"); err == nil {
+			if fileVersion := strings.TrimSpace(string(data)); fileVersion != "" {
+				version = fileVersion + " (dev)"
+			}
+		}
+	}
+	if strings.HasPrefix(strings.ToLower(version), "v") {
+		return version
+	}
+	return "v" + version
 }
 
 func (s *playerSelectionScene) onlineButtonHovered() bool {
