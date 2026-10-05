@@ -140,18 +140,22 @@ server-docker:
 
 server-docker-tar: server-docker
 	mkdir -p $(DIST_DIR)
-	@if [ -n "$${DISTROBOX_ENTER_PATH:-}" ] && command -v distrobox-host-exec >/dev/null 2>&1; then \
-		distrobox-host-exec podman save -o "$(CURDIR)/$(SERVER_IMAGE_TAR)" $(SERVER_DOCKER_IMAGE); \
+	@tmp="$(SERVER_IMAGE_TAR).tmp"; \
+	rm -f "$$tmp"; \
+	trap 'rm -f "$$tmp"' EXIT INT TERM; \
+	if [ -n "$${DISTROBOX_ENTER_PATH:-}" ] && command -v distrobox-host-exec >/dev/null 2>&1; then \
+		distrobox-host-exec podman save -o "$(CURDIR)/$$tmp" $(SERVER_DOCKER_IMAGE); \
 	elif command -v docker >/dev/null 2>&1; then \
-		docker save -o "$(SERVER_IMAGE_TAR)" $(SERVER_DOCKER_IMAGE); \
+		docker save -o "$$tmp" $(SERVER_DOCKER_IMAGE); \
 	elif command -v podman >/dev/null 2>&1; then \
-		podman save -o "$(SERVER_IMAGE_TAR)" $(SERVER_DOCKER_IMAGE); \
+		podman save -o "$$tmp" $(SERVER_DOCKER_IMAGE); \
 	elif [ -x "$(HOST_SPAWN)" ]; then \
-		$(HOST_SPAWN) -no-pty sh -lc 'cd "$$1" && podman save -o "$$2" "$$3"' sh "$(CURDIR)" "$(CURDIR)/$(SERVER_IMAGE_TAR)" "$(SERVER_DOCKER_IMAGE)"; \
+		$(HOST_SPAWN) -no-pty sh -lc 'cd "$$1" && podman save -o "$$2" "$$3"' sh "$(CURDIR)" "$(CURDIR)/$$tmp" "$(SERVER_DOCKER_IMAGE)"; \
 	else \
 		printf '%s\n' 'Neither docker nor podman was found in PATH.' >&2; \
 		exit 1; \
-	fi
+	fi; \
+	mv -f "$$tmp" "$(SERVER_IMAGE_TAR)"
 
 windows:
 	$(call with_release_config,mkdir -p $(BUILD_DIR); $(RSRC) -ico $(WINDOWS_ICON) -o $(WINDOWS_ICON_SYSO); GOOS=windows GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o $(WINDOWS_BIN) .; rm -f $(WINDOWS_ICON_SYSO))
