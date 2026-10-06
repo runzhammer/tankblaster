@@ -338,6 +338,7 @@ type projectile struct {
 	zeroPowerScatter   bool
 	scatterImpactColor color.RGBA
 	trail              []engine.Vec
+	tailAge            int
 	shooter            *battleTank
 	launchRot          float64
 	angeredClouds      map[*battleCloud]bool
@@ -3482,6 +3483,7 @@ func (s *GameScene) updateSingleProjectile(p *projectile, gravity, windAccelerat
 	}
 	p.pos = *p.pos.Add(p.velocity)
 	p.trail = append(p.trail, p.pos)
+	p.tailAge++
 	if !p.zeroPowerScatter && len(p.trail) > 260 {
 		p.trail = p.trail[len(p.trail)-260:]
 	}
@@ -4057,6 +4059,7 @@ func (s *GameScene) handleProjectileWorldEdge(p *projectile) (bool, bool) {
 	}
 	p.prev = p.pos
 	p.trail = []engine.Vec{p.pos}
+	p.tailAge = 0
 	s.playEventSound(soundEventProjectileReentryExit)
 	s.reentryAnimation = &projectileReentryAnimation{
 		projectile: p,
@@ -6885,6 +6888,9 @@ func (s *GameScene) drawSingleProjectile(screen *ebiten.Image, camera *ebiten.Ge
 	}
 	projected := p.pos.Project(camera)
 	radius := projectileRadiusForWeapon(weapon)
+	if weapon.ShowTrail {
+		radius *= 0.62
+	}
 	if weapon.RoundProjectile {
 		vector.DrawFilledCircle(screen, float32(projected.X), float32(projected.Y), float32(radius), c, true)
 		return
@@ -6912,15 +6918,26 @@ func (s *GameScene) drawProjectileTail(screen *ebiten.Image, camera *ebiten.GeoM
 		return
 	}
 	const (
-		redAtDistance  = 70.0
-		transparentAt  = 250.0
-		tailLineWidth  = 1.0
-		tailStartAlpha = 200.0
-		tailMidAlpha   = 175.0
+		fullTailLength       = 625.0
+		tailFadeLength       = fullTailLength / 2
+		tailGrowthPerFrame   = 14.0
+		tailLineWidth        = 1.0
+		tailAlpha            = 180.0
+		maxTailSegmentLength = 2.0
 	)
+	tailColor := color.RGBA{R: 213, G: 198, B: 86, A: 255}
+	visibleLength := math.Min(fullTailLength, float64(p.tailAge)*tailGrowthPerFrame)
+	if visibleLength <= 0 {
+		return
+	}
+	drawnTailLength := math.Min(visibleLength, projectileTrailLength(p.trail, visibleLength))
+	if drawnTailLength <= 0 {
+		return
+	}
+	opaqueDistance := math.Max(0, drawnTailLength-tailFadeLength)
 
 	distanceFromProjectile := 0.0
-	for i := len(p.trail) - 1; i > 0 && distanceFromProjectile < transparentAt; i-- {
+	for i := len(p.trail) - 1; i > 0 && distanceFromProjectile < drawnTailLength; i-- {
 		current := p.trail[i]
 		previous := p.trail[i-1]
 		segment := current.Sub(previous)
@@ -6929,7 +6946,7 @@ func (s *GameScene) drawProjectileTail(screen *ebiten.Image, camera *ebiten.GeoM
 			continue
 		}
 
-		remaining := transparentAt - distanceFromProjectile
+		remaining := drawnTailLength - distanceFromProjectile
 		if segmentLength > remaining {
 			keep := remaining / segmentLength
 			previous = engine.V(
@@ -6939,27 +6956,52 @@ func (s *GameScene) drawProjectileTail(screen *ebiten.Image, camera *ebiten.GeoM
 			segmentLength = remaining
 		}
 
-		midDistance := distanceFromProjectile + segmentLength/2
-		redProgress := math.Min(1, midDistance/redAtDistance)
-		alpha := tailStartAlpha + (tailMidAlpha-tailStartAlpha)*math.Min(1, midDistance/redAtDistance)
-		if midDistance > redAtDistance {
-			alpha = tailMidAlpha * math.Max(0, 1-(midDistance-redAtDistance)/(transparentAt-redAtDistance))
+		for drawn := 0.0; drawn < segmentLength; {
+			partLength := math.Min(maxTailSegmentLength, segmentLength-drawn)
+			partStartDistance := distanceFromProjectile + drawn
+			partEndDistance := partStartDistance + partLength
+			midDistance := (partStartDistance + partEndDistance) / 2
+			fadeStrength := 1.0
+			if midDistance > opaqueDistance {
+				fadeDistance := math.Max(1, drawnTailLength-opaqueDistance)
+				fadeProgress := math.Max(0, math.Min(1, (midDistance-opaqueDistance)/fadeDistance))
+				fadeStrength = math.Pow(1-fadeProgress, 2.5)
+			}
+			alpha := tailAlpha * fadeStrength
+			if alpha >= 2 {
+				startT := drawn / segmentLength
+				endT := (drawn + partLength) / segmentLength
+				from := engine.V(
+					current.X+(previous.X-current.X)*startT,
+					current.Y+(previous.Y-current.Y)*startT,
+				).Project(camera)
+				to := engine.V(
+					current.X+(previous.X-current.X)*endT,
+					current.Y+(previous.Y-current.Y)*endT,
+				).Project(camera)
+				c := tailColor
+				c.R = uint8(math.Round(float64(c.R) * fadeStrength))
+				c.G = uint8(math.Round(float64(c.G) * fadeStrength))
+				c.B = uint8(math.Round(float64(c.B) * fadeStrength))
+				c.A = uint8(math.Round(alpha))
+				vector.StrokeLine(screen, float32(from.X), float32(from.Y), float32(to.X), float32(to.Y), float32(tailLineWidth*fadeStrength), c, true)
+			}
+			drawn += partLength
 		}
-		if alpha <= 0 {
-			break
-		}
-
-		c := color.RGBA{
-			R: 255,
-			G: uint8(math.Round(255 * (1 - redProgress))),
-			B: uint8(math.Round(255 * (1 - redProgress))),
-			A: uint8(math.Round(alpha)),
-		}
-		from := previous.Project(camera)
-		to := current.Project(camera)
-		vector.StrokeLine(screen, float32(from.X), float32(from.Y), float32(to.X), float32(to.Y), tailLineWidth, c, true)
 		distanceFromProjectile += segmentLength
 	}
+}
+
+func projectileTrailLength(trail []engine.Vec, maxLength float64) float64 {
+	length := 0.0
+	for i := len(trail) - 1; i > 0 && length < maxLength; i-- {
+		segmentLength := trail[i].Sub(trail[i-1]).Len()
+		if segmentLength <= 0 {
+			continue
+		}
+		length += segmentLength
+	}
+	return math.Min(length, maxLength)
 }
 
 func (s *GameScene) drawProjectileReentryAnimation(screen *ebiten.Image) {
