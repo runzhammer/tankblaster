@@ -23,6 +23,8 @@ const (
 	TypeReady                MessageType = "ready"
 	TypeFire                 MessageType = "fire"
 	TypeOnlineGameCommand    MessageType = "online_game_command"
+	TypeLobbyUpdate          MessageType = "lobby_update"
+	TypeStartLobbyGame       MessageType = "start_lobby_game"
 	TypeMatchComplete        MessageType = "match_complete"
 	TypeReconnect            MessageType = "reconnect"
 	TypeGetLeaderboard       MessageType = "get_leaderboard"
@@ -137,6 +139,43 @@ type OnlineCloudState struct {
 	Aggression float64 `json:"aggression"`
 }
 
+type LobbySlot struct {
+	Index      int    `json:"index"`
+	Kind       string `json:"kind"`
+	OwnerID    string `json:"owner_id,omitempty"`
+	PlayerID   string `json:"player_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	ComputerID int    `json:"computer_id,omitempty"`
+	Color      RGBA   `json:"color"`
+}
+
+type RGBA struct {
+	R uint8 `json:"r"`
+	G uint8 `json:"g"`
+	B uint8 `json:"b"`
+	A uint8 `json:"a"`
+}
+
+type LobbyUpdate struct {
+	SessionID           string       `json:"session_id"`
+	Revision            int64        `json:"revision,omitempty"`
+	Slots               []LobbySlot  `json:"slots"`
+	Rounds              int          `json:"rounds,omitempty"`
+	Options             LobbyOptions `json:"options,omitempty"`
+	ControlledPlayerIDs []string     `json:"controlled_player_ids,omitempty"`
+}
+
+type LobbyOptions struct {
+	ProjectileReentry int  `json:"projectile_reentry,omitempty"`
+	PalmCount         int  `json:"palm_count,omitempty"`
+	CloudAggression   int  `json:"cloud_aggression,omitempty"`
+	QuickRoundStart   bool `json:"quick_round_start,omitempty"`
+}
+
+type StartLobbyGame struct {
+	SessionID string `json:"session_id"`
+}
+
 type Reconnect struct {
 	MatchID       string `json:"match_id"`
 	AfterSequence int64  `json:"after_sequence,omitempty"`
@@ -179,7 +218,9 @@ type MatchFound struct {
 }
 
 type StateUpdate struct {
-	State gamecore.MatchState `json:"state"`
+	State               gamecore.MatchState `json:"state"`
+	ControlledPlayerIDs []string            `json:"controlled_player_ids,omitempty"`
+	LobbySlots          []LobbySlot         `json:"lobby_slots,omitempty"`
 }
 
 type ShotResult struct {

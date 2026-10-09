@@ -41,14 +41,14 @@ Useful development commands:
 ```sh
 make test
 make live-test
-make live-test-auto
-make live-test-cp
 ```
 
-The live-test targets start a local multiplayer server and two clients. They use 5 rounds by default:
+The live-test target starts a local multiplayer server and two clients in the
+player selection online panel. It uses 5 rounds by default:
 
 ```sh
-make live-test-auto LIVE_TEST_ROUNDS=3
+make live-test LIVE_TEST_ROUNDS=3
+make live-test LIVE_TEST_SERVER_URL=ws://127.0.0.1:8765/game
 ```
 
 Useful debug overrides:

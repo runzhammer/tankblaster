@@ -21,6 +21,7 @@ import (
 
 	"github.com/runzhammer/tankblaster/pkg/core"
 	"github.com/runzhammer/tankblaster/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
 	"github.com/runzhammer/tankblaster/pkg/models"
 	"github.com/runzhammer/tankblaster/pkg/protocol"
 	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
@@ -345,6 +346,7 @@ type projectile struct {
 	searchingCloud     *battleCloud
 	mosquitoPreview    bool
 	splitterArmed      bool
+	randomSeed         int64
 }
 
 type projectileReentryAnimation struct {
@@ -448,6 +450,7 @@ type smallCrumblerImpact struct {
 	start      engine.Vec
 	crumbs     []smallCrumb
 	cfg        crumblerConfig
+	rng        *rand.Rand
 	age        int
 	openingAge int
 	opening    bool
@@ -980,11 +983,24 @@ func (s *GameScene) startRound() {
 	s.shopSelectedIndex = 0
 	s.roundScores = make([]int, len(s.players))
 	s.assignEffectiveComputerIDs()
-	s.wind = s.rng.Intn(101)
-	if s.rng.Intn(2) == 0 {
-		s.windDirection = -1
+	onlineState := gamecore.MatchState{}
+	if s.g.online != nil {
+		onlineState = s.g.online.state
+	}
+	if onlineState.MatchID != "" {
+		s.wind = int(math.Abs(float64(onlineState.Wind)))
+		if onlineState.Wind < 0 {
+			s.windDirection = -1
+		} else {
+			s.windDirection = 1
+		}
 	} else {
-		s.windDirection = 1
+		s.wind = s.rng.Intn(101)
+		if s.rng.Intn(2) == 0 {
+			s.windDirection = -1
+		} else {
+			s.windDirection = 1
+		}
 	}
 	s.projectileReentry = s.projectileReentryEnabledForRound()
 	s.cameraY = 0
@@ -1002,7 +1018,11 @@ func (s *GameScene) startRound() {
 	if b.Position != nil {
 		b.Position.Y = -skyExtra
 	}
-	gr := models.NewRandomGroundWithSize(s.worldWidth, battlefieldHeight, s.rng.Int63())
+	terrainSeed := s.rng.Int63()
+	if onlineState.TerrainSeed != 0 {
+		terrainSeed = onlineState.TerrainSeed
+	}
+	gr := models.NewRandomGroundWithSize(s.worldWidth, battlefieldHeight, terrainSeed)
 	s.ground = gr
 	s.tanks = nil
 	s.turnOrder = nil
@@ -1019,7 +1039,11 @@ func (s *GameScene) startRound() {
 	s.airStrikeImpacts = nil
 	s.stopBattleEffectLoops()
 
-	spawnLaneOrder := shuffledIndexes(s.rng, len(s.players))
+	tankRNG := s.rng
+	if onlineState.TankSeed != 0 {
+		tankRNG = rand.New(rand.NewSource(onlineState.TankSeed))
+	}
+	spawnLaneOrder := shuffledIndexes(tankRNG, len(s.players))
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
 		if s.playerHasXMV12(tankIndex) {
@@ -1040,8 +1064,8 @@ func (s *GameScene) startRound() {
 			if tankIndex < len(spawnLaneOrder) {
 				spawnLane = spawnLaneOrder[tankIndex]
 			}
-			tankBody.Pos = randomTankDropPosition(s.rng, spawnLane, len(s.players), tankBody.Size, s.worldWidth, battlefieldHeight)
-			tankBody.Velocity = engine.Vec{Y: 2 + s.rng.Float64()*4}
+			tankBody.Pos = randomTankDropPosition(tankRNG, spawnLane, len(s.players), tankBody.Size, s.worldWidth, battlefieldHeight)
+			tankBody.Velocity = engine.Vec{Y: 2 + tankRNG.Float64()*4}
 			battleTank.body = tankBody
 		}
 
@@ -1061,7 +1085,14 @@ func (s *GameScene) startRound() {
 	}
 	s.setTurnOrderLeftToRight()
 	s.createClouds(battlefieldHeight)
-	s.createPalms()
+	if onlineState.PalmSeed != 0 {
+		palmRNG := s.rng
+		s.rng = rand.New(rand.NewSource(onlineState.PalmSeed))
+		s.createPalms()
+		s.rng = palmRNG
+	} else {
+		s.createPalms()
+	}
 	if s.g.options.quickRoundStart {
 		s.placeTanksOnGroundForQuickStart()
 	}
@@ -4594,6 +4625,7 @@ func (s *GameScene) fireZeroPowerScatterProjectiles(tank *battleTank) {
 			shooter:            tank,
 			launchRot:          angle,
 			trail:              []engine.Vec{center},
+			randomSeed:         s.rng.Int63(),
 		})
 	}
 	s.setProjectiles(append(s.projectiles, projectiles...))
@@ -4610,8 +4642,12 @@ func (s *GameScene) onZeroPowerScatterGroundImpact(p *projectile) {
 	if p == nil {
 		return
 	}
+	rng := s.rng
+	if p.randomSeed != 0 {
+		rng = rand.New(rand.NewSource(p.randomSeed))
+	}
 	s.playZeroPowerSound(zeroPowerSoundScatterImpact)
-	radius := 30 + s.rng.Intn(71)
+	radius := 30 + rng.Intn(71)
 	profile := weaponspkg.RadialDamageProfile{
 		InnerRadius: (2 * radius) / 3,
 		OuterRadius: radius,
@@ -4761,21 +4797,22 @@ func (s *GameScene) startMoleImpact(pos engine.Vec) {
 
 func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig) {
 	s.playEventSoundLoop(crumblerBroeslerLoopKey, soundEventCrumblerImpact)
+	impactRNG := rand.New(rand.NewSource(s.rng.Int63()))
 	crumbs := make([]smallCrumb, cfg.count)
 	for i := range crumbs {
 		fan := 0.0
 		if len(crumbs) > 1 {
 			fan = float64(i)/float64(len(crumbs)-1)*2 - 1
 		}
-		startX := pos.X + (s.rng.Float64()-0.5)*cfg.startWidth
+		startX := pos.X + (impactRNG.Float64()-0.5)*cfg.startWidth
 		startX = math.Max(0, math.Min(s.worldWidth-1, startX))
-		startOffset := cfg.hiddenStart*0.32 + s.rng.Float64()*cfg.hiddenStart*0.18
+		startOffset := cfg.hiddenStart*0.32 + impactRNG.Float64()*cfg.hiddenStart*0.18
 		crumbs[i] = smallCrumb{
 			pos:    engine.V(startX, pos.Y-startOffset),
 			fan:    fan,
-			speed:  cfg.minSpeed + s.rng.Float64()*(cfg.maxSpeed-cfg.minSpeed),
-			drift:  fan*0.34 + (s.rng.Float64()-0.5)*0.7,
-			wobble: s.rng.Float64() * math.Pi * 2,
+			speed:  cfg.minSpeed + impactRNG.Float64()*(cfg.maxSpeed-cfg.minSpeed),
+			drift:  fan*0.34 + (impactRNG.Float64()-0.5)*0.7,
+			wobble: impactRNG.Float64() * math.Pi * 2,
 		}
 	}
 
@@ -4783,6 +4820,7 @@ func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig)
 		start:   pos,
 		crumbs:  crumbs,
 		cfg:     cfg,
+		rng:     impactRNG,
 		opening: true,
 	}
 	if area := s.ground.ClearRects(s.crumblerOpeningAreas(impact)); !area.Empty() {
@@ -5305,7 +5343,11 @@ func (s *GameScene) updateSmallCrumblerImpacts() {
 			spread := math.Max(2, startHalfWidth+(impact.cfg.funnelSpread-startHalfWidth)*math.Min(1, depth/impact.cfg.maxDepth))
 			crumb.pos.Y += crumb.speed
 			targetX := impact.start.X + crumb.fan*spread
-			randomStep := (s.rng.Float64()*2 - 1) * impact.cfg.jitter
+			rng := impact.rng
+			if rng == nil {
+				rng = s.rng
+			}
+			randomStep := (rng.Float64()*2 - 1) * impact.cfg.jitter
 			wobble := math.Sin(float64(impact.age)*1.35+crumb.wobble) * impact.cfg.wobble
 			steer := 0.0
 			if crumb.pos.Y >= impact.start.Y {
@@ -5380,22 +5422,26 @@ func (s *GameScene) crumblerOpeningAreas(impact *smallCrumblerImpact) []image.Re
 	if impact == nil {
 		return nil
 	}
+	rng := impact.rng
+	if rng == nil {
+		rng = s.rng
+	}
 	progress := easeOut(float64(impact.openingAge+1) / float64(crumblerOpeningFrames))
 	width := impact.cfg.startWidth * (0.45 + progress*0.75)
 	depth := math.Max(float64(impact.cfg.height)*4, impact.cfg.maxDepth*crumblerOpeningDepthScale*progress)
 	count := maxInt(8, impact.cfg.count/3)
 	areas := make([]image.Rectangle, 0, count)
 	for i := 0; i < count; i++ {
-		xBias := (s.rng.Float64()*2 - 1)
+		xBias := (rng.Float64()*2 - 1)
 		x := impact.start.X + math.Copysign(math.Pow(math.Abs(xBias), 0.72), xBias)*width/2
-		x += (s.rng.Float64()*2 - 1) * impact.cfg.jitter
-		y := impact.start.Y + math.Pow(s.rng.Float64(), 1.65)*depth
-		if s.rng.Float64() < 0.42 {
+		x += (rng.Float64()*2 - 1) * impact.cfg.jitter
+		y := impact.start.Y + math.Pow(rng.Float64(), 1.65)*depth
+		if rng.Float64() < 0.42 {
 			lipLift := crumblerOpeningLipLift * (0.45 + progress*0.75)
-			y = impact.start.Y - s.rng.Float64()*lipLift + s.rng.Float64()*float64(impact.cfg.height+2)
+			y = impact.start.Y - rng.Float64()*lipLift + rng.Float64()*float64(impact.cfg.height+2)
 		}
 		size := crumblerOpeningChipSize
-		if s.rng.Float64() < 0.35 {
+		if rng.Float64() < 0.35 {
 			size++
 		}
 		areas = append(areas, centeredCrumblerChip(x, y, size))
@@ -8718,7 +8764,7 @@ func (s *GameScene) chooseStartingPlayerAfterLanding() {
 	if len(living) == 0 {
 		return
 	}
-	if s.g.online != nil {
+	if s.g.online != nil && s.roundNumber <= 1 {
 		if index := s.g.online.state.CurrentPlayerIndex; index >= 0 && index < len(s.tanks) && s.tankCanAct(s.tanks[index]) {
 			s.activePlayerIndex = index
 			s.resetComputerTurnPlans()
@@ -8744,6 +8790,9 @@ func (s *GameScene) onlineCanControlPlayer(playerIndex int) bool {
 	}
 	if playerIndex < 0 || playerIndex >= len(s.g.online.state.Players) {
 		return false
+	}
+	if len(s.g.online.controlledPlayerIDs) > 0 {
+		return s.g.online.controlledPlayerIDs[s.g.online.state.Players[playerIndex].ID]
 	}
 	return s.g.online.state.Players[playerIndex].ID == s.g.online.playerID
 }

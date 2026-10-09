@@ -22,8 +22,6 @@ make test
 
 ```sh
 make live-test
-make live-test-auto
-make live-test-cp
 make linux
 make windows
 make android

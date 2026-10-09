@@ -77,8 +77,6 @@ func DefaultConfig() Config {
 	cfg.Server.Address = "127.0.0.1:8765"
 	cfg.Server.PublicURL = "http://127.0.0.1:8765"
 	cfg.Server.ReadHeaderTimeout = 5 * time.Second
-	cfg.Server.ReadTimeout = 15 * time.Second
-	cfg.Server.WriteTimeout = 15 * time.Second
 	cfg.Server.IdleTimeout = 60 * time.Second
 	cfg.Server.WebSocketReadLimit = 64 * 1024
 	cfg.Server.MaxConnections = 256
@@ -87,7 +85,7 @@ func DefaultConfig() Config {
 	cfg.Server.ErrorChannelTimeout = 250 * time.Millisecond
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.Path = "tankblaster.db"
-	cfg.Sessions.MaxPlayers = 2
+	cfg.Sessions.MaxPlayers = 10
 	cfg.Sessions.InviteTTL = 24 * time.Hour
 	cfg.Sessions.InviteTokenLength = 32
 	cfg.Sessions.JoinCodeLength = 8

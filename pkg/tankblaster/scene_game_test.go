@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/runzhammer/tankblaster/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
 	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
 )
 
@@ -85,6 +86,42 @@ func TestFollowingRoundStartsWithPreviousLoser(t *testing.T) {
 
 	if got, want := s.activePlayerIndex, 2; got != want {
 		t.Fatalf("active player = %d, want %d", got, want)
+	}
+}
+
+func TestOnlineFirstRoundUsesServerSelectedStarter(t *testing.T) {
+	s := newScoringTestScene(100, 100, 100)
+	s.g = &GameLoop{online: &onlineGameRuntime{state: gamecore.MatchState{CurrentPlayerIndex: 1}}}
+	s.rng = rand.New(rand.NewSource(1))
+	s.roundNumber = 1
+	s.nextRoundStartingPlayerIndex = 2
+	s.activePlayerIndex = -1
+	for _, tank := range s.tanks {
+		tank.landed = true
+	}
+
+	s.chooseStartingPlayerAfterLanding()
+
+	if got, want := s.activePlayerIndex, 1; got != want {
+		t.Fatalf("active player = %d, want server starter %d", got, want)
+	}
+}
+
+func TestOnlineFollowingRoundStartsWithPreviousLoser(t *testing.T) {
+	s := newScoringTestScene(100, 100, 100)
+	s.g = &GameLoop{online: &onlineGameRuntime{state: gamecore.MatchState{CurrentPlayerIndex: 1}}}
+	s.rng = rand.New(rand.NewSource(1))
+	s.roundNumber = 2
+	s.nextRoundStartingPlayerIndex = 2
+	s.activePlayerIndex = -1
+	for _, tank := range s.tanks {
+		tank.landed = true
+	}
+
+	s.chooseStartingPlayerAfterLanding()
+
+	if got, want := s.activePlayerIndex, 2; got != want {
+		t.Fatalf("active player = %d, want previous loser %d", got, want)
 	}
 }
 

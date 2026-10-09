@@ -37,6 +37,9 @@ type TerrainCrater struct {
 type MatchState struct {
 	MatchID            string          `json:"match_id"`
 	Seed               int64           `json:"seed"`
+	TerrainSeed        int64           `json:"terrain_seed,omitempty"`
+	TankSeed           int64           `json:"tank_seed,omitempty"`
+	PalmSeed           int64           `json:"palm_seed,omitempty"`
 	Players            []Player        `json:"players"`
 	Tanks              []TankState     `json:"tanks"`
 	Terrain            []TerrainCrater `json:"terrain"`
@@ -101,6 +104,9 @@ func (e *Engine) NewMatch(matchID string, players []Player) MatchState {
 	return MatchState{
 		MatchID:            matchID,
 		Seed:               e.seed,
+		TerrainSeed:        e.rng.Int63(),
+		TankSeed:           e.rng.Int63(),
+		PalmSeed:           e.rng.Int63(),
 		Players:            append([]Player(nil), players...),
 		Tanks:              tanks,
 		CurrentPlayerIndex: 0,

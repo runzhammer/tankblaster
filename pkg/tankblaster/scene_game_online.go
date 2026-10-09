@@ -3,6 +3,7 @@ package tankblaster
 import (
 	"hash/fnv"
 	"math"
+	"math/rand"
 	"strconv"
 
 	"github.com/runzhammer/tankblaster/pkg/core"
@@ -32,6 +33,8 @@ func (s *GameScene) handleOnlineGameEnvelope(env protocol.Envelope) {
 		return
 	}
 	switch env.Type {
+	case protocol.TypeHelloAck:
+		s.requestOnlineCatchUp()
 	case protocol.TypeOnlineGameCommand:
 		cmd, err := protocol.Decode[protocol.OnlineGameCommand](env)
 		if err == nil {
@@ -89,7 +92,12 @@ func (s *GameScene) sendOnlineGameCommand(cmd protocol.OnlineGameCommand) {
 	}
 	s.g.online.commandSequence++
 	cmd.MatchID = s.g.online.state.MatchID
-	cmd.PlayerID = s.g.online.playerID
+	if cmd.PlayerID == "" && cmd.PlayerIndex >= 0 && cmd.PlayerIndex < len(s.g.online.state.Players) {
+		cmd.PlayerID = s.g.online.state.Players[cmd.PlayerIndex].ID
+	}
+	if cmd.PlayerID == "" {
+		cmd.PlayerID = s.g.online.playerID
+	}
 	cmd.CommandSequence = s.g.online.commandSequence
 	s.g.online.client.Send(protocol.TypeOnlineGameCommand, cmd)
 }
@@ -238,7 +246,9 @@ func (s *GameScene) applyOnlineFireCommand(cmd protocol.OnlineGameCommand) {
 	tank.shotStrength = maxInt(0, minInt(cmd.ShotStrength, s.maxShotStrength()))
 	tank.cannon.Rot = cmd.CannonRotation
 	s.cameraX = s.clampOnlineCameraX(cmd.CameraX)
-	s.fireActiveWeapon()
+	s.withDeterministicOnlineRNG(cmd, func() {
+		s.fireActiveWeapon()
+	})
 }
 
 func (s *GameScene) applyOnlineAimCommand(cmd protocol.OnlineGameCommand) {
@@ -412,6 +422,7 @@ func (s *GameScene) syncOnlineTurn(previousPlayerIndex int) {
 	}
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:         "turn",
+		PlayerID:     s.g.online.state.Players[previousPlayerIndex].ID,
 		PlayerIndex:  s.activePlayerIndex,
 		TurnSequence: s.g.online.turnSequence,
 		CameraX:      s.cameraX,
@@ -603,6 +614,41 @@ func (s *GameScene) onlineComputerDecisionSeed(tank *battleTank) int64 {
 		_, _ = hasher.Write([]byte(":"))
 		_, _ = hasher.Write([]byte(tank.player.Name))
 	}
+	return int64(hasher.Sum64())
+}
+
+func (s *GameScene) withDeterministicOnlineRNG(cmd protocol.OnlineGameCommand, apply func()) {
+	if s.g.online == nil {
+		apply()
+		return
+	}
+	previous := s.rng
+	s.rng = rand.New(rand.NewSource(s.onlineCommandSeed(cmd)))
+	defer func() {
+		s.rng = previous
+	}()
+	apply()
+}
+
+func (s *GameScene) onlineCommandSeed(cmd protocol.OnlineGameCommand) int64 {
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(strconv.FormatInt(s.g.online.state.Seed, 10)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(cmd.MatchID))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(cmd.PlayerID))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(cmd.Kind))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.PlayerIndex)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.TurnSequence)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.CommandSequence)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.WeaponSlot)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.ShotStrength)))
 	return int64(hasher.Sum64())
 }
 
