@@ -10,7 +10,7 @@ The format is inspired by Keep a Changelog, and the project uses the version in 
 
 - Public issue and pull request workflow will start after the repository is published on GitHub.
 
-## [1.0.4] - 2026-10-09
+## [1.0.7] - 2026-10-09
 
 ### Added
 
