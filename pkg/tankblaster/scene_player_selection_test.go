@@ -87,6 +87,27 @@ func TestPlayerSelectionOnlineClickStaysInSelectionScene(t *testing.T) {
 	scene.leaveEmbeddedOnlineMode()
 }
 
+func TestVersionUpdateNoticeDoesNotCoverOnlineButton(t *testing.T) {
+	bounds := image.Rect(0, 0, 960, 720)
+	if versionUpdateNoticeRect(bounds).Overlaps(onlineSelectionButtonRect()) {
+		t.Fatalf("version notice %v overlaps online button %v", versionUpdateNoticeRect(bounds), onlineSelectionButtonRect())
+	}
+}
+
+func TestVersionUpdateCloseButtonDismissesNotice(t *testing.T) {
+	scene := &playerSelectionScene{
+		versionUpdate: &versionUpdateResult{available: true, latest: "9.9.9"},
+	}
+	p := versionUpdateCloseRect(scene.selectionBounds()).Min.Add(image.Pt(1, 1))
+
+	if !scene.handleVersionUpdateClick(p.X, p.Y) {
+		t.Fatal("close click was not handled")
+	}
+	if !scene.versionUpdateDismissed {
+		t.Fatal("version update notice was not dismissed")
+	}
+}
+
 func TestEmbeddedJoinCodeValidation(t *testing.T) {
 	tests := []struct {
 		value string

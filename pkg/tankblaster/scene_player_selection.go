@@ -3,6 +3,7 @@ package tankblaster
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -132,6 +133,11 @@ type playerSelectionScene struct {
 	onlineStartSlots    []protocol.LobbySlot
 	onlinePendingLobby  *protocol.LobbyUpdate
 
+	versionUpdateCheckInFlight bool
+	versionUpdateResults       chan versionUpdateResult
+	versionUpdate              *versionUpdateResult
+	versionUpdateDismissed     bool
+
 	baseImage         *ebiten.Image
 	canvas            *ebiten.Image
 	humanPortrait     *ebiten.Image
@@ -145,14 +151,15 @@ func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 	baseImage := mustImageFromPNG(r.PlayerSelectionBase)
 	game.playSound(tankBlasterSounds.Events[soundEventPlayerSelectionStart])
 	s := &playerSelectionScene{
-		g:                  game,
-		rounds:             game.rounds,
-		focusedName:        -1,
-		openPaletteFor:     -1,
-		baseImage:          baseImage,
-		canvas:             ebiten.NewImage(baseImage.Bounds().Dx(), baseImage.Bounds().Dy()),
-		onlineCheckResults: make(chan bool, 1),
-		humanPortrait:      mustImageFromPNG(r.PlayerHuman),
+		g:                    game,
+		rounds:               game.rounds,
+		focusedName:          -1,
+		openPaletteFor:       -1,
+		baseImage:            baseImage,
+		canvas:               ebiten.NewImage(baseImage.Bounds().Dx(), baseImage.Bounds().Dy()),
+		onlineCheckResults:   make(chan bool, 1),
+		versionUpdateResults: make(chan versionUpdateResult, 1),
+		humanPortrait:        mustImageFromPNG(r.PlayerHuman),
 		computerPortraits: map[computerplayers.ID]*ebiten.Image{
 			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
 			computerplayers.FrederikID: mustImageFromPNG(r.PlayerComputerFrederik),
@@ -165,6 +172,7 @@ func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 		s.rounds = 10
 	}
 	s.queueOnlineAvailabilityCheck()
+	s.queueVersionUpdateCheck()
 	for i := range s.slots {
 		s.slots[i].Color = defaultPlayerColors[i%len(defaultPlayerColors)]
 	}
@@ -192,6 +200,7 @@ func (s *playerSelectionScene) Update() error {
 	defer s.syncPlayerNameInputActive()
 	s.tick++
 	s.updateOnlineAvailability()
+	s.updateVersionUpdateCheck()
 	s.consumeEmbeddedOnline()
 	if s.onlineStartState != nil && s.onlineClient != nil {
 		state := *s.onlineStartState
@@ -247,6 +256,9 @@ func (s *playerSelectionScene) Update() error {
 
 	x, y := primaryPointerPosition()
 	x, y = s.toSelectionCoords(x, y)
+	if s.handleVersionUpdateClick(x, y) {
+		return nil
+	}
 	if s.handleEmbeddedOnlineJoinOverlayClick(x, y) {
 		return nil
 	}
@@ -292,6 +304,7 @@ func (s *playerSelectionScene) Draw(screen *ebiten.Image) {
 	s.drawFooter(target)
 	s.drawEmbeddedOnlinePanel(target)
 	s.drawVersion(target)
+	s.drawVersionUpdateNotice(target)
 	s.drawStartState(target)
 	if s.openPaletteFor >= 0 {
 		s.drawPalette(target, s.openPaletteFor)
@@ -969,6 +982,44 @@ func (s *playerSelectionScene) updateOnlineAvailability() {
 			return
 		}
 	}
+}
+
+func (s *playerSelectionScene) updateVersionUpdateCheck() {
+	if s.versionUpdateResults == nil {
+		return
+	}
+	for {
+		select {
+		case result := <-s.versionUpdateResults:
+			s.versionUpdateCheckInFlight = false
+			if result.available {
+				next := result
+				s.versionUpdate = &next
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (s *playerSelectionScene) queueVersionUpdateCheck() {
+	if s.versionUpdateCheckInFlight || s.versionUpdateResults == nil {
+		return
+	}
+	current := currentSemanticVersionString()
+	if _, ok := parseSemanticVersion(current); !ok {
+		return
+	}
+	s.versionUpdateCheckInFlight = true
+	go func(results chan<- versionUpdateResult, current string) {
+		ctx, cancel := context.WithTimeout(context.Background(), versionCheckTimeout)
+		defer cancel()
+		result := checkLatestVersion(ctx, versionCheckURL, current)
+		select {
+		case results <- result:
+		default:
+		}
+	}(s.versionUpdateResults, current)
 }
 
 func (s *playerSelectionScene) queueOnlineAvailabilityCheck() {
@@ -1774,6 +1825,63 @@ func (s *playerSelectionScene) drawFooter(screen *ebiten.Image) {
 func (s *playerSelectionScene) drawVersion(screen *ebiten.Image) {
 	bounds := screen.Bounds()
 	drawTextFace(screen, playerSelectionVersionLabel(), dialogTextFace, bounds.Min.X+14, bounds.Max.Y-14, color.RGBA{R: 45, G: 45, B: 45, A: 155})
+}
+
+func (s *playerSelectionScene) drawVersionUpdateNotice(screen *ebiten.Image) {
+	if s.versionUpdate == nil || !s.versionUpdate.available || s.versionUpdateDismissed {
+		return
+	}
+	t := texts()
+	r := versionUpdateNoticeRect(screen.Bounds())
+	drawFrame(screen, r, color.RGBA{R: 255, G: 250, B: 210, A: 242}, colornames.Black)
+	drawTextFace(screen, fmt.Sprintf(t.PlayerSelectionUpdateAvailable, s.versionUpdate.latest), dialogTextFace, r.Min.X+10, r.Min.Y+18, colornames.Black)
+	link := versionUpdateLinkRect(screen.Bounds())
+	drawFrame(screen, link, color.RGBA{R: 220, G: 236, B: 255, A: 255}, colornames.Black)
+	drawCenteredTextFace(screen, t.PlayerSelectionUpdateOpen, link, dialogTextFace, color.RGBA{R: 0, G: 38, B: 180, A: 255})
+	close := versionUpdateCloseRect(screen.Bounds())
+	drawFrame(screen, close, color.RGBA{R: 235, G: 235, B: 220, A: 255}, colornames.Black)
+	drawCenteredTextFace(screen, "x", close, dialogTextFace, colornames.Black)
+}
+
+func (s *playerSelectionScene) handleVersionUpdateClick(x, y int) bool {
+	if s.versionUpdate == nil || !s.versionUpdate.available || s.versionUpdateDismissed {
+		return false
+	}
+	bounds := s.selectionBounds()
+	p := image.Pt(x, y)
+	if p.In(versionUpdateCloseRect(bounds)) {
+		s.versionUpdateDismissed = true
+		return true
+	}
+	if !p.In(versionUpdateLinkRect(bounds)) {
+		return false
+	}
+	if err := openDefaultBrowser(versionDownloadURL); err != nil {
+		s.transientMessage = texts().PlayerSelectionUpdateOpenFailed
+		s.transientMessageUntil = s.tick + onlineUnavailableMessageTicks
+	}
+	return true
+}
+
+func (s *playerSelectionScene) selectionBounds() image.Rectangle {
+	if s != nil && s.baseImage != nil {
+		return s.baseImage.Bounds()
+	}
+	return image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height))
+}
+
+func versionUpdateNoticeRect(bounds image.Rectangle) image.Rectangle {
+	return image.Rect(bounds.Min.X+14, bounds.Max.Y-94, bounds.Min.X+374, bounds.Max.Y-58)
+}
+
+func versionUpdateLinkRect(bounds image.Rectangle) image.Rectangle {
+	notice := versionUpdateNoticeRect(bounds)
+	return image.Rect(notice.Max.X-150, notice.Min.Y+8, notice.Max.X-28, notice.Max.Y-8)
+}
+
+func versionUpdateCloseRect(bounds image.Rectangle) image.Rectangle {
+	notice := versionUpdateNoticeRect(bounds)
+	return image.Rect(notice.Max.X-24, notice.Min.Y+4, notice.Max.X-6, notice.Min.Y+22)
 }
 
 func playerSelectionVersionLabel() string {
