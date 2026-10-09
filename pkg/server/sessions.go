@@ -3,8 +3,11 @@ package server
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"encoding/binary"
 	"encoding/hex"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +15,8 @@ import (
 	"github.com/runzhammer/tankblaster/pkg/gamecore"
 	"github.com/runzhammer/tankblaster/pkg/protocol"
 )
+
+const sessionEventHistoryLimit = 512
 
 type SessionType string
 type SessionStatus string
@@ -36,19 +41,24 @@ type SessionPlayer struct {
 }
 
 type Session struct {
-	ID          string
-	Type        SessionType
-	HostID      string
-	Rounds      int
-	Players     []SessionPlayer
-	MaxPlayers  int
-	CreatedAt   time.Time
-	InviteToken string
-	JoinCode    string
-	InviteURL   string
-	InviteUntil time.Time
-	Status      SessionStatus
-	Match       gamecore.MatchState
+	ID            string
+	Type          SessionType
+	HostID        string
+	Rounds        int
+	Players       []SessionPlayer
+	MaxPlayers    int
+	CreatedAt     time.Time
+	InviteToken   string
+	JoinCode      string
+	InviteURL     string
+	InviteUntil   time.Time
+	Status        SessionStatus
+	Match         gamecore.MatchState
+	EventSeq      int64
+	Events        []protocol.Envelope
+	LobbyRevision int64
+	LobbySlots    []protocol.LobbySlot
+	LobbyOptions  protocol.LobbyOptions
 }
 
 type Hub struct {
@@ -110,15 +120,21 @@ func (h *Hub) JoinSession(req protocol.JoinSession, player SessionPlayer) (*Sess
 	if s.Status != SessionWaiting && s.Status != SessionReady {
 		return nil, errProtocol("session_closed", "session is not joinable")
 	}
-	if len(s.Players) >= s.MaxPlayers {
-		return nil, errProtocol("session_full", "session is full")
-	}
-	for _, existing := range s.Players {
-		if existing.PlayerID == player.PlayerID {
+	for i := range s.Players {
+		if s.Players[i].PlayerID == player.PlayerID {
+			s.Players[i].Client = player.Client
 			return s, nil
 		}
 	}
+	if len(s.Players) >= s.MaxPlayers {
+		return nil, errProtocol("session_full", "session is full")
+	}
 	s.Players = append(s.Players, player)
+	if !ensureLobbySlotForPlayer(s, player) {
+		s.Players = s.Players[:len(s.Players)-1]
+		return nil, errProtocol("session_full", "no free player slots")
+	}
+	s.LobbyRevision++
 	return s, nil
 }
 
@@ -166,6 +182,8 @@ func (h *Hub) Leave(playerID string) []*Session {
 			continue
 		}
 		s.Players = next
+		s.LobbySlots = removeLobbySlotsForOwner(s.LobbySlots, playerID)
+		s.LobbyRevision++
 		changed = append(changed, s)
 		if len(s.Players) == 0 || s.HostID == playerID {
 			delete(h.sessions, id)
@@ -173,6 +191,17 @@ func (h *Hub) Leave(playerID string) []*Session {
 		}
 	}
 	return changed
+}
+
+func removeLobbySlotsForOwner(slots []protocol.LobbySlot, ownerID string) []protocol.LobbySlot {
+	next := slots[:0]
+	for _, slot := range slots {
+		if slot.OwnerID == ownerID {
+			continue
+		}
+		next = append(next, slot)
+	}
+	return next
 }
 
 func (h *Hub) Reconnect(matchID string, player SessionPlayer) (*Session, error) {
@@ -191,6 +220,64 @@ func (h *Hub) Reconnect(matchID string, player SessionPlayer) (*Session, error) 
 		return nil, errProtocol("not_in_match", "player is not in that match")
 	}
 	return nil, errProtocol("match_not_found", "match not found")
+}
+
+func (h *Hub) AttachClient(playerID string, client *Client) []*Session {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	updated := make([]*Session, 0)
+	for _, s := range h.sessions {
+		changed := false
+		for i := range s.Players {
+			if s.Players[i].PlayerID == playerID {
+				s.Players[i].Client = client
+				changed = true
+			}
+		}
+		if changed {
+			updated = append(updated, s)
+		}
+	}
+	return updated
+}
+
+func (h *Hub) UpdateLobby(sessionID, playerID string, slots []protocol.LobbySlot, rounds int, options protocol.LobbyOptions) (*Session, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sessions[sessionID]
+	if s == nil {
+		return nil, errProtocol("session_not_found", "session not found")
+	}
+	if s.HostID == playerID {
+		s.Rounds = normalizedRounds(rounds)
+		s.LobbyOptions = normalizedLobbyOptions(options)
+	}
+	s.LobbySlots = mergePlayerLobbySlots(s, playerID, slots)
+	s.LobbyRevision++
+	return s, nil
+}
+
+func (h *Hub) StartLobbyGame(sessionID, playerID string) (*Session, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sessions[sessionID]
+	if s == nil {
+		return nil, errProtocol("session_not_found", "session not found")
+	}
+	if s.HostID != playerID {
+		return nil, errProtocol("not_host", "only the session host can start the game")
+	}
+	players := lobbyGamePlayers(s)
+	if len(players) < 2 {
+		return nil, errProtocol("not_enough_players", "at least two players are required")
+	}
+	s.Match = gamecore.NewEngine(time.Now().UnixNano()).NewMatch(randomID("mat", 12), players)
+	s.Match.TotalRounds = normalizedRounds(s.Rounds)
+	if len(s.Match.Players) > 0 {
+		s.Match.CurrentPlayerIndex = randomIndex(len(s.Match.Players))
+	}
+	s.Status = SessionInGame
+	return s, nil
 }
 
 func (h *Hub) QuickMatch(player SessionPlayer) (*Session, bool, error) {
@@ -359,6 +446,152 @@ func (h *Hub) startMatchLocked(s *Session) {
 	}
 }
 
+func ensureLobbySlotForPlayer(s *Session, player SessionPlayer) bool {
+	if s == nil || player.PlayerID == "" {
+		return false
+	}
+	for _, slot := range s.LobbySlots {
+		if slot.Kind == "human" && slot.OwnerID == player.PlayerID {
+			return true
+		}
+	}
+	for i := 0; i < s.MaxPlayers; i++ {
+		occupied := false
+		for _, slot := range s.LobbySlots {
+			if slot.Index == i && slot.Kind != "" && slot.Kind != "none" {
+				occupied = true
+				break
+			}
+		}
+		if occupied {
+			continue
+		}
+		s.LobbySlots = append(s.LobbySlots, protocol.LobbySlot{
+			Index:    i,
+			Kind:     "human",
+			OwnerID:  player.PlayerID,
+			PlayerID: lobbySlotPlayerID(player.PlayerID, i),
+			Name:     player.DisplayName,
+			Color:    defaultLobbyColor(i),
+		})
+		return true
+	}
+	return false
+}
+
+func normalizedLobbyOptions(options protocol.LobbyOptions) protocol.LobbyOptions {
+	options.ProjectileReentry = clampInt(options.ProjectileReentry, 0, 2)
+	options.PalmCount = clampInt(options.PalmCount, -1, 2)
+	options.CloudAggression = clampInt(options.CloudAggression, 0, 100)
+	return options
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func mergePlayerLobbySlots(s *Session, playerID string, slots []protocol.LobbySlot) []protocol.LobbySlot {
+	incomingByIndex := map[int]protocol.LobbySlot{}
+	for _, slot := range slots {
+		if slot.Index < 0 || slot.Index >= s.MaxPlayers || (slot.Kind != "human" && slot.Kind != "computer" && slot.Kind != "none") {
+			continue
+		}
+		if slot.OwnerID != "" && slot.OwnerID != playerID {
+			continue
+		}
+		slot.OwnerID = playerID
+		if slot.Kind == "none" {
+			slot.PlayerID = ""
+		} else {
+			slot.PlayerID = lobbySlotPlayerID(playerID, slot.Index)
+		}
+		incomingByIndex[slot.Index] = slot
+	}
+
+	next := make([]protocol.LobbySlot, 0, len(s.LobbySlots)+len(incomingByIndex))
+	occupied := map[int]bool{}
+	for _, slot := range s.LobbySlots {
+		if slot.OwnerID == playerID {
+			if incoming, ok := incomingByIndex[slot.Index]; ok {
+				if incoming.Kind != "none" {
+					next = append(next, incoming)
+					occupied[slot.Index] = true
+				}
+				delete(incomingByIndex, slot.Index)
+			}
+			continue
+		}
+		next = append(next, slot)
+		occupied[slot.Index] = true
+	}
+	for _, slot := range incomingByIndex {
+		if slot.Kind == "none" {
+			continue
+		}
+		if occupied[slot.Index] {
+			continue
+		}
+		next = append(next, slot)
+		occupied[slot.Index] = true
+	}
+	return next
+}
+
+func lobbyGamePlayers(s *Session) []gamecore.Player {
+	slots := append([]protocol.LobbySlot(nil), s.LobbySlots...)
+	sort.Slice(slots, func(i, j int) bool {
+		return slots[i].Index < slots[j].Index
+	})
+	players := make([]gamecore.Player, 0, len(slots))
+	for _, slot := range slots {
+		if slot.Kind != "human" && slot.Kind != "computer" {
+			continue
+		}
+		name := slot.Name
+		if name == "" {
+			name = "Player"
+		}
+		players = append(players, gamecore.Player{ID: slot.PlayerID, DisplayName: name})
+	}
+	return players
+}
+
+func lobbySlotPlayerID(ownerID string, index int) string {
+	return ownerID + ":slot:" + strconv.Itoa(index)
+}
+
+func defaultLobbyColor(index int) protocol.RGBA {
+	colors := []protocol.RGBA{
+		{R: 230, G: 34, B: 45, A: 255},
+		{R: 11, G: 31, B: 255, A: 255},
+		{R: 20, G: 150, B: 62, A: 255},
+		{R: 255, G: 132, B: 0, A: 255},
+		{R: 145, G: 235, B: 35, A: 255},
+		{R: 240, G: 220, B: 20, A: 255},
+		{R: 0, G: 170, B: 180, A: 255},
+		{R: 185, G: 80, B: 25, A: 255},
+		{R: 235, G: 85, B: 170, A: 255},
+		{R: 40, G: 40, B: 40, A: 255},
+	}
+	return colors[index%len(colors)]
+}
+
+func controlledLobbyPlayerIDs(s *Session, playerID string) []string {
+	ids := make([]string, 0)
+	for _, slot := range s.LobbySlots {
+		if (slot.Kind == "human" || slot.Kind == "computer") && slot.OwnerID == playerID && slot.PlayerID != "" {
+			ids = append(ids, slot.PlayerID)
+		}
+	}
+	return ids
+}
+
 func (h *Hub) findSession(req protocol.JoinSession) *Session {
 	if req.SessionID != "" {
 		return h.sessions[req.SessionID]
@@ -433,6 +666,17 @@ func (s *Session) averageRating() int {
 
 func randomID(prefix string, bytesLen int) string {
 	return prefix + "_" + randomToken(bytesLen)
+}
+
+func randomIndex(count int) int {
+	if count <= 1 {
+		return 0
+	}
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return int(binary.LittleEndian.Uint64(buf[:]) % uint64(count))
+	}
+	return int(time.Now().UnixNano() % int64(count))
 }
 
 func randomToken(bytesLen int) string {

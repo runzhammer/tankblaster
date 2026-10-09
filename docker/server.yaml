@@ -3,8 +3,8 @@ server:
   public_url: "http://127.0.0.1:8765"
   allowed_origins: []
   read_header_timeout: "5s"
-  read_timeout: "15s"
-  write_timeout: "15s"
+  read_timeout: "0s"
+  write_timeout: "0s"
   idle_timeout: "60s"
   websocket_read_limit: 65536
   max_connections: 256
@@ -17,7 +17,7 @@ database:
   path: "/data/tankblaster.db"
 
 sessions:
-  max_players: 2
+  max_players: 10
   invite_ttl: "24h"
   invite_token_length: 32
   join_code_length: 8

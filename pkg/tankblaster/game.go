@@ -68,12 +68,15 @@ type GameLoop struct {
 type onlineGameRuntime struct {
 	client                   *onlineClient
 	playerID                 string
+	controlledPlayerIDs      map[string]bool
 	state                    gamecore.MatchState
 	autoPlay                 bool
 	applyingRemoteCmd        bool
 	turnSequence             int
 	commandSequence          int
 	receivedCommandSequences map[string]int
+	lastServerSequence       int64
+	awaitingCatchUp          bool
 	lastAim                  onlineAimState
 	matchResultSent          bool
 }
@@ -226,7 +229,7 @@ func debugStartSceneFactory(scene string) func(*GameLoop) (core.Scene, error) {
 	case "score", "scores", "hall_of_fame", "hall-of-fame", "bestenliste":
 		return NewDebugHallOfFameScene
 	case "online", "onlinespiel", "online_game":
-		return NewOnlineScene
+		return NewEmbeddedOnlinePlayerSelectionScene
 	default:
 		return NewGameScene
 	}

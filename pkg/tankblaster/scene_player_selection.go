@@ -3,6 +3,7 @@ package tankblaster
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/golang/freetype/truetype"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -20,6 +22,8 @@ import (
 	"github.com/runzhammer/tankblaster/pkg/buildinfo"
 	"github.com/runzhammer/tankblaster/pkg/core"
 	"github.com/runzhammer/tankblaster/pkg/engine/tinge"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
+	"github.com/runzhammer/tankblaster/pkg/protocol"
 	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
 	"github.com/runzhammer/tankblaster/pkg/tankblaster/soundpaths"
 	r "github.com/runzhammer/tankblaster/resources"
@@ -88,6 +92,8 @@ type playerSelectionSlot struct {
 	ComputerID computerplayers.ID
 	Name       string
 	Color      color.RGBA
+	OwnerID    string
+	PlayerID   string
 }
 
 type playerSelectionScene struct {
@@ -112,6 +118,25 @@ type playerSelectionScene struct {
 	onlineCheckInFlight bool
 	onlineNextCheckTick int
 	onlineCheckResults  chan bool
+	onlineMode          bool
+	onlineClient        *onlineClient
+	onlineSessionID     string
+	onlineJoinCode      string
+	onlineHost          bool
+	onlineConnected     bool
+	onlineJoinOpen      bool
+	onlineJoinInput     string
+	onlineStatus        string
+	onlineControlledIDs []string
+	onlineLobbyRevision int64
+	onlineStartState    *gamecore.MatchState
+	onlineStartSlots    []protocol.LobbySlot
+	onlinePendingLobby  *protocol.LobbyUpdate
+
+	versionUpdateCheckInFlight bool
+	versionUpdateResults       chan versionUpdateResult
+	versionUpdate              *versionUpdateResult
+	versionUpdateDismissed     bool
 
 	baseImage         *ebiten.Image
 	canvas            *ebiten.Image
@@ -126,14 +151,15 @@ func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 	baseImage := mustImageFromPNG(r.PlayerSelectionBase)
 	game.playSound(tankBlasterSounds.Events[soundEventPlayerSelectionStart])
 	s := &playerSelectionScene{
-		g:                  game,
-		rounds:             game.rounds,
-		focusedName:        -1,
-		openPaletteFor:     -1,
-		baseImage:          baseImage,
-		canvas:             ebiten.NewImage(baseImage.Bounds().Dx(), baseImage.Bounds().Dy()),
-		onlineCheckResults: make(chan bool, 1),
-		humanPortrait:      mustImageFromPNG(r.PlayerHuman),
+		g:                    game,
+		rounds:               game.rounds,
+		focusedName:          -1,
+		openPaletteFor:       -1,
+		baseImage:            baseImage,
+		canvas:               ebiten.NewImage(baseImage.Bounds().Dx(), baseImage.Bounds().Dy()),
+		onlineCheckResults:   make(chan bool, 1),
+		versionUpdateResults: make(chan versionUpdateResult, 1),
+		humanPortrait:        mustImageFromPNG(r.PlayerHuman),
 		computerPortraits: map[computerplayers.ID]*ebiten.Image{
 			computerplayers.DoedelID:   mustImageFromPNG(r.PlayerComputerDoedel),
 			computerplayers.FrederikID: mustImageFromPNG(r.PlayerComputerFrederik),
@@ -146,8 +172,26 @@ func NewPlayerSelectionScene(game *GameLoop) (core.Scene, error) {
 		s.rounds = 10
 	}
 	s.queueOnlineAvailabilityCheck()
+	s.queueVersionUpdateCheck()
 	for i := range s.slots {
 		s.slots[i].Color = defaultPlayerColors[i%len(defaultPlayerColors)]
+	}
+	return s, nil
+}
+
+func NewEmbeddedOnlinePlayerSelectionScene(game *GameLoop) (core.Scene, error) {
+	scene, err := NewPlayerSelectionScene(game)
+	if err != nil {
+		return nil, err
+	}
+	s, ok := scene.(*playerSelectionScene)
+	if !ok {
+		return scene, nil
+	}
+	s.enterEmbeddedOnlineMode()
+	if name := debugOnlineDisplayName(); name != "" {
+		s.slots[0].Kind = PlayerHuman
+		s.slots[0].Name = name
 	}
 	return s, nil
 }
@@ -156,6 +200,17 @@ func (s *playerSelectionScene) Update() error {
 	defer s.syncPlayerNameInputActive()
 	s.tick++
 	s.updateOnlineAvailability()
+	s.updateVersionUpdateCheck()
+	s.consumeEmbeddedOnline()
+	if s.onlineStartState != nil && s.onlineClient != nil {
+		state := *s.onlineStartState
+		controlled := append([]string(nil), s.onlineControlledIDs...)
+		slots := append([]protocol.LobbySlot(nil), s.onlineStartSlots...)
+		s.onlineStartState = nil
+		return s.g.SetNewScene(func(game *GameLoop) (core.Scene, error) {
+			return NewOnlineGameSceneWithControl(game, s.onlineClient, state, controlled, slots, false)
+		})
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyF1) {
 		s.openHelpDialog()
 		return nil
@@ -201,6 +256,15 @@ func (s *playerSelectionScene) Update() error {
 
 	x, y := primaryPointerPosition()
 	x, y = s.toSelectionCoords(x, y)
+	if s.handleVersionUpdateClick(x, y) {
+		return nil
+	}
+	if s.handleEmbeddedOnlineJoinOverlayClick(x, y) {
+		return nil
+	}
+	if handled := s.handleEmbeddedOnlinePanelClick(x, y); handled {
+		return nil
+	}
 	if s.handleOptionsClick(x, y) {
 		return nil
 	}
@@ -238,7 +302,9 @@ func (s *playerSelectionScene) Draw(screen *ebiten.Image) {
 		s.drawSlot(target, i)
 	}
 	s.drawFooter(target)
+	s.drawEmbeddedOnlinePanel(target)
 	s.drawVersion(target)
+	s.drawVersionUpdateNotice(target)
 	s.drawStartState(target)
 	if s.openPaletteFor >= 0 {
 		s.drawPalette(target, s.openPaletteFor)
@@ -254,6 +320,9 @@ func (s *playerSelectionScene) Draw(screen *ebiten.Image) {
 	}
 	if s.languageOpen {
 		s.drawLanguageDialog(target)
+	}
+	if s.onlineJoinOpen {
+		s.drawEmbeddedOnlineJoinOverlay(target)
 	}
 	if s.canvas != nil {
 		drawScaledImage(screen, s.canvas, screen.Bounds())
@@ -297,6 +366,13 @@ func (s *playerSelectionScene) handleSelectionShortcuts() (bool, error) {
 		return false, nil
 	}
 	switch {
+	case inpututil.IsKeyJustPressed(ebiten.KeyEscape) && s.onlineJoinOpen:
+		s.onlineJoinOpen = false
+		s.onlineJoinInput = ""
+		return true, nil
+	case inpututil.IsKeyJustPressed(ebiten.KeyEscape) && s.onlineHost && s.onlineJoinCode != "":
+		s.cancelEmbeddedOnlineSession()
+		return true, nil
 	case inpututil.IsKeyJustPressed(ebiten.KeyO):
 		s.optionsOpen = true
 		s.helpOpen = false
@@ -306,19 +382,24 @@ func (s *playerSelectionScene) handleSelectionShortcuts() (bool, error) {
 		s.openPaletteFor = -1
 		return true, nil
 	case inpututil.IsKeyJustPressed(ebiten.KeyEscape):
+		if s.onlineMode && !s.onlineHost {
+			return true, nil
+		}
 		return true, s.startGame()
 	case inpututil.IsKeyJustPressed(ebiten.KeyEqual) || inpututil.IsKeyJustPressed(ebiten.KeyKPAdd):
-		if s.rounds < 99 {
+		if s.canEditLobbySettings() && s.rounds < 99 {
 			s.rounds++
 			s.playRoundCountChangeSound(1)
 			s.saveUserConfig()
+			s.syncEmbeddedOnlineLobby()
 		}
 		return true, nil
 	case inpututil.IsKeyJustPressed(ebiten.KeyMinus) || inpututil.IsKeyJustPressed(ebiten.KeyKPSubtract):
-		if s.rounds > 1 {
+		if s.canEditLobbySettings() && s.rounds > 1 {
 			s.rounds--
 			s.playRoundCountChangeSound(-1)
 			s.saveUserConfig()
+			s.syncEmbeddedOnlineLobby()
 		}
 		return true, nil
 	default:
@@ -327,6 +408,10 @@ func (s *playerSelectionScene) handleSelectionShortcuts() (bool, error) {
 }
 
 func (s *playerSelectionScene) handleKeyboard() {
+	if s.onlineJoinOpen {
+		s.handleEmbeddedOnlineJoinKeyboard()
+		return
+	}
 	if s.focusedName < 0 || s.focusedName >= len(s.slots) {
 		drainPlayerNameInputCommands()
 		return
@@ -338,6 +423,7 @@ func (s *playerSelectionScene) handleKeyboard() {
 	}
 
 	if s.handleQueuedPlayerNameInput(slot) {
+		s.syncEmbeddedOnlineLobby()
 		return
 	}
 
@@ -350,11 +436,13 @@ func (s *playerSelectionScene) handleKeyboard() {
 			}
 		}
 		slot.Name = string(name)
+		s.syncEmbeddedOnlineLobby()
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
 		name := []rune(slot.Name)
 		if len(name) > 0 {
 			slot.Name = string(name[:len(name)-1])
+			s.syncEmbeddedOnlineLobby()
 		}
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
@@ -405,17 +493,19 @@ func (s *playerSelectionScene) handleRoundsClick(x, y int) bool {
 	p := image.Pt(x, y)
 	switch {
 	case p.In(minus):
-		if s.rounds > 1 {
+		if s.canEditLobbySettings() && s.rounds > 1 {
 			s.rounds--
 			s.playRoundCountChangeSound(-1)
 			s.saveUserConfig()
+			s.syncEmbeddedOnlineLobby()
 		}
 		return true
 	case p.In(plus):
-		if s.rounds < 99 {
+		if s.canEditLobbySettings() && s.rounds < 99 {
 			s.rounds++
 			s.playRoundCountChangeSound(1)
 			s.saveUserConfig()
+			s.syncEmbeddedOnlineLobby()
 		}
 		return true
 	default:
@@ -447,11 +537,16 @@ func (s *playerSelectionScene) handleOnlineClick(x, y int) (bool, error) {
 	if !image.Pt(x, y).In(onlineSelectionButtonRect()) {
 		return false, nil
 	}
+	if s.onlineMode {
+		s.leaveEmbeddedOnlineMode()
+		return true, nil
+	}
 	if !s.onlineAvailable {
 		s.showOnlineUnavailableMessage()
 		return true, nil
 	}
-	return true, s.g.SetNewScene(NewOnlineScene)
+	s.enterEmbeddedOnlineMode()
+	return true, nil
 }
 
 func (s *playerSelectionScene) handleOptionsClick(x, y int) bool {
@@ -531,9 +626,12 @@ func (s *playerSelectionScene) releaseDialogButton(x, y int) {
 	}
 	switch button {
 	case "options_ok":
-		s.g.options = s.optionsDraft
+		if s.canEditLobbySettings() {
+			s.g.options = s.optionsDraft
+			s.saveUserConfig()
+			s.syncEmbeddedOnlineLobby()
+		}
 		s.optionsOpen = false
-		s.saveUserConfig()
 	case "options_cancel":
 		s.optionsOpen = false
 	case "options_close":
@@ -558,9 +656,12 @@ func (s *playerSelectionScene) handleOptionsDialogClick(x, y int) {
 	p := image.Pt(x, y)
 	r := optionsDialogRect()
 	if p.In(image.Rect(r.Max.X-88, r.Min.Y+56, r.Max.X-16, r.Min.Y+77)) {
-		s.g.options = s.optionsDraft
+		if s.canEditLobbySettings() {
+			s.g.options = s.optionsDraft
+			s.saveUserConfig()
+			s.syncEmbeddedOnlineLobby()
+		}
 		s.optionsOpen = false
-		s.saveUserConfig()
 		return
 	}
 	if p.In(image.Rect(r.Max.X-88, r.Min.Y+86, r.Max.X-16, r.Min.Y+107)) {
@@ -570,6 +671,9 @@ func (s *playerSelectionScene) handleOptionsDialogClick(x, y int) {
 	if p.In(image.Rect(r.Max.X-88, r.Min.Y+166, r.Max.X-16, r.Min.Y+187)) {
 		s.languageDraft = currentLanguage
 		s.languageOpen = true
+		return
+	}
+	if !s.canEditLobbySettings() {
 		return
 	}
 	if p.In(image.Rect(r.Min.X+120, r.Min.Y+236, r.Min.X+143, r.Min.Y+258)) {
@@ -640,12 +744,32 @@ func (s *playerSelectionScene) handlePaletteClick(x, y int) bool {
 	for i, c := range paletteColors {
 		rect := image.Rect(x0+i*26, y0, x0+i*26+22, y0+22)
 		if image.Pt(x, y).In(rect) {
+			if !s.colorAvailableForSlot(s.openPaletteFor, c) {
+				return true
+			}
 			s.slots[s.openPaletteFor].Color = c
 			s.openPaletteFor = -1
+			s.syncEmbeddedOnlineLobby()
 			return true
 		}
 	}
 	return false
+}
+
+func (s *playerSelectionScene) colorAvailableForSlot(slotIndex int, c color.RGBA) bool {
+	for i := range s.slots {
+		if i == slotIndex || s.slots[i].Kind == PlayerNone {
+			continue
+		}
+		if sameColor(s.slots[i].Color, c) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameColor(a, b color.RGBA) bool {
+	return a.R == b.R && a.G == b.G && a.B == b.B && a.A == b.A
 }
 
 func (s *playerSelectionScene) handleSlotClick(x, y int) bool {
@@ -659,22 +783,37 @@ func (s *playerSelectionScene) handleSlotClick(x, y int) bool {
 
 		switch {
 		case p.In(titleRect):
+			if !s.canEditSlotKind(i) {
+				return true
+			}
 			s.cycleSlotKind(i)
+			s.syncEmbeddedOnlineLobby()
 			s.focusedName = -1
 			s.openPaletteFor = -1
 			return true
 		case s.slots[i].Kind != PlayerNone && p.In(nameRect):
+			if !s.canEditSlotDetails(i) {
+				return true
+			}
 			s.focusedName = i
 			s.slots[i].Name = ""
 			SetPlayerNameText("")
+			s.syncEmbeddedOnlineLobby()
 			s.openPaletteFor = -1
 			return true
 		case s.slots[i].Kind != PlayerNone && p.In(swatchRect):
+			if !s.canEditSlotDetails(i) {
+				return true
+			}
 			s.openPaletteFor = i
 			s.focusedName = -1
 			return true
 		case s.slots[i].Kind == PlayerComputer && p.In(portraitRect):
+			if !s.canEditSlotKind(i) {
+				return true
+			}
 			s.cycleComputerPlayer(i)
+			s.syncEmbeddedOnlineLobby()
 			s.focusedName = -1
 			s.openPaletteFor = -1
 			return true
@@ -683,14 +822,40 @@ func (s *playerSelectionScene) handleSlotClick(x, y int) bool {
 	return false
 }
 
+func (s *playerSelectionScene) canEditSlotKind(index int) bool {
+	if !s.onlineMode {
+		return true
+	}
+	if index < 0 || index >= len(s.slots) || s.onlineClient == nil {
+		return false
+	}
+	slot := s.slots[index]
+	return slot.Kind == PlayerNone || slot.OwnerID == s.onlineClient.id.PlayerID
+}
+
+func (s *playerSelectionScene) canEditSlotDetails(index int) bool {
+	if !s.onlineMode {
+		return true
+	}
+	return index >= 0 && index < len(s.slots) && s.slots[index].OwnerID == s.onlineClient.id.PlayerID
+}
+
 func (s *playerSelectionScene) cycleSlotKind(index int) {
 	s.message = ""
 	slot := &s.slots[index]
+	if s.onlineMode {
+		s.cycleOnlineSlotKind(index)
+		return
+	}
 	switch slot.Kind {
 	case PlayerNone:
 		name := "Spieler " + strconv.Itoa(s.nextHumanNumber())
 		slot.Kind = PlayerHuman
 		slot.Name = name
+		if s.onlineMode && s.onlineClient != nil {
+			slot.OwnerID = s.onlineClient.id.PlayerID
+			slot.PlayerID = localLobbyPlayerID(slot.OwnerID, index)
+		}
 	case PlayerHuman:
 		slot.Kind = PlayerComputer
 		slot.ComputerID = computerplayers.DoedelID
@@ -699,7 +864,46 @@ func (s *playerSelectionScene) cycleSlotKind(index int) {
 		slot.Kind = PlayerNone
 		slot.ComputerID = computerplayers.DoedelID
 		slot.Name = ""
+		slot.OwnerID = ""
+		slot.PlayerID = ""
 	}
+}
+
+func (s *playerSelectionScene) cycleOnlineSlotKind(index int) {
+	if index < 0 || index >= len(s.slots) || s.onlineClient == nil {
+		return
+	}
+	slot := &s.slots[index]
+	switch slot.Kind {
+	case PlayerNone:
+		slot.Kind = PlayerHuman
+		slot.Name = s.localOnlineDisplayName()
+		slot.OwnerID = s.onlineClient.id.PlayerID
+		slot.PlayerID = localLobbyPlayerID(slot.OwnerID, index)
+	case PlayerHuman:
+		if slot.OwnerID != s.onlineClient.id.PlayerID {
+			return
+		}
+		slot.Kind = PlayerComputer
+		slot.ComputerID = computerplayers.DoedelID
+		slot.Name = computerplayers.Name(slot.ComputerID)
+		slot.OwnerID = s.onlineClient.id.PlayerID
+		slot.PlayerID = localLobbyPlayerID(slot.OwnerID, index)
+	case PlayerComputer:
+		if slot.OwnerID != s.onlineClient.id.PlayerID {
+			return
+		}
+		slot.Kind = PlayerNone
+		slot.ComputerID = computerplayers.DoedelID
+		slot.Name = ""
+	}
+}
+
+func (s *playerSelectionScene) localOnlineDisplayName() string {
+	if s.onlineClient != nil && strings.TrimSpace(s.onlineClient.id.DisplayName) != "" {
+		return s.onlineClient.id.DisplayName
+	}
+	return s.firstHumanName()
 }
 
 func (s *playerSelectionScene) cycleComputerPlayer(index int) {
@@ -719,6 +923,18 @@ func (s *playerSelectionScene) nextHumanNumber() int {
 }
 
 func (s *playerSelectionScene) startGame() error {
+	if s.onlineMode && !s.onlineHost {
+		s.message = "Warte auf Session-Start"
+		return nil
+	}
+	if s.onlineHost && s.onlineJoinCode != "" && !s.ensureEmbeddedOnlineHostPlayer() {
+		return nil
+	}
+	if s.onlineHost && s.onlineSessionID != "" && s.onlineClient != nil {
+		s.syncEmbeddedOnlineLobby()
+		s.onlineClient.Send(protocol.TypeStartLobbyGame, protocol.StartLobbyGame{SessionID: s.onlineSessionID})
+		return nil
+	}
 	players := make([]PlayerConfig, 0, maxPlayerSlots)
 	for _, slot := range s.slots {
 		if slot.Kind == PlayerNone {
@@ -768,6 +984,44 @@ func (s *playerSelectionScene) updateOnlineAvailability() {
 	}
 }
 
+func (s *playerSelectionScene) updateVersionUpdateCheck() {
+	if s.versionUpdateResults == nil {
+		return
+	}
+	for {
+		select {
+		case result := <-s.versionUpdateResults:
+			s.versionUpdateCheckInFlight = false
+			if result.available {
+				next := result
+				s.versionUpdate = &next
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (s *playerSelectionScene) queueVersionUpdateCheck() {
+	if s.versionUpdateCheckInFlight || s.versionUpdateResults == nil {
+		return
+	}
+	current := currentSemanticVersionString()
+	if _, ok := parseSemanticVersion(current); !ok {
+		return
+	}
+	s.versionUpdateCheckInFlight = true
+	go func(results chan<- versionUpdateResult, current string) {
+		ctx, cancel := context.WithTimeout(context.Background(), versionCheckTimeout)
+		defer cancel()
+		result := checkLatestVersion(ctx, versionCheckURL, current)
+		select {
+		case results <- result:
+		default:
+		}
+	}(s.versionUpdateResults, current)
+}
+
 func (s *playerSelectionScene) queueOnlineAvailabilityCheck() {
 	if !core.Config().Online.Enabled || s.onlineCheckInFlight || s.onlineCheckResults == nil {
 		return
@@ -787,6 +1041,513 @@ func (s *playerSelectionScene) queueOnlineAvailabilityCheck() {
 func (s *playerSelectionScene) showOnlineUnavailableMessage() {
 	s.transientMessage = texts().PlayerSelectionOnlineUnavailable
 	s.transientMessageUntil = s.tick + onlineUnavailableMessageTicks
+}
+
+func (s *playerSelectionScene) canEditLobbySettings() bool {
+	return !s.onlineMode || s.onlineHost
+}
+
+func (s *playerSelectionScene) enterEmbeddedOnlineMode() {
+	s.onlineMode = true
+	s.onlineStatus = ""
+	if s.onlineClient == nil {
+		s.onlineClient = newOnlineClient(s.firstHumanName())
+	}
+}
+
+func (s *playerSelectionScene) leaveEmbeddedOnlineMode() {
+	if s.onlineClient != nil {
+		if s.onlineSessionID != "" {
+			s.onlineClient.Send(protocol.TypeLeaveSession, struct{}{})
+		}
+		s.onlineClient.Close()
+	}
+	s.onlineClient = nil
+	s.onlineMode = false
+	s.onlineHost = false
+	s.onlineConnected = false
+	s.onlineSessionID = ""
+	s.onlineJoinCode = ""
+	s.onlineJoinOpen = false
+	s.onlineJoinInput = ""
+	s.onlineStatus = ""
+}
+
+func (s *playerSelectionScene) cancelEmbeddedOnlineSession() {
+	if s.onlineClient != nil && s.onlineSessionID != "" {
+		s.onlineClient.Send(protocol.TypeLeaveSession, struct{}{})
+	}
+	s.onlineHost = false
+	s.onlineConnected = false
+	s.onlineSessionID = ""
+	s.onlineJoinCode = ""
+	s.onlineStatus = ""
+}
+
+func (s *playerSelectionScene) consumeEmbeddedOnline() {
+	if !s.onlineMode || s.onlineClient == nil {
+		return
+	}
+	for {
+		select {
+		case env := <-s.onlineClient.recv:
+			s.handleEmbeddedOnlineMessage(env)
+		case err := <-s.onlineClient.errs:
+			if err != nil {
+				s.onlineStatus = err.Error()
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (s *playerSelectionScene) handleEmbeddedOnlineMessage(env protocol.Envelope) {
+	t := texts()
+	switch env.Type {
+	case protocol.TypeHelloAck:
+		msg, err := protocol.Decode[protocol.HelloAck](env)
+		if err == nil {
+			s.onlineClient.id.PlayerID = msg.PlayerID
+			if msg.PlayerToken != "" {
+				s.onlineClient.id.PlayerToken = msg.PlayerToken
+			}
+			s.onlineClient.id.DisplayName = msg.DisplayName
+			saveOnlineIdentity(s.onlineClient.id)
+			s.onlineStatus = t.OnlineConnected
+		}
+	case protocol.TypeSessionCreated:
+		msg, err := protocol.Decode[protocol.SessionCreated](env)
+		if err == nil {
+			s.onlineSessionID = msg.Session.ID
+			s.onlineConnected = true
+			s.onlineHost = true
+			s.onlineStatus = t.OnlineSessionCreated
+			s.ensureEmbeddedOnlineHostPlayer()
+			s.syncEmbeddedOnlineLobby()
+		}
+	case protocol.TypeInviteCreated:
+		msg, err := protocol.Decode[protocol.InviteCreated](env)
+		if err == nil {
+			s.onlineJoinCode = msg.JoinCode
+		}
+	case protocol.TypeSessionJoined:
+		msg, err := protocol.Decode[protocol.SessionJoined](env)
+		if err == nil {
+			s.onlineSessionID = msg.Session.ID
+			s.onlineConnected = true
+			if !s.onlineHost {
+				s.onlineStatus = t.OnlineSessionJoined
+			}
+		}
+	case protocol.TypeLobbyUpdate:
+		msg, err := protocol.Decode[protocol.LobbyUpdate](env)
+		if err == nil {
+			if !s.acceptEmbeddedLobbyUpdate(msg) {
+				return
+			}
+			s.onlineSessionID = msg.SessionID
+			s.onlineControlledIDs = append([]string(nil), msg.ControlledPlayerIDs...)
+			s.applyEmbeddedLobbyUpdate(msg)
+		}
+	case protocol.TypeGameStart, protocol.TypeTurnStart:
+		msg, err := protocol.Decode[protocol.StateUpdate](env)
+		if err == nil {
+			s.onlineControlledIDs = append([]string(nil), msg.ControlledPlayerIDs...)
+			s.onlineStartSlots = append([]protocol.LobbySlot(nil), msg.LobbySlots...)
+			state := msg.State
+			s.onlineStartState = &state
+		}
+	case protocol.TypeSessionClosed:
+		s.cancelEmbeddedOnlineSession()
+	case protocol.TypeError:
+		msg, err := protocol.Decode[protocol.Error](env)
+		if err == nil {
+			s.onlineStatus = msg.Message
+		}
+	}
+}
+
+func (s *playerSelectionScene) acceptEmbeddedLobbyUpdate(update protocol.LobbyUpdate) bool {
+	if update.Revision > 0 && update.Revision <= s.onlineLobbyRevision {
+		return false
+	}
+	if s.onlinePendingLobby == nil {
+		return true
+	}
+	if lobbyUpdateSatisfiesPending(update, *s.onlinePendingLobby, s.onlineHost, s.onlineClientID()) {
+		s.onlinePendingLobby = nil
+		return true
+	}
+	return false
+}
+
+func (s *playerSelectionScene) applyEmbeddedLobbyUpdate(update protocol.LobbyUpdate) {
+	if update.Revision > s.onlineLobbyRevision {
+		s.onlineLobbyRevision = update.Revision
+	}
+	for i := range s.slots {
+		s.slots[i] = playerSelectionSlot{Color: defaultPlayerColors[i%len(defaultPlayerColors)]}
+	}
+	for _, slot := range update.Slots {
+		if slot.Index < 0 || slot.Index >= len(s.slots) {
+			continue
+		}
+		dst := &s.slots[slot.Index]
+		dst.Name = slot.Name
+		dst.Color = color.RGBA{R: slot.Color.R, G: slot.Color.G, B: slot.Color.B, A: slot.Color.A}
+		dst.OwnerID = slot.OwnerID
+		dst.PlayerID = slot.PlayerID
+		dst.ComputerID = computerplayers.ID(slot.ComputerID)
+		switch slot.Kind {
+		case "human":
+			dst.Kind = PlayerHuman
+		case "computer":
+			dst.Kind = PlayerComputer
+		default:
+			dst.Kind = PlayerNone
+		}
+	}
+	if update.Rounds > 0 {
+		s.rounds = normalizedOnlineRounds(update.Rounds)
+	}
+	if s.g != nil {
+		s.g.options = gameOptionsFromLobbyOptions(update.Options, s.g.options)
+		if s.optionsOpen && !s.canEditLobbySettings() {
+			s.optionsDraft = s.g.options
+		}
+	}
+}
+
+func (s *playerSelectionScene) syncEmbeddedOnlineLobby() {
+	if !s.onlineMode || s.onlineClient == nil || s.onlineSessionID == "" {
+		return
+	}
+	update := protocol.LobbyUpdate{
+		SessionID: s.onlineSessionID,
+		Revision:  s.onlineLobbyRevision,
+		Slots:     s.embeddedLobbySlots(),
+		Rounds:    s.rounds,
+		Options:   lobbyOptionsFromGameOptions(s.g.options),
+	}
+	s.onlinePendingLobby = cloneLobbyUpdate(update)
+	s.onlineClient.Send(protocol.TypeLobbyUpdate, update)
+}
+
+func (s *playerSelectionScene) onlineClientID() string {
+	if s.onlineClient == nil {
+		return ""
+	}
+	return s.onlineClient.id.PlayerID
+}
+
+func cloneLobbyUpdate(update protocol.LobbyUpdate) *protocol.LobbyUpdate {
+	clone := update
+	clone.Slots = append([]protocol.LobbySlot(nil), update.Slots...)
+	return &clone
+}
+
+func lobbyUpdateSatisfiesPending(update, pending protocol.LobbyUpdate, host bool, playerID string) bool {
+	if host {
+		return update.Rounds == pending.Rounds &&
+			update.Options == pending.Options &&
+			lobbySlotsContainAll(update.Slots, pending.Slots)
+	}
+	return lobbySlotsContainAll(update.Slots, lobbyOwnedSlots(pending.Slots, playerID))
+}
+
+func lobbyOwnedSlots(slots []protocol.LobbySlot, playerID string) []protocol.LobbySlot {
+	out := make([]protocol.LobbySlot, 0, len(slots))
+	for _, slot := range slots {
+		if slot.OwnerID == playerID {
+			out = append(out, slot)
+		}
+	}
+	return out
+}
+
+func lobbySlotsContainAll(haystack, needles []protocol.LobbySlot) bool {
+	for _, needle := range needles {
+		if needle.Kind == "none" {
+			if lobbySlotCleared(haystack, needle) {
+				continue
+			}
+			return false
+		}
+		found := false
+		for _, slot := range haystack {
+			if lobbySlotMatches(slot, needle) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func lobbySlotCleared(slots []protocol.LobbySlot, needle protocol.LobbySlot) bool {
+	for _, slot := range slots {
+		if slot.Index == needle.Index && slot.OwnerID == needle.OwnerID {
+			return false
+		}
+	}
+	return true
+}
+
+func lobbySlotMatches(a, b protocol.LobbySlot) bool {
+	return a.Index == b.Index &&
+		a.Kind == b.Kind &&
+		a.OwnerID == b.OwnerID &&
+		a.PlayerID == b.PlayerID &&
+		a.Name == b.Name &&
+		a.ComputerID == b.ComputerID &&
+		a.Color == b.Color
+}
+
+func lobbyOptionsFromGameOptions(options gameOptions) protocol.LobbyOptions {
+	return protocol.LobbyOptions{
+		ProjectileReentry: clampProjectileReentry(options.projectileReentry),
+		PalmCount:         clampPalmCount(options.palmCount),
+		CloudAggression:   clampCloudAggression(options.cloudAggression),
+		QuickRoundStart:   options.quickRoundStart,
+	}
+}
+
+func gameOptionsFromLobbyOptions(options protocol.LobbyOptions, fallback gameOptions) gameOptions {
+	fallback.projectileReentry = clampProjectileReentry(options.ProjectileReentry)
+	fallback.palmCount = clampPalmCount(options.PalmCount)
+	fallback.cloudAggression = clampCloudAggression(options.CloudAggression)
+	fallback.quickRoundStart = options.QuickRoundStart
+	return fallback
+}
+
+func (s *playerSelectionScene) embeddedLobbySlots() []protocol.LobbySlot {
+	slots := make([]protocol.LobbySlot, 0, len(s.slots))
+	for i, slot := range s.slots {
+		if slot.Kind == PlayerNone {
+			if s.onlineClient == nil || slot.OwnerID != s.onlineClient.id.PlayerID {
+				continue
+			}
+			slots = append(slots, protocol.LobbySlot{
+				Index:   i,
+				Kind:    "none",
+				OwnerID: slot.OwnerID,
+			})
+			continue
+		}
+		kind := "human"
+		ownerID := slot.OwnerID
+		playerID := slot.PlayerID
+		if slot.Kind == PlayerComputer {
+			kind = "computer"
+		}
+		if ownerID == "" && s.onlineClient != nil {
+			ownerID = s.onlineClient.id.PlayerID
+			playerID = localLobbyPlayerID(ownerID, i)
+		}
+		slots = append(slots, protocol.LobbySlot{
+			Index:      i,
+			Kind:       kind,
+			OwnerID:    ownerID,
+			PlayerID:   playerID,
+			Name:       slot.Name,
+			ComputerID: int(slot.ComputerID),
+			Color: protocol.RGBA{
+				R: slot.Color.R,
+				G: slot.Color.G,
+				B: slot.Color.B,
+				A: slot.Color.A,
+			},
+		})
+	}
+	return slots
+}
+
+func localLobbyPlayerID(ownerID string, index int) string {
+	return ownerID + ":slot:" + strconv.Itoa(index)
+}
+
+func (s *playerSelectionScene) handleEmbeddedOnlinePanelClick(x, y int) bool {
+	if !s.onlineMode || s.onlineJoinOpen {
+		return false
+	}
+	p := image.Pt(x, y)
+	switch {
+	case p.In(embeddedOnlineStartRect()) && s.onlineJoinCode == "" && !s.onlineConnected:
+		s.startEmbeddedOnlineSession()
+		return true
+	case p.In(embeddedOnlineJoinRect()) && s.onlineJoinCode == "" && !s.onlineConnected:
+		s.onlineJoinOpen = true
+		s.onlineJoinInput = ""
+		s.focusedName = -1
+		s.openPaletteFor = -1
+		return true
+	case p.In(embeddedOnlineCodeRect()) && s.onlineJoinCode != "":
+		if err := copyTextToClipboard(s.onlineJoinCode); err != nil {
+			s.onlineStatus = texts().OnlineClipboardUnavailable
+		} else {
+			s.onlineStatus = texts().OnlineCopiedCode
+		}
+		return true
+	case p.In(embeddedOnlineCancelRect()) && s.onlineJoinCode != "":
+		s.cancelEmbeddedOnlineSession()
+		return true
+	}
+	return false
+}
+
+func (s *playerSelectionScene) startEmbeddedOnlineSession() {
+	if s.onlineClient == nil {
+		s.onlineClient = newOnlineClient(s.firstHumanName())
+	}
+	if !s.ensureEmbeddedOnlineHostPlayer() {
+		return
+	}
+	s.onlineHost = true
+	s.onlineStatus = texts().OnlineConnecting
+	s.onlineClient.Send(protocol.TypeCreatePrivateSession, protocol.CreateSession{DisplayName: s.firstHumanName(), Rounds: s.rounds})
+}
+
+func (s *playerSelectionScene) ensureEmbeddedOnlineHostPlayer() bool {
+	for i := range s.slots {
+		if s.slots[i].Kind == PlayerHuman {
+			if s.slots[i].OwnerID == "" && s.onlineClient != nil {
+				s.slots[i].OwnerID = s.onlineClient.id.PlayerID
+				s.slots[i].PlayerID = localLobbyPlayerID(s.slots[i].OwnerID, i)
+			}
+			return true
+		}
+	}
+	for i := range s.slots {
+		if s.slots[i].Kind == PlayerNone {
+			s.slots[i].Kind = PlayerHuman
+			s.slots[i].Name = s.firstHumanName()
+			if s.onlineClient != nil {
+				s.slots[i].OwnerID = s.onlineClient.id.PlayerID
+				s.slots[i].PlayerID = localLobbyPlayerID(s.slots[i].OwnerID, i)
+			}
+			return true
+		}
+	}
+	s.message = "Keine freien Slots für weitere Spieler"
+	return false
+}
+
+func (s *playerSelectionScene) assignJoinedOnlineSlot() {
+	name := texts().GameDefaultPlayerName
+	if s.onlineClient != nil && s.onlineClient.id.DisplayName != "" {
+		name = s.onlineClient.id.DisplayName
+	}
+	for i := range s.slots {
+		if s.slots[i].Kind == PlayerNone {
+			s.slots[i].Kind = PlayerHuman
+			s.slots[i].Name = name
+			return
+		}
+	}
+}
+
+func (s *playerSelectionScene) firstHumanName() string {
+	for i := range s.slots {
+		if s.slots[i].Kind == PlayerHuman && strings.TrimSpace(s.slots[i].Name) != "" {
+			return s.slots[i].Name
+		}
+	}
+	if name := debugOnlineDisplayName(); name != "" {
+		return name
+	}
+	id := loadOnlineIdentity()
+	if id.DisplayName != "" {
+		return id.DisplayName
+	}
+	return texts().GameDefaultPlayerName
+}
+
+func debugOnlineDisplayName() string {
+	return truncateRunes(strings.TrimSpace(os.Getenv("TANKBLASTER_ONLINE_DISPLAY_NAME")), 16)
+}
+
+func (s *playerSelectionScene) handleEmbeddedOnlineJoinKeyboard() {
+	s.inputRunes = ebiten.AppendInputChars(s.inputRunes[:0])
+	for _, r := range s.inputRunes {
+		if len([]rune(s.onlineJoinInput)) < 10 && isJoinCodeRune(r) {
+			s.onlineJoinInput += strings.ToUpper(string(r))
+		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
+		runes := []rune(s.onlineJoinInput)
+		if len(runes) > 0 {
+			s.onlineJoinInput = string(runes[:len(runes)-1])
+		}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter) {
+		s.submitEmbeddedOnlineJoin()
+	}
+}
+
+func (s *playerSelectionScene) handleEmbeddedOnlineJoinOverlayClick(x, y int) bool {
+	if !s.onlineJoinOpen {
+		return false
+	}
+	p := image.Pt(x, y)
+	if p.In(embeddedJoinPasteRect()) {
+		value, err := readClipboardText()
+		if err != nil {
+			s.onlineStatus = texts().OnlineClipboardUnavailable
+			return true
+		}
+		value = strings.TrimSpace(value)
+		if validEmbeddedJoinCode(value) {
+			s.onlineJoinInput = strings.ToUpper(value)
+			s.submitEmbeddedOnlineJoin()
+		}
+		return true
+	}
+	if p.In(embeddedJoinSubmitRect()) {
+		s.submitEmbeddedOnlineJoin()
+		return true
+	}
+	if !p.In(embeddedJoinDialogRect()) {
+		s.onlineJoinOpen = false
+		s.onlineJoinInput = ""
+		return true
+	}
+	return true
+}
+
+func (s *playerSelectionScene) submitEmbeddedOnlineJoin() {
+	code := strings.ToUpper(strings.TrimSpace(s.onlineJoinInput))
+	if !validEmbeddedJoinCode(code) {
+		s.onlineStatus = "Ungültiger Join-Code"
+		return
+	}
+	if s.onlineClient == nil {
+		s.onlineClient = newOnlineClient(s.firstHumanName())
+	}
+	s.onlineHost = false
+	s.onlineStatus = texts().OnlineConnecting
+	s.onlineClient.Send(protocol.TypeJoinSession, protocol.JoinSession{JoinCode: code})
+	s.onlineJoinOpen = false
+}
+
+func validEmbeddedJoinCode(value string) bool {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) < 8 || len(runes) > 10 {
+		return false
+	}
+	for _, r := range runes {
+		if !isJoinCodeRune(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func isJoinCodeRune(r rune) bool {
+	return unicode.IsDigit(r) || (unicode.IsLetter(r) && r <= unicode.MaxASCII)
 }
 
 func onlineSelectionButtonRect() image.Rectangle {
@@ -946,28 +1707,181 @@ func nameInputRectForSlot(index int, kind PlayerKind) image.Rectangle {
 	)
 }
 
+func (s *playerSelectionScene) drawEmbeddedOnlinePanel(screen *ebiten.Image) {
+	if !s.onlineMode {
+		return
+	}
+	r := embeddedOnlinePanelRect()
+	drawFilledRect(screen, r, color.RGBA{A: 170})
+	drawTextFace(screen, "Session", uiTextFace, r.Min.X+16, r.Min.Y+24, colornames.White)
+	if s.onlineJoinCode == "" && !s.onlineConnected {
+		drawButton(screen, embeddedOnlineStartRect(), "Start")
+		drawButton(screen, embeddedOnlineJoinRect(), "Join")
+	} else if s.onlineHost {
+		drawTextFace(screen, "Join-Code", dialogTextFace, r.Min.X+16, r.Min.Y+55, colornames.Lightblue)
+		codeRect := embeddedOnlineCodeRect()
+		drawFrame(screen, codeRect, color.RGBA{R: 255, G: 255, B: 255, A: 230}, colornames.White)
+		drawCenteredTextFace(screen, s.onlineJoinCode, codeRect, uiTextFace, colornames.Black)
+		drawTextFace(screen, "⧉", uiTextFace, codeRect.Max.X+8, codeRect.Min.Y+22, colornames.White)
+		drawButton(screen, embeddedOnlineCancelRect(), "Abbruch")
+	} else if s.onlineConnected {
+		drawTextFace(screen, "Verbunden!", uiTextFace, r.Min.X+16, r.Min.Y+58, colornames.Lightgreen)
+		drawTextFace(screen, "Warte auf weitere Spieler...", dialogTextFace, r.Min.X+16, r.Min.Y+82, colornames.White)
+	}
+	if s.onlineStatus != "" {
+		pos := embeddedOnlineStatusTextPosition(s.onlineHost && s.onlineJoinCode != "")
+		drawTextFace(screen, s.onlineStatus, dialogTextFace, pos.X, pos.Y, colornames.Silver)
+	}
+}
+
+func (s *playerSelectionScene) drawEmbeddedOnlineJoinOverlay(screen *ebiten.Image) {
+	drawFilledRect(screen, screen.Bounds(), color.RGBA{A: 150})
+	r := embeddedJoinDialogRect()
+	drawFrame(screen, r, color.RGBA{R: 18, G: 20, B: 24, A: 235}, colornames.White)
+	drawCenteredTextFace(screen, "Join-Code", image.Rect(r.Min.X, r.Min.Y+20, r.Max.X, r.Min.Y+48), uiTextFace, colornames.White)
+	input := embeddedJoinInputRect()
+	drawFrame(screen, input, colornames.White, colornames.Black)
+	drawTextFace(screen, s.onlineJoinInput, uiTextFace, input.Min.X+10, input.Min.Y+24, colornames.Black)
+	if s.tick%60 < 30 {
+		cursorX := input.Min.X + 12 + text.BoundString(uiTextFace, s.onlineJoinInput).Dx()
+		drawFilledRect(screen, image.Rect(cursorX, input.Min.Y+6, cursorX+2, input.Max.Y-6), colornames.Black)
+	}
+	drawButton(screen, embeddedJoinPasteRect(), "⧉")
+	drawButton(screen, embeddedJoinSubmitRect(), "Join")
+}
+
+func embeddedOnlinePanelRect() image.Rectangle {
+	return image.Rect(650, 24, 936, 150)
+}
+
+func embeddedOnlineStartRect() image.Rectangle {
+	return image.Rect(666, 66, 782, 98)
+}
+
+func embeddedOnlineJoinRect() image.Rectangle {
+	return image.Rect(802, 66, 918, 98)
+}
+
+func embeddedOnlineCodeRect() image.Rectangle {
+	return image.Rect(748, 58, 884, 90)
+}
+
+func embeddedOnlineCancelRect() image.Rectangle {
+	return image.Rect(666, 105, 782, 136)
+}
+
+func embeddedOnlineStatusTextPosition(hostWithCode bool) image.Point {
+	if hostWithCode {
+		cancel := embeddedOnlineCancelRect()
+		return image.Pt(cancel.Max.X+20, cancel.Min.Y+21)
+	}
+	r := embeddedOnlinePanelRect()
+	return image.Pt(r.Min.X+16, r.Max.Y-15)
+}
+
+func embeddedJoinDialogRect() image.Rectangle {
+	return image.Rect(300, 245, 660, 390)
+}
+
+func embeddedJoinInputRect() image.Rectangle {
+	return image.Rect(340, 306, 548, 340)
+}
+
+func embeddedJoinPasteRect() image.Rectangle {
+	return image.Rect(562, 306, 604, 340)
+}
+
+func embeddedJoinSubmitRect() image.Rectangle {
+	return image.Rect(435, 354, 525, 382)
+}
+
 func (s *playerSelectionScene) drawFooter(screen *ebiten.Image) {
 	t := texts()
 	drawFilledRect(screen, image.Rect(372, 676, 586, 695), colornames.Yellow)
 	drawCenteredText(screen, t.PlayerSelectionHelpHint, image.Rect(372, 676, 586, 695), colornames.Black)
 	if core.Config().Online.Enabled {
 		r := onlineSelectionButtonRect()
-		if s.onlineAvailable {
-			drawButton(screen, r, t.PlayerSelectionOnlineButton)
+		label := t.PlayerSelectionOnlineButton
+		if s.onlineMode {
+			label = "Single Player"
+		}
+		if s.onlineAvailable || s.onlineMode {
+			drawButton(screen, r, label)
 		} else {
-			drawDisabledButton(screen, r, t.PlayerSelectionOnlineButton)
+			drawDisabledButton(screen, r, label)
 			if s.onlineButtonHovered() && !primaryPointerIsTouch() {
 				drawTooltip(screen, t.PlayerSelectionOnlineUnavailable, image.Pt(r.Min.X, r.Min.Y-10))
 			}
 		}
 	}
 	drawButton(screen, image.Rect(624, 673, 756, 706), t.PlayerSelectionOptionsButton)
-	drawButton(screen, image.Rect(780, 673, 922, 706), t.PlayerSelectionStartButton)
+	if s.onlineMode && !s.onlineHost {
+		drawDisabledButton(screen, image.Rect(780, 673, 922, 706), t.PlayerSelectionStartButton)
+	} else {
+		drawButton(screen, image.Rect(780, 673, 922, 706), t.PlayerSelectionStartButton)
+	}
 }
 
 func (s *playerSelectionScene) drawVersion(screen *ebiten.Image) {
 	bounds := screen.Bounds()
 	drawTextFace(screen, playerSelectionVersionLabel(), dialogTextFace, bounds.Min.X+14, bounds.Max.Y-14, color.RGBA{R: 45, G: 45, B: 45, A: 155})
+}
+
+func (s *playerSelectionScene) drawVersionUpdateNotice(screen *ebiten.Image) {
+	if s.versionUpdate == nil || !s.versionUpdate.available || s.versionUpdateDismissed {
+		return
+	}
+	t := texts()
+	r := versionUpdateNoticeRect(screen.Bounds())
+	drawFrame(screen, r, color.RGBA{R: 255, G: 250, B: 210, A: 242}, colornames.Black)
+	drawTextFace(screen, fmt.Sprintf(t.PlayerSelectionUpdateAvailable, s.versionUpdate.latest), dialogTextFace, r.Min.X+10, r.Min.Y+18, colornames.Black)
+	link := versionUpdateLinkRect(screen.Bounds())
+	drawFrame(screen, link, color.RGBA{R: 220, G: 236, B: 255, A: 255}, colornames.Black)
+	drawCenteredTextFace(screen, t.PlayerSelectionUpdateOpen, link, dialogTextFace, color.RGBA{R: 0, G: 38, B: 180, A: 255})
+	close := versionUpdateCloseRect(screen.Bounds())
+	drawFrame(screen, close, color.RGBA{R: 235, G: 235, B: 220, A: 255}, colornames.Black)
+	drawCenteredTextFace(screen, "x", close, dialogTextFace, colornames.Black)
+}
+
+func (s *playerSelectionScene) handleVersionUpdateClick(x, y int) bool {
+	if s.versionUpdate == nil || !s.versionUpdate.available || s.versionUpdateDismissed {
+		return false
+	}
+	bounds := s.selectionBounds()
+	p := image.Pt(x, y)
+	if p.In(versionUpdateCloseRect(bounds)) {
+		s.versionUpdateDismissed = true
+		return true
+	}
+	if !p.In(versionUpdateLinkRect(bounds)) {
+		return false
+	}
+	if err := openDefaultBrowser(versionDownloadURL); err != nil {
+		s.transientMessage = texts().PlayerSelectionUpdateOpenFailed
+		s.transientMessageUntil = s.tick + onlineUnavailableMessageTicks
+	}
+	return true
+}
+
+func (s *playerSelectionScene) selectionBounds() image.Rectangle {
+	if s != nil && s.baseImage != nil {
+		return s.baseImage.Bounds()
+	}
+	return image.Rect(0, 0, int(core.Config().Screen.Width), int(core.Config().Screen.Height))
+}
+
+func versionUpdateNoticeRect(bounds image.Rectangle) image.Rectangle {
+	return image.Rect(bounds.Min.X+14, bounds.Max.Y-94, bounds.Min.X+374, bounds.Max.Y-58)
+}
+
+func versionUpdateLinkRect(bounds image.Rectangle) image.Rectangle {
+	notice := versionUpdateNoticeRect(bounds)
+	return image.Rect(notice.Max.X-150, notice.Min.Y+8, notice.Max.X-28, notice.Max.Y-8)
+}
+
+func versionUpdateCloseRect(bounds image.Rectangle) image.Rectangle {
+	notice := versionUpdateNoticeRect(bounds)
+	return image.Rect(notice.Max.X-24, notice.Min.Y+4, notice.Max.X-6, notice.Min.Y+22)
 }
 
 func playerSelectionVersionLabel() string {

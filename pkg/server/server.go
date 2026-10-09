@@ -162,10 +162,21 @@ func (s *Server) handleEnvelope(ctx context.Context, c *Client, env protocol.Env
 		if created {
 			token = player.Token
 		}
-		return c.sendMessage(protocol.TypeHelloAck, protocol.HelloAck{
+		sessions := s.hub.AttachClient(player.PlayerID, c)
+		if err := c.sendMessage(protocol.TypeHelloAck, protocol.HelloAck{
 			PlayerID: player.PlayerID, PlayerToken: token, DisplayName: player.DisplayName,
 			Rating: player.Rating, Score: player.Score,
-		})
+		}); err != nil {
+			return err
+		}
+		for _, sess := range sessions {
+			if sess.Status == SessionWaiting || sess.Status == SessionReady {
+				if err := s.sendLobbyUpdateToClient(sess, c); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	case protocol.TypeQuickMatch:
 		if err := c.requireAuth(); err != nil {
 			return err
@@ -232,14 +243,21 @@ func (s *Server) handleEnvelope(ctx context.Context, c *Client, env protocol.Env
 		if err != nil {
 			return err
 		}
-		return s.broadcast(sess, protocol.TypeSessionJoined, protocol.SessionJoined{Session: sessionSummary(sess)})
+		if err := s.broadcast(sess, protocol.TypeSessionJoined, protocol.SessionJoined{Session: sessionSummary(sess)}); err != nil {
+			return err
+		}
+		return s.broadcastLobbyUpdate(sess)
 	case protocol.TypeLeaveSession:
 		if err := c.requireAuth(); err != nil {
 			return err
 		}
 		sessions := s.hub.Leave(c.player.PlayerID)
 		for _, sess := range sessions {
-			_ = s.broadcast(sess, protocol.TypeSessionClosed, protocol.SessionJoined{Session: sessionSummary(sess)})
+			if sess.Status == SessionFinished {
+				_ = s.broadcast(sess, protocol.TypeSessionClosed, protocol.SessionJoined{Session: sessionSummary(sess)})
+				continue
+			}
+			_ = s.broadcastLobbyUpdate(sess)
 		}
 		return nil
 	case protocol.TypeReady:
@@ -269,6 +287,13 @@ func (s *Server) handleEnvelope(ctx context.Context, c *Client, env protocol.Env
 		sess, err := s.hub.Reconnect(req.MatchID, c.sessionPlayer())
 		if err != nil {
 			return err
+		}
+		if req.AfterSequence > 0 {
+			if sent, err := s.sendSessionEventsAfter(sess, c, req.AfterSequence); err != nil {
+				return err
+			} else if sent {
+				return nil
+			}
 		}
 		return c.sendMessage(protocol.TypeStateUpdate, protocol.StateUpdate{State: sess.Match})
 	case protocol.TypeFire:
@@ -312,8 +337,36 @@ func (s *Server) handleEnvelope(ctx context.Context, c *Client, env protocol.Env
 		if !sessionHasPlayer(sess, c.player.PlayerID) {
 			return errProtocol("not_in_match", "player is not in that match")
 		}
-		req.PlayerID = c.player.PlayerID
+		if !sessionCanControlPlayerID(sess, c.player.PlayerID, req.PlayerID) {
+			return errProtocol("not_in_match", "player does not control that slot")
+		}
 		return s.broadcast(sess, protocol.TypeOnlineGameCommand, req)
+	case protocol.TypeLobbyUpdate:
+		if err := c.requireAuth(); err != nil {
+			return err
+		}
+		req, err := protocol.Decode[protocol.LobbyUpdate](env)
+		if err != nil || req.SessionID == "" {
+			return errProtocol("bad_message", "invalid lobby update")
+		}
+		sess, err := s.hub.UpdateLobby(req.SessionID, c.player.PlayerID, req.Slots, req.Rounds, req.Options)
+		if err != nil {
+			return err
+		}
+		return s.broadcastLobbyUpdate(sess)
+	case protocol.TypeStartLobbyGame:
+		if err := c.requireAuth(); err != nil {
+			return err
+		}
+		req, err := protocol.Decode[protocol.StartLobbyGame](env)
+		if err != nil || req.SessionID == "" {
+			return errProtocol("bad_message", "invalid lobby start")
+		}
+		sess, err := s.hub.StartLobbyGame(req.SessionID, c.player.PlayerID)
+		if err != nil {
+			return err
+		}
+		return s.broadcastLobbyGameStart(sess)
 	case protocol.TypeMatchComplete:
 		if err := c.requireAuth(); err != nil {
 			return err
@@ -356,12 +409,68 @@ func (s *Server) broadcastSessionStart(sess *Session) error {
 	return s.broadcast(sess, protocol.TypeTurnStart, protocol.StateUpdate{State: sess.Match})
 }
 
+func (s *Server) broadcastLobbyUpdate(sess *Session) error {
+	if sess == nil {
+		return nil
+	}
+	for _, p := range sess.Players {
+		if p.Client == nil {
+			continue
+		}
+		if err := s.sendLobbyUpdateToClient(sess, p.Client); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) sendLobbyUpdateToClient(sess *Session, c *Client) error {
+	if sess == nil || c == nil {
+		return nil
+	}
+	return c.sendMessage(protocol.TypeLobbyUpdate, protocol.LobbyUpdate{
+		SessionID:           sess.ID,
+		Revision:            sess.LobbyRevision,
+		Slots:               append([]protocol.LobbySlot(nil), sess.LobbySlots...),
+		Rounds:              sess.Rounds,
+		Options:             sess.LobbyOptions,
+		ControlledPlayerIDs: controlledLobbyPlayerIDs(sess, c.player.PlayerID),
+	})
+}
+
+func (s *Server) broadcastLobbyGameStart(sess *Session) error {
+	if sess == nil {
+		return nil
+	}
+	if err := s.broadcast(sess, protocol.TypeMatchFound, protocol.MatchFound{SessionID: sess.ID, MatchID: sess.Match.MatchID}); err != nil {
+		return err
+	}
+	for _, p := range sess.Players {
+		if p.Client == nil {
+			continue
+		}
+		payload := protocol.StateUpdate{
+			State:               sess.Match,
+			ControlledPlayerIDs: controlledLobbyPlayerIDs(sess, p.PlayerID),
+			LobbySlots:          append([]protocol.LobbySlot(nil), sess.LobbySlots...),
+		}
+		if err := p.Client.sendMessage(protocol.TypeGameStart, payload); err != nil {
+			return err
+		}
+		if err := p.Client.sendMessage(protocol.TypeTurnStart, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) broadcast(sess *Session, typ protocol.MessageType, payload any) error {
 	env, err := protocol.Wrap(typ, payload)
 	if err != nil {
 		return err
 	}
-	for _, p := range sess.Players {
+	env, players := s.recordSessionEvent(sess, env)
+	for _, p := range players {
 		if p.Client == nil {
 			continue
 		}
@@ -372,6 +481,61 @@ func (s *Server) broadcast(sess *Session, typ protocol.MessageType, payload any)
 		}
 	}
 	return nil
+}
+
+func (s *Server) recordSessionEvent(sess *Session, env protocol.Envelope) (protocol.Envelope, []SessionPlayer) {
+	if s == nil || s.hub == nil || sess == nil {
+		return env, nil
+	}
+	s.hub.mu.Lock()
+	defer s.hub.mu.Unlock()
+	current := s.hub.sessions[sess.ID]
+	if current == nil {
+		current = sess
+	}
+	current.EventSeq++
+	env.Sequence = current.EventSeq
+	env.MatchID = current.Match.MatchID
+	current.Events = append(current.Events, env)
+	if len(current.Events) > sessionEventHistoryLimit {
+		copy(current.Events, current.Events[len(current.Events)-sessionEventHistoryLimit:])
+		current.Events = current.Events[:sessionEventHistoryLimit]
+	}
+	players := append([]SessionPlayer(nil), current.Players...)
+	return env, players
+}
+
+func (s *Server) sendSessionEventsAfter(sess *Session, c *Client, after int64) (bool, error) {
+	if s == nil || s.hub == nil || sess == nil || c == nil || after <= 0 {
+		return false, nil
+	}
+	s.hub.mu.Lock()
+	current := s.hub.sessions[sess.ID]
+	if current == nil {
+		current = sess
+	}
+	if len(current.Events) == 0 {
+		s.hub.mu.Unlock()
+		return false, nil
+	}
+	first := current.Events[0].Sequence
+	if after < first-1 {
+		s.hub.mu.Unlock()
+		return false, nil
+	}
+	events := make([]protocol.Envelope, 0, len(current.Events))
+	for _, env := range current.Events {
+		if env.Sequence > after {
+			events = append(events, env)
+		}
+	}
+	s.hub.mu.Unlock()
+	for _, env := range events {
+		if err := c.sendEnvelope(env); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func (c *Client) writeLoop(ctx context.Context) {
@@ -397,6 +561,10 @@ func (c *Client) sendMessage(typ protocol.MessageType, payload any) error {
 	if err != nil {
 		return err
 	}
+	return c.sendEnvelope(env)
+}
+
+func (c *Client) sendEnvelope(env protocol.Envelope) error {
 	if c.sendTimeout <= 0 {
 		c.sendTimeout = 250 * time.Millisecond
 	}
@@ -469,6 +637,21 @@ func findSessionForMatchState(h *Hub, matchID string) *Session {
 func sessionHasPlayer(sess *Session, playerID string) bool {
 	for _, player := range sess.Players {
 		if player.PlayerID == playerID {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionCanControlPlayerID(sess *Session, ownerID, playerID string) bool {
+	if playerID == "" {
+		return false
+	}
+	if playerID == ownerID {
+		return true
+	}
+	for _, slot := range sess.LobbySlots {
+		if slot.PlayerID == playerID && slot.OwnerID == ownerID {
 			return true
 		}
 	}

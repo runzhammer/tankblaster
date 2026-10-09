@@ -21,6 +21,7 @@ import (
 
 	"github.com/runzhammer/tankblaster/pkg/core"
 	"github.com/runzhammer/tankblaster/pkg/engine"
+	"github.com/runzhammer/tankblaster/pkg/gamecore"
 	"github.com/runzhammer/tankblaster/pkg/models"
 	"github.com/runzhammer/tankblaster/pkg/protocol"
 	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
@@ -144,13 +145,13 @@ const (
 	shockwaveInnerLineWidth   = 2.0
 	shockwaveCameraOrbit      = 34.0
 	shockwaveCameraAngular    = 0.82
-	airStrikeWaitFrames       = 540
-	airStrikeBombCount        = 10
-	airStrikeBombSpacing      = 80.0
-	airStrikeBombDelayFrames  = 20
-	airStrikeBombDelayWindow  = airStrikeBombDelayFrames * (airStrikeBombCount - 1)
-	airStrikeBombFallFrames   = 46
-	airStrikeBombAngle        = 25 * math.Pi / 180
+	airStrikeWaitFrames       = 360
+	airStrikeBombCount        = 8
+	airStrikeBombSpacing      = 60.0
+	airStrikeBombDelayFrames  = 12
+	airStrikeBombFallFrames   = 140
+	airStrikeOriginalGravity  = 5.0
+	airStrikeOriginalTimeStep = 12.0
 	airStrikeImpactScale      = 1.5
 	splitterBombFragmentCount = 9
 	splitterBombSpreadWidth   = 300.0
@@ -345,6 +346,7 @@ type projectile struct {
 	searchingCloud     *battleCloud
 	mosquitoPreview    bool
 	splitterArmed      bool
+	randomSeed         int64
 }
 
 type projectileReentryAnimation struct {
@@ -448,6 +450,7 @@ type smallCrumblerImpact struct {
 	start      engine.Vec
 	crumbs     []smallCrumb
 	cfg        crumblerConfig
+	rng        *rand.Rand
 	age        int
 	openingAge int
 	opening    bool
@@ -519,13 +522,14 @@ type airStrikeImpact struct {
 	beepsPlayed     int
 	lastBeaconCycle int
 	jetStarted      bool
+	source          *battleTank
 	bombs           []airStrikeBomb
 }
 
 type airStrikeBomb struct {
 	start    engine.Vec
-	target   engine.Vec
 	pos      engine.Vec
+	velocity engine.Vec
 	delay    int
 	impacted bool
 }
@@ -568,14 +572,15 @@ type palmLeafFall struct {
 }
 
 type zeroPowerAnimation struct {
-	tank      *battleTank
-	animation spriteAnimation
-	kind      zeroPowerEffectKind
-	weapon    weaponspkg.Weapon
-	delay     int
-	age       int
-	duration  int
-	triggered bool
+	tank       *battleTank
+	animation  spriteAnimation
+	kind       zeroPowerEffectKind
+	weapon     weaponspkg.Weapon
+	delay      int
+	age        int
+	duration   int
+	triggered  bool
+	randomSeed int64
 }
 
 type zeroPowerEffectKind uint8
@@ -980,11 +985,24 @@ func (s *GameScene) startRound() {
 	s.shopSelectedIndex = 0
 	s.roundScores = make([]int, len(s.players))
 	s.assignEffectiveComputerIDs()
-	s.wind = s.rng.Intn(101)
-	if s.rng.Intn(2) == 0 {
-		s.windDirection = -1
+	onlineState := gamecore.MatchState{}
+	if s.g.online != nil {
+		onlineState = s.g.online.state
+	}
+	if onlineState.MatchID != "" {
+		s.wind = int(math.Abs(float64(onlineState.Wind)))
+		if onlineState.Wind < 0 {
+			s.windDirection = -1
+		} else {
+			s.windDirection = 1
+		}
 	} else {
-		s.windDirection = 1
+		s.wind = s.rng.Intn(101)
+		if s.rng.Intn(2) == 0 {
+			s.windDirection = -1
+		} else {
+			s.windDirection = 1
+		}
 	}
 	s.projectileReentry = s.projectileReentryEnabledForRound()
 	s.cameraY = 0
@@ -1002,7 +1020,11 @@ func (s *GameScene) startRound() {
 	if b.Position != nil {
 		b.Position.Y = -skyExtra
 	}
-	gr := models.NewRandomGroundWithSize(s.worldWidth, battlefieldHeight, s.rng.Int63())
+	terrainSeed := s.rng.Int63()
+	if onlineState.TerrainSeed != 0 {
+		terrainSeed = onlineState.TerrainSeed
+	}
+	gr := models.NewRandomGroundWithSize(s.worldWidth, battlefieldHeight, terrainSeed)
 	s.ground = gr
 	s.tanks = nil
 	s.turnOrder = nil
@@ -1019,7 +1041,11 @@ func (s *GameScene) startRound() {
 	s.airStrikeImpacts = nil
 	s.stopBattleEffectLoops()
 
-	spawnLaneOrder := shuffledIndexes(s.rng, len(s.players))
+	tankRNG := s.rng
+	if onlineState.TankSeed != 0 {
+		tankRNG = rand.New(rand.NewSource(onlineState.TankSeed))
+	}
+	spawnLaneOrder := shuffledIndexes(tankRNG, len(s.players))
 	for tankIndex, player := range s.players {
 		tank := models.NewTank(player.Name, player.Color)
 		if s.playerHasXMV12(tankIndex) {
@@ -1040,8 +1066,8 @@ func (s *GameScene) startRound() {
 			if tankIndex < len(spawnLaneOrder) {
 				spawnLane = spawnLaneOrder[tankIndex]
 			}
-			tankBody.Pos = randomTankDropPosition(s.rng, spawnLane, len(s.players), tankBody.Size, s.worldWidth, battlefieldHeight)
-			tankBody.Velocity = engine.Vec{Y: 2 + s.rng.Float64()*4}
+			tankBody.Pos = randomTankDropPosition(tankRNG, spawnLane, len(s.players), tankBody.Size, s.worldWidth, battlefieldHeight)
+			tankBody.Velocity = engine.Vec{Y: 2 + tankRNG.Float64()*4}
 			battleTank.body = tankBody
 		}
 
@@ -1061,7 +1087,14 @@ func (s *GameScene) startRound() {
 	}
 	s.setTurnOrderLeftToRight()
 	s.createClouds(battlefieldHeight)
-	s.createPalms()
+	if onlineState.PalmSeed != 0 {
+		palmRNG := s.rng
+		s.rng = rand.New(rand.NewSource(onlineState.PalmSeed))
+		s.createPalms()
+		s.rng = palmRNG
+	} else {
+		s.createPalms()
+	}
 	if s.g.options.quickRoundStart {
 		s.placeTanksOnGroundForQuickStart()
 	}
@@ -3367,6 +3400,7 @@ func (s *GameScene) fireActiveWeapon() {
 			launchRot:          angle,
 			trail:              []engine.Vec{*muzzle},
 			splitterArmed:      weapon.SplitterBomb && velocity.Y < -0.05,
+			randomSeed:         s.rng.Int63(),
 		})
 	}
 	s.setProjectiles(projectiles)
@@ -3632,6 +3666,10 @@ func (s *GameScene) splitProjectile(p *projectile, gravity, windAcceleration flo
 	if p == nil || splitterBombFragmentCount <= 0 {
 		return nil
 	}
+	rng := s.rng
+	if p.randomSeed != 0 {
+		rng = rand.New(rand.NewSource(p.randomSeed))
+	}
 	fragmentWeapon := weaponspkg.SplitterBombFragment()
 	fragments := make([]*projectile, 0, splitterBombFragmentCount)
 	fallFrames := s.estimateSplitterFragmentFallFrames(p.pos, 0.45, gravity)
@@ -3641,11 +3679,11 @@ func (s *GameScene) splitProjectile(p *projectile, gravity, windAcceleration flo
 		if splitterBombFragmentCount > 1 {
 			offset = (float64(i) - center) / center * (splitterBombSpreadWidth / 2)
 		}
-		offset += (s.rng.Float64()*2 - 1) * 8
+		offset += (rng.Float64()*2 - 1) * 8
 		frames := math.Max(1, float64(fallFrames))
 		windDrift := windAcceleration * frames * (frames + 1) / 2
 		vx := (offset - windDrift) / frames
-		vy := 0.35 + s.rng.Float64()*0.25
+		vy := 0.35 + rng.Float64()*0.25
 		fragments = append(fragments, &projectile{
 			pos:                p.pos,
 			prev:               p.pos,
@@ -3656,6 +3694,7 @@ func (s *GameScene) splitProjectile(p *projectile, gravity, windAcceleration flo
 			shooter:            p.shooter,
 			launchRot:          math.Atan2(vy, vx),
 			trail:              []engine.Vec{p.pos},
+			randomSeed:         rng.Int63(),
 		})
 	}
 	return fragments
@@ -4272,7 +4311,7 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	}
 	if weapon.AirStrike {
 		s.reportComputerShot(p.pos, -1, false)
-		s.startAirStrikeImpact(p.pos)
+		s.startAirStrikeImpact(p.pos, p.randomSeed)
 		return true
 	}
 
@@ -4555,9 +4594,13 @@ func (s *GameScene) zeroPowerTankImpactCenter(tank *battleTank) engine.Vec {
 	return engine.V(body.Center().X, body.Max.Y)
 }
 
-func (s *GameScene) fireZeroPowerScatterProjectiles(tank *battleTank) {
+func (s *GameScene) fireZeroPowerScatterProjectiles(tank *battleTank, seed int64) {
 	if tank == nil || tank.body == nil {
 		return
+	}
+	rng := s.rng
+	if seed != 0 {
+		rng = rand.New(rand.NewSource(seed))
 	}
 	center := s.zeroPowerTankScatterOrigin(tank)
 	strength := maxInt(30, tank.shotStrength)
@@ -4581,7 +4624,7 @@ func (s *GameScene) fireZeroPowerScatterProjectiles(tank *battleTank) {
 	for _, angle := range angles {
 		velocity := engine.V(speed, 0).Rotated(angle)
 		weapon := weaponspkg.Grenade()
-		weapon.Color = colors[s.rng.Intn(len(colors))]
+		weapon.Color = colors[rng.Intn(len(colors))]
 		projectiles = append(projectiles, &projectile{
 			pos:                center,
 			prev:               center,
@@ -4594,6 +4637,7 @@ func (s *GameScene) fireZeroPowerScatterProjectiles(tank *battleTank) {
 			shooter:            tank,
 			launchRot:          angle,
 			trail:              []engine.Vec{center},
+			randomSeed:         rng.Int63(),
 		})
 	}
 	s.setProjectiles(append(s.projectiles, projectiles...))
@@ -4610,8 +4654,12 @@ func (s *GameScene) onZeroPowerScatterGroundImpact(p *projectile) {
 	if p == nil {
 		return
 	}
+	rng := s.rng
+	if p.randomSeed != 0 {
+		rng = rand.New(rand.NewSource(p.randomSeed))
+	}
 	s.playZeroPowerSound(zeroPowerSoundScatterImpact)
-	radius := 30 + s.rng.Intn(71)
+	radius := 30 + rng.Intn(71)
 	profile := weaponspkg.RadialDamageProfile{
 		InnerRadius: (2 * radius) / 3,
 		OuterRadius: radius,
@@ -4761,21 +4809,22 @@ func (s *GameScene) startMoleImpact(pos engine.Vec) {
 
 func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig) {
 	s.playEventSoundLoop(crumblerBroeslerLoopKey, soundEventCrumblerImpact)
+	impactRNG := rand.New(rand.NewSource(s.rng.Int63()))
 	crumbs := make([]smallCrumb, cfg.count)
 	for i := range crumbs {
 		fan := 0.0
 		if len(crumbs) > 1 {
 			fan = float64(i)/float64(len(crumbs)-1)*2 - 1
 		}
-		startX := pos.X + (s.rng.Float64()-0.5)*cfg.startWidth
+		startX := pos.X + (impactRNG.Float64()-0.5)*cfg.startWidth
 		startX = math.Max(0, math.Min(s.worldWidth-1, startX))
-		startOffset := cfg.hiddenStart*0.32 + s.rng.Float64()*cfg.hiddenStart*0.18
+		startOffset := cfg.hiddenStart*0.32 + impactRNG.Float64()*cfg.hiddenStart*0.18
 		crumbs[i] = smallCrumb{
 			pos:    engine.V(startX, pos.Y-startOffset),
 			fan:    fan,
-			speed:  cfg.minSpeed + s.rng.Float64()*(cfg.maxSpeed-cfg.minSpeed),
-			drift:  fan*0.34 + (s.rng.Float64()-0.5)*0.7,
-			wobble: s.rng.Float64() * math.Pi * 2,
+			speed:  cfg.minSpeed + impactRNG.Float64()*(cfg.maxSpeed-cfg.minSpeed),
+			drift:  fan*0.34 + (impactRNG.Float64()-0.5)*0.7,
+			wobble: impactRNG.Float64() * math.Pi * 2,
 		}
 	}
 
@@ -4783,6 +4832,7 @@ func (s *GameScene) startSmallCrumblerImpact(pos engine.Vec, cfg crumblerConfig)
 		start:   pos,
 		crumbs:  crumbs,
 		cfg:     cfg,
+		rng:     impactRNG,
 		opening: true,
 	}
 	if area := s.ground.ClearRects(s.crumblerOpeningAreas(impact)); !area.Empty() {
@@ -4810,37 +4860,62 @@ func (s *GameScene) startWaterSurfaceImpact(pos engine.Vec) {
 	s.delayTurnAdvance(effect.duration + secondsToFrames(0.5))
 }
 
-func (s *GameScene) startAirStrikeImpact(pos engine.Vec) {
+func (s *GameScene) startAirStrikeImpact(pos engine.Vec, seed int64) {
 	s.playEventSoundLoop(airStrikeBeaconLoopKey, soundEventAirStrikeBeacon)
+	rng := s.rng
+	if seed != 0 {
+		rng = rand.New(rand.NewSource(seed))
+	}
+	sign := 1.0
+	if rng.Intn(2) != 0 {
+		sign = -1
+	}
+	signedWind := s.airStrikeOriginalWind()
+	centerX := pos.X
+	centerX -= signedWind * math.Sqrt(math.Max(0, s.ground.SurfaceY(pos.X))/airStrikeOriginalGravity)
 	bombs := make([]airStrikeBomb, airStrikeBombCount)
-	startY := -s.skyExtraHeight() - 80
-	lastDelay := airStrikeWaitFrames
-	for i := range bombs {
-		offset := (float64(i) - float64(airStrikeBombCount-1)/2) * airStrikeBombSpacing
-		offset += (s.rng.Float64()*2 - 1) * 6
-		targetX := math.Max(0, math.Min(s.worldWidth, pos.X+offset))
-		targetY := s.ground.SurfaceY(targetX)
-		fallDistance := targetY - startY
-		startX := targetX - math.Tan(airStrikeBombAngle)*fallDistance
-		delay := airStrikeWaitFrames
-		if airStrikeBombDelayWindow > 0 {
-			delay += s.rng.Intn(airStrikeBombDelayWindow + 1)
-		}
-		lastDelay = max(lastDelay, delay)
+	offsets := originalAirStrikeOffsets(sign)
+	for i, offset := range offsets {
+		start := engine.V(centerX+offset, 0)
 		bombs[i] = airStrikeBomb{
-			start:  engine.V(startX, startY),
-			target: engine.V(targetX, targetY),
-			pos:    engine.V(startX, startY),
-			delay:  delay,
+			start: start,
+			pos:   start,
+			delay: airStrikeWaitFrames + i*airStrikeBombDelayFrames,
 		}
 	}
-	duration := lastDelay + airStrikeBombFallFrames + s.impactAnimationFramesForWeapon(weaponspkg.AtomBomb()) + s.impactPauseFrames()
+	duration := airStrikeWaitFrames + (airStrikeBombCount-1)*airStrikeBombDelayFrames + airStrikeBombFallFrames + s.impactAnimationFramesForWeapon(weaponspkg.AtomBomb()) + s.impactPauseFrames()
 	s.airStrikeImpacts = append(s.airStrikeImpacts, &airStrikeImpact{
 		pos:      pos,
 		duration: duration,
+		source:   s.lastDamageSource,
 		bombs:    bombs,
 	})
 	s.delayTurnAdvance(duration)
+}
+
+func originalAirStrikeOffsets(sign float64) []float64 {
+	return []float64{
+		sign * 180,
+		sign * 120,
+		sign * 60,
+		0,
+		sign * 60,
+		-sign * 120,
+		-sign * 180,
+		-sign * 240,
+	}
+}
+
+func (s *GameScene) airStrikeOriginalWind() float64 {
+	return float64(s.windDirection*s.wind) * 0.4
+}
+
+func (s *GameScene) airStrikeBombWindAcceleration() float64 {
+	return (2 * s.airStrikeOriginalWind() / 10) / (airStrikeOriginalTimeStep * airStrikeOriginalTimeStep)
+}
+
+func airStrikeBombGravity() float64 {
+	return (2 * airStrikeOriginalGravity) / (airStrikeOriginalTimeStep * airStrikeOriginalTimeStep)
 }
 
 func (s *GameScene) updateAirStrikeImpacts() {
@@ -4863,51 +4938,51 @@ func (s *GameScene) updateAirStrikeImpacts() {
 
 func (s *GameScene) updateAirStrikeImpact(impact *airStrikeImpact) {
 	s.updateAirStrikeBeaconSound(impact)
+	windAcceleration := s.airStrikeBombWindAcceleration()
+	gravity := airStrikeBombGravity()
 	for i := range impact.bombs {
 		bomb := &impact.bombs[i]
 		if bomb.impacted || impact.age < bomb.delay {
 			continue
 		}
-		progress := math.Min(1, float64(impact.age-bomb.delay)/math.Max(1, float64(airStrikeBombFallFrames)))
-		bomb.pos = engine.V(
-			bomb.start.X+(bomb.target.X-bomb.start.X)*progress,
-			bomb.start.Y+(bomb.target.Y-bomb.start.Y)*progress,
-		)
+		if impact.age == bomb.delay {
+			bomb.pos = bomb.start
+		} else {
+			bomb.velocity.X += windAcceleration
+			bomb.velocity.Y += gravity
+			bomb.pos = *bomb.pos.Add(bomb.velocity)
+		}
 		if tank := s.airStrikeBombHitsTank(bomb.pos); tank != nil {
 			bomb.impacted = true
 			impact.bojeHidden = true
-			s.applyAirStrikeBombImpact(bomb.pos)
+			s.applyAirStrikeBombImpact(bomb.pos, impact.source)
 			continue
 		}
 		groundY := s.ground.SurfaceY(bomb.pos.X)
-		if progress >= 1 || bomb.pos.Y >= groundY {
+		if bomb.pos.Y >= groundY {
 			bomb.impacted = true
 			impact.bojeHidden = true
-			s.applyAirStrikeBombImpact(engine.V(bomb.pos.X, groundY))
+			s.applyAirStrikeBombImpact(engine.V(bomb.pos.X, groundY), impact.source)
 		}
 	}
 }
 
 func (s *GameScene) updateAirStrikeBeaconSound(impact *airStrikeImpact) {
-	if impact == nil || s.blinkBojeAnimation.totalTicks <= 0 {
+	if impact == nil {
 		return
 	}
 	if impact.bojeHidden {
 		s.stopSoundLoop(airStrikeBeaconLoopKey)
 		return
 	}
-	cycle := impact.age / s.blinkBojeAnimation.totalTicks
-	if impact.beepsPlayed >= 5 && !impact.jetStarted {
+	if impact.age >= 10*int(airStrikeOriginalTimeStep) && !impact.jetStarted {
 		impact.jetStarted = true
-		s.stopSoundLoop(airStrikeBeaconLoopKey)
 		s.playEventSound(soundEventAirStrikeJet)
 		return
 	}
-	if cycle <= impact.lastBeaconCycle {
-		return
+	if impact.age >= airStrikeWaitFrames {
+		s.stopSoundLoop(airStrikeBeaconLoopKey)
 	}
-	impact.lastBeaconCycle = cycle
-	impact.beepsPlayed++
 }
 
 func (s *GameScene) airStrikeBombHitsTank(pos engine.Vec) *battleTank {
@@ -4924,12 +4999,14 @@ func (s *GameScene) airStrikeBombHitsTank(pos engine.Vec) *battleTank {
 	return nil
 }
 
-func (s *GameScene) applyAirStrikeBombImpact(pos engine.Vec) {
+func (s *GameScene) applyAirStrikeBombImpact(pos engine.Vec, source *battleTank) {
 	s.playEventSound(soundEventAirStrikeBomb)
 	weapon := weaponspkg.AtomBomb()
 	radius := impactRadiusForWeapon(weapon) * airStrikeImpactScale
 	duration := s.impactAnimationFramesForWeapon(weapon)
 	s.zeroPowerStartDelay = (duration * 2) / 3
+	previous := s.lastDamageSource
+	s.lastDamageSource = source
 	s.damageTanksInImpactRadius(pos, weapon)
 	s.zeroPowerStartDelay = 0
 	if falls := s.applyCraterAndRefillWater(pos.X, pos.Y, radius); len(falls) > 0 {
@@ -4938,6 +5015,7 @@ func (s *GameScene) applyAirStrikeBombImpact(pos engine.Vec) {
 			duration: sandFallFrames,
 		})
 	}
+	s.lastDamageSource = previous
 	s.dropUnsupportedTanks()
 	s.impacts = append(s.impacts, impactAnimation{
 		pos:            pos,
@@ -5305,7 +5383,11 @@ func (s *GameScene) updateSmallCrumblerImpacts() {
 			spread := math.Max(2, startHalfWidth+(impact.cfg.funnelSpread-startHalfWidth)*math.Min(1, depth/impact.cfg.maxDepth))
 			crumb.pos.Y += crumb.speed
 			targetX := impact.start.X + crumb.fan*spread
-			randomStep := (s.rng.Float64()*2 - 1) * impact.cfg.jitter
+			rng := impact.rng
+			if rng == nil {
+				rng = s.rng
+			}
+			randomStep := (rng.Float64()*2 - 1) * impact.cfg.jitter
 			wobble := math.Sin(float64(impact.age)*1.35+crumb.wobble) * impact.cfg.wobble
 			steer := 0.0
 			if crumb.pos.Y >= impact.start.Y {
@@ -5380,22 +5462,26 @@ func (s *GameScene) crumblerOpeningAreas(impact *smallCrumblerImpact) []image.Re
 	if impact == nil {
 		return nil
 	}
+	rng := impact.rng
+	if rng == nil {
+		rng = s.rng
+	}
 	progress := easeOut(float64(impact.openingAge+1) / float64(crumblerOpeningFrames))
 	width := impact.cfg.startWidth * (0.45 + progress*0.75)
 	depth := math.Max(float64(impact.cfg.height)*4, impact.cfg.maxDepth*crumblerOpeningDepthScale*progress)
 	count := maxInt(8, impact.cfg.count/3)
 	areas := make([]image.Rectangle, 0, count)
 	for i := 0; i < count; i++ {
-		xBias := (s.rng.Float64()*2 - 1)
+		xBias := (rng.Float64()*2 - 1)
 		x := impact.start.X + math.Copysign(math.Pow(math.Abs(xBias), 0.72), xBias)*width/2
-		x += (s.rng.Float64()*2 - 1) * impact.cfg.jitter
-		y := impact.start.Y + math.Pow(s.rng.Float64(), 1.65)*depth
-		if s.rng.Float64() < 0.42 {
+		x += (rng.Float64()*2 - 1) * impact.cfg.jitter
+		y := impact.start.Y + math.Pow(rng.Float64(), 1.65)*depth
+		if rng.Float64() < 0.42 {
 			lipLift := crumblerOpeningLipLift * (0.45 + progress*0.75)
-			y = impact.start.Y - s.rng.Float64()*lipLift + s.rng.Float64()*float64(impact.cfg.height+2)
+			y = impact.start.Y - rng.Float64()*lipLift + rng.Float64()*float64(impact.cfg.height+2)
 		}
 		size := crumblerOpeningChipSize
-		if s.rng.Float64() < 0.35 {
+		if rng.Float64() < 0.35 {
 			size++
 		}
 		areas = append(areas, centeredCrumblerChip(x, y, size))
@@ -6090,7 +6176,7 @@ func (s *GameScene) triggerZeroPowerWorldEffect(effect *zeroPowerAnimation) {
 	case zeroPowerEffectGrenadeImpact, zeroPowerEffectLargeGrenadeImpact, zeroPowerEffectAtomImpact:
 		s.startZeroPowerImpactAtTank(effect.tank, effect.weapon)
 	case zeroPowerEffectScatterProjectiles:
-		s.fireZeroPowerScatterProjectiles(effect.tank)
+		s.fireZeroPowerScatterProjectiles(effect.tank, effect.randomSeed)
 	}
 }
 
@@ -6313,6 +6399,12 @@ func (s *GameScene) updateAirStrikeCamera() bool {
 func (s *GameScene) airStrikeFocus(impact *airStrikeImpact) engine.Vec {
 	if impact == nil {
 		return engine.Vec{}
+	}
+	for i := range impact.bombs {
+		bomb := &impact.bombs[i]
+		if !bomb.impacted && impact.age >= bomb.delay {
+			return bomb.pos
+		}
 	}
 	return impact.pos
 }
@@ -6563,12 +6655,14 @@ func (s *GameScene) startZeroPowerAnimation(tank *battleTank) {
 	if len(choices) == 0 {
 		return
 	}
-	choice := choices[s.rng.Intn(len(choices))]
+	rng, randomSeed := s.zeroPowerAnimationRNG(tank)
+	choice := choices[rng.Intn(len(choices))]
 	s.playZeroPowerSound(zeroPowerSound(choice.name))
 	delay := maxInt(0, s.zeroPowerStartDelay)
 	effect := zeroPowerAnimation{
-		tank:  tank,
-		delay: delay,
+		tank:       tank,
+		delay:      delay,
+		randomSeed: randomSeed,
 	}
 	if choice.kind == zeroPowerEffectSprite {
 		animation := s.zeroPowerAnimations[choice.spriteIdx]
@@ -7350,7 +7444,6 @@ func (s *GameScene) drawAirStrikeBomb(screen *ebiten.Image, camera *ebiten.GeoM,
 	h := float64(bounds.Dy())
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Translate(-w/2, -h/2)
-	op.GeoM.Rotate(airStrikeBombAngle)
 	op.GeoM.Translate(projected.X, projected.Y)
 	screen.DrawImage(s.bulletBombImage, op)
 }
@@ -8718,7 +8811,7 @@ func (s *GameScene) chooseStartingPlayerAfterLanding() {
 	if len(living) == 0 {
 		return
 	}
-	if s.g.online != nil {
+	if s.g.online != nil && s.roundNumber <= 1 {
 		if index := s.g.online.state.CurrentPlayerIndex; index >= 0 && index < len(s.tanks) && s.tankCanAct(s.tanks[index]) {
 			s.activePlayerIndex = index
 			s.resetComputerTurnPlans()
@@ -8744,6 +8837,9 @@ func (s *GameScene) onlineCanControlPlayer(playerIndex int) bool {
 	}
 	if playerIndex < 0 || playerIndex >= len(s.g.online.state.Players) {
 		return false
+	}
+	if len(s.g.online.controlledPlayerIDs) > 0 {
+		return s.g.online.controlledPlayerIDs[s.g.online.state.Players[playerIndex].ID]
 	}
 	return s.g.online.state.Players[playerIndex].ID == s.g.online.playerID
 }

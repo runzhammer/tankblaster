@@ -20,8 +20,23 @@ func TestDefaultConfigSecurityLimits(t *testing.T) {
 	if cfg.Server.MaxSessions <= 0 {
 		t.Fatal("default max sessions is not set")
 	}
-	if cfg.Server.ReadHeaderTimeout <= 0 || cfg.Server.ReadTimeout <= 0 || cfg.Server.WriteTimeout <= 0 || cfg.Server.IdleTimeout <= 0 {
+	if cfg.Server.ReadHeaderTimeout <= 0 || cfg.Server.IdleTimeout <= 0 {
 		t.Fatal("default HTTP timeouts are not set")
+	}
+	if cfg.Server.ReadTimeout != 0 || cfg.Server.WriteTimeout != 0 {
+		t.Fatal("long-lived websocket timeouts must stay disabled")
+	}
+}
+
+func TestBundledServerConfigsAllowAllLobbySlots(t *testing.T) {
+	for _, path := range []string{"../../config/server.example.yaml", "../../docker/server.yaml"} {
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatalf("LoadConfig(%q) error = %v", path, err)
+		}
+		if got, want := cfg.Sessions.MaxPlayers, 10; got < want {
+			t.Fatalf("%s max players = %d, want at least %d lobby slots", path, got, want)
+		}
 	}
 }
 

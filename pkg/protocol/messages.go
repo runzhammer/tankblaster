@@ -23,6 +23,8 @@ const (
 	TypeReady                MessageType = "ready"
 	TypeFire                 MessageType = "fire"
 	TypeOnlineGameCommand    MessageType = "online_game_command"
+	TypeLobbyUpdate          MessageType = "lobby_update"
+	TypeStartLobbyGame       MessageType = "start_lobby_game"
 	TypeMatchComplete        MessageType = "match_complete"
 	TypeReconnect            MessageType = "reconnect"
 	TypeGetLeaderboard       MessageType = "get_leaderboard"
@@ -51,8 +53,10 @@ const (
 )
 
 type Envelope struct {
-	Type MessageType     `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
+	Type     MessageType     `json:"type"`
+	Sequence int64           `json:"sequence,omitempty"`
+	MatchID  string          `json:"match_id,omitempty"`
+	Data     json.RawMessage `json:"data,omitempty"`
 }
 
 func Wrap[T any](typ MessageType, payload T) (Envelope, error) {
@@ -125,6 +129,8 @@ type OnlineGameCommand struct {
 	ShopHoverClass  int                `json:"shop_hover_class,omitempty"`
 	ShopListIndex   int                `json:"shop_list_index,omitempty"`
 	Clouds          []OnlineCloudState `json:"clouds,omitempty"`
+	Palms           []OnlinePalmState  `json:"palms,omitempty"`
+	Economy         *OnlineEconomy     `json:"economy,omitempty"`
 }
 
 type OnlineCloudState struct {
@@ -135,8 +141,82 @@ type OnlineCloudState struct {
 	Aggression float64 `json:"aggression"`
 }
 
+type OnlinePalmState struct {
+	State                int     `json:"state"`
+	Age                  int     `json:"age"`
+	EyeAge               int     `json:"eye_age"`
+	EyesOn               bool    `json:"eyes_on"`
+	ScreamAge            int     `json:"scream_age"`
+	Screaming            bool    `json:"screaming"`
+	GrinAge              int     `json:"grin_age"`
+	Grinning             bool    `json:"grinning"`
+	GrinHideAt           int     `json:"grin_hide_at"`
+	Aggression           float64 `json:"aggression"`
+	InitialAggression    float64 `json:"initial_aggression"`
+	AggressionMultiplier float64 `json:"aggression_multiplier"`
+}
+
+type OnlineEconomy struct {
+	Scores       []int                  `json:"scores,omitempty"`
+	RoundScores  []int                  `json:"round_scores,omitempty"`
+	Credits      []int                  `json:"credits,omitempty"`
+	Inventories  []OnlineInventoryState `json:"inventories,omitempty"`
+	ShopOrder    []int                  `json:"shop_order,omitempty"`
+	ShopCursor   int                    `json:"shop_cursor,omitempty"`
+	ShopMode     int                    `json:"shop_mode,omitempty"`
+	ShopHover    int                    `json:"shop_hover,omitempty"`
+	ShopSelected int                    `json:"shop_selected,omitempty"`
+}
+
+type OnlineInventoryState struct {
+	ClassA            []int   `json:"class_a,omitempty"`
+	ClassB            []int   `json:"class_b,omitempty"`
+	MFSBoosterCharges int     `json:"mfs_booster_charges,omitempty"`
+	EnergyShield      int     `json:"energy_shield,omitempty"`
+	HasXMV12          bool    `json:"has_xm_v12,omitempty"`
+	Diesel            float64 `json:"diesel,omitempty"`
+}
+
+type LobbySlot struct {
+	Index      int    `json:"index"`
+	Kind       string `json:"kind"`
+	OwnerID    string `json:"owner_id,omitempty"`
+	PlayerID   string `json:"player_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	ComputerID int    `json:"computer_id,omitempty"`
+	Color      RGBA   `json:"color"`
+}
+
+type RGBA struct {
+	R uint8 `json:"r"`
+	G uint8 `json:"g"`
+	B uint8 `json:"b"`
+	A uint8 `json:"a"`
+}
+
+type LobbyUpdate struct {
+	SessionID           string       `json:"session_id"`
+	Revision            int64        `json:"revision,omitempty"`
+	Slots               []LobbySlot  `json:"slots"`
+	Rounds              int          `json:"rounds,omitempty"`
+	Options             LobbyOptions `json:"options,omitempty"`
+	ControlledPlayerIDs []string     `json:"controlled_player_ids,omitempty"`
+}
+
+type LobbyOptions struct {
+	ProjectileReentry int  `json:"projectile_reentry,omitempty"`
+	PalmCount         int  `json:"palm_count,omitempty"`
+	CloudAggression   int  `json:"cloud_aggression,omitempty"`
+	QuickRoundStart   bool `json:"quick_round_start,omitempty"`
+}
+
+type StartLobbyGame struct {
+	SessionID string `json:"session_id"`
+}
+
 type Reconnect struct {
-	MatchID string `json:"match_id"`
+	MatchID       string `json:"match_id"`
+	AfterSequence int64  `json:"after_sequence,omitempty"`
 }
 
 type SessionSummary struct {
@@ -176,7 +256,9 @@ type MatchFound struct {
 }
 
 type StateUpdate struct {
-	State gamecore.MatchState `json:"state"`
+	State               gamecore.MatchState `json:"state"`
+	ControlledPlayerIDs []string            `json:"controlled_player_ids,omitempty"`
+	LobbySlots          []LobbySlot         `json:"lobby_slots,omitempty"`
 }
 
 type ShotResult struct {

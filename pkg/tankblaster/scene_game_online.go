@@ -3,6 +3,7 @@ package tankblaster
 import (
 	"hash/fnv"
 	"math"
+	"math/rand"
 	"strconv"
 
 	"github.com/runzhammer/tankblaster/pkg/core"
@@ -28,7 +29,12 @@ func (s *GameScene) consumeOnlineGameCommands() {
 }
 
 func (s *GameScene) handleOnlineGameEnvelope(env protocol.Envelope) {
+	if !s.acceptOnlineGameEnvelope(env) {
+		return
+	}
 	switch env.Type {
+	case protocol.TypeHelloAck:
+		s.requestOnlineCatchUp()
 	case protocol.TypeOnlineGameCommand:
 		cmd, err := protocol.Decode[protocol.OnlineGameCommand](env)
 		if err == nil {
@@ -42,14 +48,58 @@ func (s *GameScene) handleOnlineGameEnvelope(env protocol.Envelope) {
 	}
 }
 
+func (s *GameScene) acceptOnlineGameEnvelope(env protocol.Envelope) bool {
+	if s.g.online == nil {
+		return false
+	}
+	if env.MatchID != "" && env.MatchID != s.g.online.state.MatchID {
+		return false
+	}
+	if env.Sequence <= 0 {
+		return true
+	}
+	if s.g.online.lastServerSequence == 0 {
+		s.g.online.lastServerSequence = env.Sequence
+		s.g.online.awaitingCatchUp = false
+		return true
+	}
+	if env.Sequence <= s.g.online.lastServerSequence {
+		return false
+	}
+	if env.Sequence != s.g.online.lastServerSequence+1 {
+		s.requestOnlineCatchUp()
+		return false
+	}
+	s.g.online.lastServerSequence = env.Sequence
+	s.g.online.awaitingCatchUp = false
+	return true
+}
+
+func (s *GameScene) requestOnlineCatchUp() {
+	if s.g.online == nil || s.g.online.client == nil || s.g.online.awaitingCatchUp || s.g.online.state.MatchID == "" {
+		return
+	}
+	s.g.online.awaitingCatchUp = true
+	s.g.online.client.Send(protocol.TypeReconnect, protocol.Reconnect{
+		MatchID:       s.g.online.state.MatchID,
+		AfterSequence: s.g.online.lastServerSequence,
+	})
+}
+
 func (s *GameScene) sendOnlineGameCommand(cmd protocol.OnlineGameCommand) {
 	if s.g.online == nil || s.g.online.client == nil {
 		return
 	}
 	s.g.online.commandSequence++
 	cmd.MatchID = s.g.online.state.MatchID
-	cmd.PlayerID = s.g.online.playerID
+	if cmd.PlayerID == "" && cmd.PlayerIndex >= 0 && cmd.PlayerIndex < len(s.g.online.state.Players) {
+		cmd.PlayerID = s.g.online.state.Players[cmd.PlayerIndex].ID
+	}
+	if cmd.PlayerID == "" {
+		cmd.PlayerID = s.g.online.playerID
+	}
 	cmd.CommandSequence = s.g.online.commandSequence
+	s.attachOnlineSharedState(&cmd)
 	s.g.online.client.Send(protocol.TypeOnlineGameCommand, cmd)
 }
 
@@ -57,6 +107,7 @@ func (s *GameScene) applyOnlineGameCommand(cmd protocol.OnlineGameCommand) {
 	if s.g.online == nil || cmd.MatchID != s.g.online.state.MatchID {
 		return
 	}
+	s.applyOnlineSharedState(cmd)
 	switch cmd.Kind {
 	case "aim":
 		s.applyOnlineAimCommand(cmd)
@@ -85,7 +136,7 @@ func (s *GameScene) applyOnlineShopHoverCommand(cmd protocol.OnlineGameCommand) 
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
-	if cmd.PlayerID == s.g.online.playerID {
+	if s.onlineCommandIsLocalControlled(cmd) {
 		return
 	}
 	s.shopHoverClass = maxInt(0, minInt(2, cmd.ShopHoverClass))
@@ -95,7 +146,7 @@ func (s *GameScene) applyOnlineShopModeCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
-	if cmd.PlayerID == s.g.online.playerID {
+	if s.onlineCommandIsLocalControlled(cmd) {
 		return
 	}
 	s.withRemoteOnlineCommand(func() {
@@ -111,7 +162,7 @@ func (s *GameScene) applyOnlineShopSelectCommand(cmd protocol.OnlineGameCommand)
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
-	if cmd.PlayerID == s.g.online.playerID {
+	if s.onlineCommandIsLocalControlled(cmd) {
 		return
 	}
 	s.withRemoteOnlineCommand(func() {
@@ -123,7 +174,10 @@ func (s *GameScene) applyOnlineShopBuyCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
-	if cmd.PlayerID == s.g.online.playerID {
+	if s.onlineCommandIsLocalControlled(cmd) {
+		return
+	}
+	if cmd.Economy != nil {
 		return
 	}
 	s.withRemoteOnlineCommand(func() {
@@ -135,7 +189,7 @@ func (s *GameScene) applyOnlineShopBackCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
-	if cmd.PlayerID == s.g.online.playerID {
+	if s.onlineCommandIsLocalControlled(cmd) {
 		return
 	}
 	s.withRemoteOnlineCommand(func() {
@@ -148,7 +202,7 @@ func (s *GameScene) applyOnlineShopContinueCommand(cmd protocol.OnlineGameComman
 	if !s.onlineShopCommandAllowed(cmd) {
 		return
 	}
-	if cmd.PlayerID == s.g.online.playerID {
+	if s.onlineCommandIsLocalControlled(cmd) {
 		return
 	}
 	s.withRemoteOnlineCommand(func() {
@@ -160,7 +214,7 @@ func (s *GameScene) onlineShopCommandAllowed(cmd protocol.OnlineGameCommand) boo
 	if s.g.online == nil || cmd.MatchID != s.g.online.state.MatchID || s.phase != phaseShop {
 		return false
 	}
-	if cmd.PlayerID == s.g.online.playerID {
+	if s.onlineCommandIsLocalControlled(cmd) {
 		s.shopAwaitingOnline = false
 	}
 	return s.onlinePlayerIndexForCommand(cmd) == s.currentShopPlayerIndex()
@@ -176,6 +230,9 @@ func (s *GameScene) withRemoteOnlineCommand(apply func()) {
 
 func (s *GameScene) applyOnlineFireCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineCommandIsCurrentTurn(cmd) {
+		return
+	}
+	if !s.onlineCommandSequenceIsFresh(cmd) {
 		return
 	}
 	s.g.online.applyingRemoteCmd = true
@@ -197,14 +254,16 @@ func (s *GameScene) applyOnlineFireCommand(cmd protocol.OnlineGameCommand) {
 	tank.shotStrength = maxInt(0, minInt(cmd.ShotStrength, s.maxShotStrength()))
 	tank.cannon.Rot = cmd.CannonRotation
 	s.cameraX = s.clampOnlineCameraX(cmd.CameraX)
-	s.fireActiveWeapon()
+	s.withDeterministicOnlineRNG(cmd, func() {
+		s.fireActiveWeapon()
+	})
 }
 
 func (s *GameScene) applyOnlineAimCommand(cmd protocol.OnlineGameCommand) {
 	if !s.onlineCommandIsCurrentTurn(cmd) {
 		return
 	}
-	if cmd.PlayerID == s.g.online.playerID {
+	if s.onlineCommandIsLocalControlled(cmd) {
 		return
 	}
 	if !s.onlineCommandSequenceIsFresh(cmd) {
@@ -371,6 +430,7 @@ func (s *GameScene) syncOnlineTurn(previousPlayerIndex int) {
 	}
 	s.sendOnlineGameCommand(protocol.OnlineGameCommand{
 		Kind:         "turn",
+		PlayerID:     s.g.online.state.Players[previousPlayerIndex].ID,
 		PlayerIndex:  s.activePlayerIndex,
 		TurnSequence: s.g.online.turnSequence,
 		CameraX:      s.cameraX,
@@ -533,6 +593,152 @@ func (s *GameScene) applyOnlineCloudStates(states []protocol.OnlineCloudState) {
 	}
 }
 
+func (s *GameScene) onlinePalmStates() []protocol.OnlinePalmState {
+	if len(s.palms) == 0 {
+		return nil
+	}
+	states := make([]protocol.OnlinePalmState, 0, len(s.palms))
+	for _, palm := range s.palms {
+		if palm == nil {
+			continue
+		}
+		states = append(states, protocol.OnlinePalmState{
+			State:                int(palm.state),
+			Age:                  palm.age,
+			EyeAge:               palm.eyeAge,
+			EyesOn:               palm.eyesOn,
+			ScreamAge:            palm.screamAge,
+			Screaming:            palm.screaming,
+			GrinAge:              palm.grinAge,
+			Grinning:             palm.grinning,
+			GrinHideAt:           palm.grinHideAt,
+			Aggression:           palm.aggression,
+			InitialAggression:    palm.initialAggression,
+			AggressionMultiplier: palm.aggressionMultiplier,
+		})
+	}
+	return states
+}
+
+func (s *GameScene) applyOnlinePalmStates(states []protocol.OnlinePalmState) {
+	if len(states) == 0 || len(s.palms) == 0 {
+		return
+	}
+	count := minInt(len(states), len(s.palms))
+	for i := 0; i < count; i++ {
+		palm := s.palms[i]
+		if palm == nil {
+			continue
+		}
+		state := states[i]
+		palm.state = palmState(maxInt(int(palmStateAlive), minInt(int(palmStateCrumbling), state.State)))
+		palm.age = state.Age
+		palm.eyeAge = state.EyeAge
+		palm.eyesOn = state.EyesOn
+		palm.screamAge = state.ScreamAge
+		palm.screaming = state.Screaming
+		palm.grinAge = state.GrinAge
+		palm.grinning = state.Grinning
+		palm.grinHideAt = state.GrinHideAt
+		palm.aggression = state.Aggression
+		palm.initialAggression = state.InitialAggression
+		if state.AggressionMultiplier > 0 {
+			palm.aggressionMultiplier = state.AggressionMultiplier
+		}
+	}
+}
+
+func (s *GameScene) onlineEconomyState() *protocol.OnlineEconomy {
+	if len(s.scores) == 0 && len(s.roundScores) == 0 && len(s.credits) == 0 && len(s.inventories) == 0 {
+		return nil
+	}
+	economy := &protocol.OnlineEconomy{
+		Scores:       append([]int(nil), s.scores...),
+		RoundScores:  append([]int(nil), s.roundScores...),
+		Credits:      append([]int(nil), s.credits...),
+		ShopOrder:    append([]int(nil), s.shopPlayerOrder...),
+		ShopCursor:   s.shopPlayerCursor,
+		ShopMode:     int(s.shopMode),
+		ShopHover:    s.shopHoverClass,
+		ShopSelected: s.shopSelectedIndex,
+	}
+	if len(s.inventories) > 0 {
+		economy.Inventories = make([]protocol.OnlineInventoryState, 0, len(s.inventories))
+		for _, inventory := range s.inventories {
+			economy.Inventories = append(economy.Inventories, protocol.OnlineInventoryState{
+				ClassA:            append([]int(nil), inventory.classA...),
+				ClassB:            append([]int(nil), inventory.classB...),
+				MFSBoosterCharges: inventory.mfsBoosterCharges,
+				EnergyShield:      inventory.energyShield,
+				HasXMV12:          inventory.hasXMV12,
+				Diesel:            inventory.diesel,
+			})
+		}
+	}
+	return economy
+}
+
+func (s *GameScene) applyOnlineEconomyState(economy *protocol.OnlineEconomy) {
+	if economy == nil {
+		return
+	}
+	if len(economy.Scores) > 0 {
+		s.scores = append([]int(nil), economy.Scores...)
+	}
+	if len(economy.RoundScores) > 0 {
+		s.roundScores = append([]int(nil), economy.RoundScores...)
+	}
+	if len(economy.Credits) > 0 {
+		s.credits = append([]int(nil), economy.Credits...)
+	}
+	if len(economy.Inventories) > 0 {
+		s.inventories = make([]shopInventory, len(economy.Inventories))
+		for i, inventory := range economy.Inventories {
+			s.inventories[i] = shopInventory{
+				classA:            append([]int(nil), inventory.ClassA...),
+				classB:            append([]int(nil), inventory.ClassB...),
+				mfsBoosterCharges: inventory.MFSBoosterCharges,
+				energyShield:      inventory.EnergyShield,
+				hasXMV12:          inventory.HasXMV12,
+				diesel:            inventory.Diesel,
+			}
+			s.ensureInventory(i)
+		}
+	}
+	if len(economy.ShopOrder) > 0 {
+		s.shopPlayerOrder = append([]int(nil), economy.ShopOrder...)
+		s.shopPlayerCursor = maxInt(0, minInt(economy.ShopCursor, len(s.shopPlayerOrder)-1))
+	}
+	s.shopMode = shopMode(maxInt(int(shopModeEntry), minInt(int(shopModeClassB), economy.ShopMode)))
+	s.shopHoverClass = maxInt(0, minInt(2, economy.ShopHover))
+	s.shopSelectedIndex = maxInt(0, economy.ShopSelected)
+}
+
+func (s *GameScene) attachOnlineSharedState(cmd *protocol.OnlineGameCommand) {
+	if cmd == nil {
+		return
+	}
+	if len(cmd.Clouds) == 0 {
+		cmd.Clouds = s.onlineCloudStates()
+	}
+	if len(cmd.Palms) == 0 {
+		cmd.Palms = s.onlinePalmStates()
+	}
+	if cmd.Economy == nil {
+		cmd.Economy = s.onlineEconomyState()
+	}
+}
+
+func (s *GameScene) applyOnlineSharedState(cmd protocol.OnlineGameCommand) {
+	s.applyOnlineCloudStates(cmd.Clouds)
+	s.applyOnlinePalmStates(cmd.Palms)
+	s.applyOnlineEconomyState(cmd.Economy)
+}
+
+func (s *GameScene) onlineCommandIsLocalControlled(cmd protocol.OnlineGameCommand) bool {
+	return s.onlineCanControlPlayer(s.onlinePlayerIndexForCommand(cmd))
+}
+
 func (s *GameScene) onlineCommandIsCurrentTurn(cmd protocol.OnlineGameCommand) bool {
 	return s.g.online == nil || cmd.TurnSequence == s.g.online.turnSequence
 }
@@ -561,6 +767,69 @@ func (s *GameScene) onlineComputerDecisionSeed(tank *battleTank) int64 {
 	if tank != nil {
 		_, _ = hasher.Write([]byte(":"))
 		_, _ = hasher.Write([]byte(tank.player.Name))
+	}
+	return int64(hasher.Sum64())
+}
+
+func (s *GameScene) withDeterministicOnlineRNG(cmd protocol.OnlineGameCommand, apply func()) {
+	if s.g.online == nil {
+		apply()
+		return
+	}
+	previous := s.rng
+	s.rng = rand.New(rand.NewSource(s.onlineCommandSeed(cmd)))
+	defer func() {
+		s.rng = previous
+	}()
+	apply()
+}
+
+func (s *GameScene) onlineCommandSeed(cmd protocol.OnlineGameCommand) int64 {
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(strconv.FormatInt(s.g.online.state.Seed, 10)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(cmd.MatchID))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(cmd.PlayerID))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(cmd.Kind))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.PlayerIndex)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.TurnSequence)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.CommandSequence)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.WeaponSlot)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(cmd.ShotStrength)))
+	return int64(hasher.Sum64())
+}
+
+func (s *GameScene) zeroPowerAnimationRNG(tank *battleTank) (*rand.Rand, int64) {
+	if s.g == nil || s.g.online == nil {
+		return s.rng, 0
+	}
+	seed := s.onlineZeroPowerSeed(tank)
+	return rand.New(rand.NewSource(seed)), seed
+}
+
+func (s *GameScene) onlineZeroPowerSeed(tank *battleTank) int64 {
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(strconv.FormatInt(s.g.online.state.Seed, 10)))
+	_, _ = hasher.Write([]byte(":zero_power:"))
+	_, _ = hasher.Write([]byte(s.g.online.state.MatchID))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(s.roundNumber)))
+	_, _ = hasher.Write([]byte(":"))
+	_, _ = hasher.Write([]byte(strconv.Itoa(s.g.online.turnSequence)))
+	_, _ = hasher.Write([]byte(":"))
+	if tank != nil {
+		_, _ = hasher.Write([]byte(strconv.Itoa(tank.playerIndex)))
+	}
+	_, _ = hasher.Write([]byte(":"))
+	if s.lastDamageSource != nil {
+		_, _ = hasher.Write([]byte(strconv.Itoa(s.lastDamageSource.playerIndex)))
 	}
 	return int64(hasher.Sum64())
 }

@@ -374,8 +374,21 @@ func TestSplitterAndAirStrikeOriginalCounts(t *testing.T) {
 	if got, want := splitterBombFragmentCount, 9; got != want {
 		t.Fatalf("splitter fragment count = %d, want %d", got, want)
 	}
-	if got, want := airStrikeBombCount, 10; got != want {
+	if got, want := airStrikeBombCount, 8; got != want {
 		t.Fatalf("airstrike bomb count = %d, want %d", got, want)
+	}
+}
+
+func TestAirStrikeUsesOriginalBombOffsets(t *testing.T) {
+	got := originalAirStrikeOffsets(1)
+	want := []float64{180, 120, 60, 0, 60, -120, -180, -240}
+	if len(got) != len(want) {
+		t.Fatalf("offset count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("offset %d = %v, want %v", i, got[i], want[i])
+		}
 	}
 }
 
