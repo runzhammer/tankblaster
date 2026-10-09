@@ -118,6 +118,95 @@ func TestApplyOnlineAimIgnoresStaleRemoteSequence(t *testing.T) {
 	}
 }
 
+func TestHandleOnlineEnvelopeRequestsCatchUpOnSequenceGap(t *testing.T) {
+	client := &onlineClient{send: make(chan protocol.Envelope, 1)}
+	s := newOnlineTurnTestScene()
+	s.g.online.client = client
+	s.g.online.lastServerSequence = 2
+
+	s.handleOnlineGameEnvelope(onlineCommandEnvelope(t, 4, onlineTurnCommand(1, 1)))
+
+	if got, want := s.activePlayerIndex, 0; got != want {
+		t.Fatalf("active player = %d, want unchanged %d", got, want)
+	}
+	if got, want := s.g.online.lastServerSequence, int64(2); got != want {
+		t.Fatalf("last server sequence = %d, want %d", got, want)
+	}
+	if !s.g.online.awaitingCatchUp {
+		t.Fatal("client is not awaiting catch-up")
+	}
+	select {
+	case env := <-client.send:
+		if env.Type != protocol.TypeReconnect {
+			t.Fatalf("sent type = %s, want %s", env.Type, protocol.TypeReconnect)
+		}
+		req, err := protocol.Decode[protocol.Reconnect](env)
+		if err != nil {
+			t.Fatalf("decode reconnect: %v", err)
+		}
+		if got, want := req.AfterSequence, int64(2); got != want {
+			t.Fatalf("after sequence = %d, want %d", got, want)
+		}
+	default:
+		t.Fatal("no catch-up request sent")
+	}
+}
+
+func TestHandleOnlineEnvelopeAppliesReplayAfterSequenceGap(t *testing.T) {
+	s := newOnlineTurnTestScene()
+	s.g.online.lastServerSequence = 2
+	s.g.online.awaitingCatchUp = true
+
+	s.handleOnlineGameEnvelope(onlineCommandEnvelope(t, 3, onlineTurnCommand(1, 1)))
+
+	if got, want := s.activePlayerIndex, 1; got != want {
+		t.Fatalf("active player = %d, want replayed turn %d", got, want)
+	}
+	if got, want := s.g.online.lastServerSequence, int64(3); got != want {
+		t.Fatalf("last server sequence = %d, want %d", got, want)
+	}
+	if s.g.online.awaitingCatchUp {
+		t.Fatal("client is still awaiting catch-up after replay")
+	}
+}
+
+func TestHandleOnlineEnvelopeRecoversFromReorderedServerEvents(t *testing.T) {
+	client := &onlineClient{send: make(chan protocol.Envelope, 1)}
+	s := newOnlineTurnTestScene()
+	s.g.online.client = client
+	s.g.online.lastServerSequence = 1
+
+	s.handleOnlineGameEnvelope(onlineCommandEnvelope(t, 3, onlineTurnCommand(0, 2)))
+	if got, want := s.g.online.lastServerSequence, int64(1); got != want {
+		t.Fatalf("last server sequence after gap = %d, want %d", got, want)
+	}
+	<-client.send
+
+	s.handleOnlineGameEnvelope(onlineCommandEnvelope(t, 2, onlineTurnCommand(1, 1)))
+	if got, want := s.activePlayerIndex, 1; got != want {
+		t.Fatalf("active player after replayed seq 2 = %d, want %d", got, want)
+	}
+
+	s.handleOnlineGameEnvelope(onlineCommandEnvelope(t, 3, onlineTurnCommand(0, 2)))
+	if got, want := s.activePlayerIndex, 0; got != want {
+		t.Fatalf("active player after replayed seq 3 = %d, want %d", got, want)
+	}
+	if got, want := s.g.online.lastServerSequence, int64(3); got != want {
+		t.Fatalf("last server sequence = %d, want %d", got, want)
+	}
+}
+
+func TestHandleOnlineEnvelopeIgnoresDuplicateServerSequence(t *testing.T) {
+	s := newOnlineTurnTestScene()
+	s.g.online.lastServerSequence = 3
+
+	s.handleOnlineGameEnvelope(onlineCommandEnvelope(t, 3, onlineTurnCommand(1, 1)))
+
+	if got, want := s.activePlayerIndex, 0; got != want {
+		t.Fatalf("active player = %d, want unchanged %d", got, want)
+	}
+}
+
 func TestSyncOnlineShopContinueSendsOriginalShopPlayer(t *testing.T) {
 	client := &onlineClient{send: make(chan protocol.Envelope, 1)}
 	s := newOnlineTurnTestScene()
@@ -156,4 +245,15 @@ func onlineTurnCommand(playerIndex, turnSequence int) protocol.OnlineGameCommand
 		Kind:         "turn",
 		TurnSequence: turnSequence,
 	}
+}
+
+func onlineCommandEnvelope(t *testing.T, sequence int64, cmd protocol.OnlineGameCommand) protocol.Envelope {
+	t.Helper()
+	env, err := protocol.Wrap(protocol.TypeOnlineGameCommand, cmd)
+	if err != nil {
+		t.Fatalf("wrap online command: %v", err)
+	}
+	env.Sequence = sequence
+	env.MatchID = cmd.MatchID
+	return env
 }

@@ -51,8 +51,10 @@ const (
 )
 
 type Envelope struct {
-	Type MessageType     `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
+	Type     MessageType     `json:"type"`
+	Sequence int64           `json:"sequence,omitempty"`
+	MatchID  string          `json:"match_id,omitempty"`
+	Data     json.RawMessage `json:"data,omitempty"`
 }
 
 func Wrap[T any](typ MessageType, payload T) (Envelope, error) {
@@ -136,7 +138,8 @@ type OnlineCloudState struct {
 }
 
 type Reconnect struct {
-	MatchID string `json:"match_id"`
+	MatchID       string `json:"match_id"`
+	AfterSequence int64  `json:"after_sequence,omitempty"`
 }
 
 type SessionSummary struct {

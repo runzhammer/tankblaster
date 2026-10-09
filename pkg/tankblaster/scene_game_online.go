@@ -28,6 +28,9 @@ func (s *GameScene) consumeOnlineGameCommands() {
 }
 
 func (s *GameScene) handleOnlineGameEnvelope(env protocol.Envelope) {
+	if !s.acceptOnlineGameEnvelope(env) {
+		return
+	}
 	switch env.Type {
 	case protocol.TypeOnlineGameCommand:
 		cmd, err := protocol.Decode[protocol.OnlineGameCommand](env)
@@ -40,6 +43,44 @@ func (s *GameScene) handleOnlineGameEnvelope(env protocol.Envelope) {
 			s.g.online.state = msg.State
 		}
 	}
+}
+
+func (s *GameScene) acceptOnlineGameEnvelope(env protocol.Envelope) bool {
+	if s.g.online == nil {
+		return false
+	}
+	if env.MatchID != "" && env.MatchID != s.g.online.state.MatchID {
+		return false
+	}
+	if env.Sequence <= 0 {
+		return true
+	}
+	if s.g.online.lastServerSequence == 0 {
+		s.g.online.lastServerSequence = env.Sequence
+		s.g.online.awaitingCatchUp = false
+		return true
+	}
+	if env.Sequence <= s.g.online.lastServerSequence {
+		return false
+	}
+	if env.Sequence != s.g.online.lastServerSequence+1 {
+		s.requestOnlineCatchUp()
+		return false
+	}
+	s.g.online.lastServerSequence = env.Sequence
+	s.g.online.awaitingCatchUp = false
+	return true
+}
+
+func (s *GameScene) requestOnlineCatchUp() {
+	if s.g.online == nil || s.g.online.client == nil || s.g.online.awaitingCatchUp || s.g.online.state.MatchID == "" {
+		return
+	}
+	s.g.online.awaitingCatchUp = true
+	s.g.online.client.Send(protocol.TypeReconnect, protocol.Reconnect{
+		MatchID:       s.g.online.state.MatchID,
+		AfterSequence: s.g.online.lastServerSequence,
+	})
 }
 
 func (s *GameScene) sendOnlineGameCommand(cmd protocol.OnlineGameCommand) {

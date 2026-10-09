@@ -270,6 +270,13 @@ func (s *Server) handleEnvelope(ctx context.Context, c *Client, env protocol.Env
 		if err != nil {
 			return err
 		}
+		if req.AfterSequence > 0 {
+			if sent, err := s.sendSessionEventsAfter(sess, c, req.AfterSequence); err != nil {
+				return err
+			} else if sent {
+				return nil
+			}
+		}
 		return c.sendMessage(protocol.TypeStateUpdate, protocol.StateUpdate{State: sess.Match})
 	case protocol.TypeFire:
 		if err := c.requireAuth(); err != nil {
@@ -361,7 +368,8 @@ func (s *Server) broadcast(sess *Session, typ protocol.MessageType, payload any)
 	if err != nil {
 		return err
 	}
-	for _, p := range sess.Players {
+	env, players := s.recordSessionEvent(sess, env)
+	for _, p := range players {
 		if p.Client == nil {
 			continue
 		}
@@ -372,6 +380,61 @@ func (s *Server) broadcast(sess *Session, typ protocol.MessageType, payload any)
 		}
 	}
 	return nil
+}
+
+func (s *Server) recordSessionEvent(sess *Session, env protocol.Envelope) (protocol.Envelope, []SessionPlayer) {
+	if s == nil || s.hub == nil || sess == nil {
+		return env, nil
+	}
+	s.hub.mu.Lock()
+	defer s.hub.mu.Unlock()
+	current := s.hub.sessions[sess.ID]
+	if current == nil {
+		current = sess
+	}
+	current.EventSeq++
+	env.Sequence = current.EventSeq
+	env.MatchID = current.Match.MatchID
+	current.Events = append(current.Events, env)
+	if len(current.Events) > sessionEventHistoryLimit {
+		copy(current.Events, current.Events[len(current.Events)-sessionEventHistoryLimit:])
+		current.Events = current.Events[:sessionEventHistoryLimit]
+	}
+	players := append([]SessionPlayer(nil), current.Players...)
+	return env, players
+}
+
+func (s *Server) sendSessionEventsAfter(sess *Session, c *Client, after int64) (bool, error) {
+	if s == nil || s.hub == nil || sess == nil || c == nil || after <= 0 {
+		return false, nil
+	}
+	s.hub.mu.Lock()
+	current := s.hub.sessions[sess.ID]
+	if current == nil {
+		current = sess
+	}
+	if len(current.Events) == 0 {
+		s.hub.mu.Unlock()
+		return false, nil
+	}
+	first := current.Events[0].Sequence
+	if after < first-1 {
+		s.hub.mu.Unlock()
+		return false, nil
+	}
+	events := make([]protocol.Envelope, 0, len(current.Events))
+	for _, env := range current.Events {
+		if env.Sequence > after {
+			events = append(events, env)
+		}
+	}
+	s.hub.mu.Unlock()
+	for _, env := range events {
+		if err := c.sendEnvelope(env); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func (c *Client) writeLoop(ctx context.Context) {
@@ -397,6 +460,10 @@ func (c *Client) sendMessage(typ protocol.MessageType, payload any) error {
 	if err != nil {
 		return err
 	}
+	return c.sendEnvelope(env)
+}
+
+func (c *Client) sendEnvelope(env protocol.Envelope) error {
 	if c.sendTimeout <= 0 {
 		c.sendTimeout = 250 * time.Millisecond
 	}

@@ -74,6 +74,8 @@ type onlineGameRuntime struct {
 	turnSequence             int
 	commandSequence          int
 	receivedCommandSequences map[string]int
+	lastServerSequence       int64
+	awaitingCatchUp          bool
 	lastAim                  onlineAimState
 	matchResultSent          bool
 }

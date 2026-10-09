@@ -13,6 +13,8 @@ import (
 	"github.com/runzhammer/tankblaster/pkg/protocol"
 )
 
+const sessionEventHistoryLimit = 512
+
 type SessionType string
 type SessionStatus string
 
@@ -49,6 +51,8 @@ type Session struct {
 	InviteUntil time.Time
 	Status      SessionStatus
 	Match       gamecore.MatchState
+	EventSeq    int64
+	Events      []protocol.Envelope
 }
 
 type Hub struct {

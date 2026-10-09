@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/runzhammer/tankblaster/pkg/protocol"
+)
 
 func TestCreateSessionStoresNormalizedRounds(t *testing.T) {
 	h := NewHub(DefaultConfig(), nil)
@@ -107,5 +111,70 @@ func TestQuickMatchRespectsMaxQueueLength(t *testing.T) {
 	}
 	if _, _, err := h.QuickMatch(SessionPlayer{PlayerID: "p2", DisplayName: "Player 2", Rating: 2000}); err == nil {
 		t.Fatal("full queue QuickMatch() error = nil, want server_busy")
+	}
+}
+
+func TestBroadcastAssignsSessionSequences(t *testing.T) {
+	h := NewHub(DefaultConfig(), nil)
+	srv := &Server{hub: h}
+	client := &Client{send: make(chan protocol.Envelope, 4)}
+	sess, err := h.CreateSession(SessionPrivate, SessionPlayer{PlayerID: "p1", DisplayName: "Player 1", Client: client}, 1)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	sess.Players = append(sess.Players, SessionPlayer{PlayerID: "p2", DisplayName: "Player 2"})
+	h.startMatchLocked(sess)
+
+	if err := srv.broadcast(sess, protocol.TypeOnlineGameCommand, protocol.OnlineGameCommand{MatchID: sess.Match.MatchID, Kind: "shop_continue"}); err != nil {
+		t.Fatalf("broadcast first: %v", err)
+	}
+	if err := srv.broadcast(sess, protocol.TypeOnlineGameCommand, protocol.OnlineGameCommand{MatchID: sess.Match.MatchID, Kind: "turn"}); err != nil {
+		t.Fatalf("broadcast second: %v", err)
+	}
+
+	first := <-client.send
+	second := <-client.send
+	if first.Sequence != 1 || second.Sequence != 2 {
+		t.Fatalf("sequences = %d,%d, want 1,2", first.Sequence, second.Sequence)
+	}
+	if first.MatchID != sess.Match.MatchID || second.MatchID != sess.Match.MatchID {
+		t.Fatalf("envelope match ids = %q,%q, want %q", first.MatchID, second.MatchID, sess.Match.MatchID)
+	}
+}
+
+func TestSendSessionEventsAfterReplaysMissedEvents(t *testing.T) {
+	h := NewHub(DefaultConfig(), nil)
+	srv := &Server{hub: h}
+	sess, err := h.CreateSession(SessionPrivate, SessionPlayer{PlayerID: "p1", DisplayName: "Player 1"}, 1)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	sess.Players = append(sess.Players, SessionPlayer{PlayerID: "p2", DisplayName: "Player 2"})
+	h.startMatchLocked(sess)
+	if err := srv.broadcast(sess, protocol.TypeOnlineGameCommand, protocol.OnlineGameCommand{MatchID: sess.Match.MatchID, Kind: "shop_continue"}); err != nil {
+		t.Fatalf("broadcast first: %v", err)
+	}
+	if err := srv.broadcast(sess, protocol.TypeOnlineGameCommand, protocol.OnlineGameCommand{MatchID: sess.Match.MatchID, Kind: "turn"}); err != nil {
+		t.Fatalf("broadcast second: %v", err)
+	}
+
+	catchUp := &Client{send: make(chan protocol.Envelope, 2)}
+	sent, err := srv.sendSessionEventsAfter(sess, catchUp, 1)
+	if err != nil {
+		t.Fatalf("sendSessionEventsAfter() error = %v", err)
+	}
+	if !sent {
+		t.Fatal("sendSessionEventsAfter() sent = false, want true")
+	}
+	env := <-catchUp.send
+	if got, want := env.Sequence, int64(2); got != want {
+		t.Fatalf("replayed sequence = %d, want %d", got, want)
+	}
+	cmd, err := protocol.Decode[protocol.OnlineGameCommand](env)
+	if err != nil {
+		t.Fatalf("decode replayed command: %v", err)
+	}
+	if got, want := cmd.Kind, "turn"; got != want {
+		t.Fatalf("replayed command = %q, want %q", got, want)
 	}
 }

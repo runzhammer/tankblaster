@@ -65,9 +65,20 @@ func (c *onlineClient) Send(typ protocol.MessageType, payload any) {
 		}
 		return
 	}
+	if c.ctx == nil {
+		select {
+		case c.send <- env:
+		case <-time.After(250 * time.Millisecond):
+			c.report(context.DeadlineExceeded)
+		}
+		return
+	}
 	select {
 	case c.send <- env:
-	default:
+	case <-time.After(250 * time.Millisecond):
+		c.report(context.DeadlineExceeded)
+	case <-c.ctx.Done():
+		c.report(c.ctx.Err())
 	}
 }
 
