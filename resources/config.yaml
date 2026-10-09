@@ -97,7 +97,7 @@ gameplay:
       points: 1
       credit_per_remaining_energy: 15
 debug:
-  enabled: true
+  enabled: false
   start_scene: shop # game / shop / score
   start_shop: false
   # Optional im Debug-Modus: leere/fehlende Liste erlaubt alle Todesanimationen.
