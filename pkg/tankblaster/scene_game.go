@@ -4321,7 +4321,6 @@ func (s *GameScene) onGroundImpact(p *projectile) bool {
 	if weapon.PlantsPalm {
 		s.reportComputerShot(p.pos, -1, false)
 		s.plantPalmAtImpact(p.pos)
-		s.damageTank(p.shooter, weapon.Damage, p.shooter, damageCauseDirect)
 		s.delayTurnAdvance(s.palmHitPauseFrames())
 		return true
 	}

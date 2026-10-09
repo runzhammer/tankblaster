@@ -9,6 +9,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/runzhammer/tankblaster/pkg/engine"
 	"github.com/runzhammer/tankblaster/pkg/models"
+	weaponspkg "github.com/runzhammer/tankblaster/pkg/tankblaster/weapons"
 )
 
 func newScoringTestScene(powers ...int) *GameScene {
@@ -245,6 +246,36 @@ func TestScoringSuicideAllowsNegativePoints(t *testing.T) {
 
 	if got, want := s.scores[0], -2; got != want {
 		t.Fatalf("points = %d, want %d", got, want)
+	}
+}
+
+func TestWonderPalmImpactPlantsPalmWithoutDamage(t *testing.T) {
+	s := newScoringTestScene(100)
+	shooter := s.tanks[0]
+	s.worldWidth = 200
+	s.ground = models.NewGroundWithSize(200, 100)
+	s.layers = engine.NewLayers(numLayers)
+	s.palmImage = ebiten.NewImage(10, 20)
+	s.palmPixels = image.NewRGBA(image.Rect(0, 0, 10, 20))
+
+	handled := s.onGroundImpact(&projectile{
+		pos:                engine.V(80, s.ground.SurfaceY(80)),
+		shooter:            shooter,
+		effectiveWeapon:    weaponspkg.WonderPalm(),
+		hasEffectiveWeapon: true,
+	})
+
+	if !handled {
+		t.Fatal("wonder palm impact was not handled")
+	}
+	if got, want := shooter.power, 100; got != want {
+		t.Fatalf("shooter power = %d, want unchanged %d", got, want)
+	}
+	if got, want := len(s.palms), 1; got != want {
+		t.Fatalf("palms = %d, want %d", got, want)
+	}
+	if got := len(s.impacts); got != 0 {
+		t.Fatalf("impact animations = %d, want no crater impact", got)
 	}
 }
 

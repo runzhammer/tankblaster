@@ -26,7 +26,7 @@ func TestDirectWeaponDamageTable(t *testing.T) {
 		damage int
 	}{
 		{"training", Training(), 0},
-		{"wonder palm", WonderPalm(), 125},
+		{"wonder palm", WonderPalm(), 0},
 		{"water", Water(), 0},
 		{"small crumblers", SmallCrumblers(), 0},
 		{"large crumblers", LargeCrumblers(), 0},
