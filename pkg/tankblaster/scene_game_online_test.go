@@ -3,17 +3,21 @@ package tankblaster
 import (
 	"image/color"
 	"math"
+	"math/rand"
 	"testing"
 
 	"github.com/runzhammer/tankblaster/pkg/engine"
 	"github.com/runzhammer/tankblaster/pkg/gamecore"
+	"github.com/runzhammer/tankblaster/pkg/models"
 	"github.com/runzhammer/tankblaster/pkg/protocol"
 	"github.com/runzhammer/tankblaster/pkg/tankblaster/computerplayers"
+	weaponspkg "github.com/runzhammer/tankblaster/pkg/tankblaster/weapons"
 )
 
 func newOnlineTurnTestScene() *GameScene {
 	return &GameScene{
 		g: &GameLoop{
+			muted: true,
 			online: &onlineGameRuntime{
 				playerID: "p1",
 				state: gamecore.MatchState{
@@ -307,6 +311,389 @@ func TestSendOnlineGameCommandUsesControlledSlotPlayerID(t *testing.T) {
 		}
 	default:
 		t.Fatal("no online command sent")
+	}
+}
+
+func TestSyncOnlineShopBuyIgnoresLocalSlotEcho(t *testing.T) {
+	s := newOnlineTurnTestScene()
+	client := &onlineClient{send: make(chan protocol.Envelope, 1)}
+	s.g.online.client = client
+	s.g.online.playerID = "p1"
+	s.g.online.controlledPlayerIDs = map[string]bool{"p1:slot:0": true}
+	s.g.online.state.Players = []gamecore.Player{
+		{ID: "p1:slot:0"},
+		{ID: "p2:slot:1"},
+	}
+	s.phase = phaseShop
+	s.players = []PlayerConfig{{Name: "Player 1"}, {Name: "Player 2"}}
+	s.credits = []int{5000, 5000}
+	s.inventories = makeShopInventories(2)
+	s.shopPlayerOrder = []int{0, 1}
+	s.shopPlayerCursor = 0
+	s.shopMode = shopModeClassA
+	s.shopSelectedIndex = 1
+	initialStock := s.inventories[0].classA[1]
+
+	s.syncOnlineShopBuy()
+
+	select {
+	case env := <-client.send:
+		cmd, err := protocol.Decode[protocol.OnlineGameCommand](env)
+		if err != nil {
+			t.Fatalf("decode online command: %v", err)
+		}
+		s.applyOnlineGameCommand(cmd)
+	default:
+		t.Fatal("no shop buy command sent")
+	}
+	if got, want := s.credits[0], 3000; got != want {
+		t.Fatalf("credits after local echo = %d, want one purchase %d", got, want)
+	}
+	if got, want := s.inventories[0].classA[1], initialStock+10; got != want {
+		t.Fatalf("inventory after local echo = %d, want one purchase stock %d", got, want)
+	}
+}
+
+func TestApplyOnlineShopBuyUsesEconomySnapshotWithoutDoubleBuy(t *testing.T) {
+	s := newOnlineTurnTestScene()
+	s.g.online.playerID = "p1"
+	s.g.online.controlledPlayerIDs = map[string]bool{"p1:slot:0": true}
+	s.g.online.state.Players = []gamecore.Player{
+		{ID: "p1:slot:0"},
+		{ID: "p2:slot:1"},
+	}
+	s.phase = phaseShop
+	s.players = []PlayerConfig{{Name: "Player 1"}, {Name: "Player 2"}}
+	s.credits = []int{9999, 9999}
+	s.inventories = makeShopInventories(2)
+	s.shopPlayerOrder = []int{1}
+	s.shopPlayerCursor = 0
+	s.shopMode = shopModeClassA
+	s.shopSelectedIndex = 1
+
+	remoteInventory := protocol.OnlineInventoryState{
+		ClassA: []int{50, 10},
+		ClassB: []int{0, 0},
+	}
+	s.applyOnlineGameCommand(protocol.OnlineGameCommand{
+		MatchID:     "match-1",
+		PlayerID:    "p2:slot:1",
+		PlayerIndex: 1,
+		Kind:        "shop_buy",
+		Economy: &protocol.OnlineEconomy{
+			Scores:       []int{3, 4},
+			RoundScores:  []int{30, 40},
+			Credits:      []int{1111, 3000},
+			Inventories:  []protocol.OnlineInventoryState{{ClassA: []int{50}, ClassB: []int{0}}, remoteInventory},
+			ShopOrder:    []int{1},
+			ShopCursor:   0,
+			ShopMode:     int(shopModeClassA),
+			ShopSelected: 1,
+		},
+	})
+
+	if got, want := s.credits[1], 3000; got != want {
+		t.Fatalf("remote credits = %d, want snapshot value %d", got, want)
+	}
+	if got, want := s.inventories[1].classA[1], 10; got != want {
+		t.Fatalf("remote inventory = %d, want snapshot value %d", got, want)
+	}
+	if got, want := s.scores[1], 4; got != want {
+		t.Fatalf("remote scores = %d, want %d", got, want)
+	}
+}
+
+func TestSendOnlineGameCommandAttachesSharedState(t *testing.T) {
+	s := newOnlineTurnTestScene()
+	client := &onlineClient{send: make(chan protocol.Envelope, 1)}
+	s.g.online.client = client
+	s.g.online.state.Players = []gamecore.Player{{ID: "p1"}, {ID: "p2"}}
+	s.clouds = []*battleCloud{{
+		sprite:     &engine.Sprite{Pos: &engine.Vec{X: 10, Y: 20}},
+		speed:      1.5,
+		kind:       cloudKindNormal,
+		aggression: 42,
+	}}
+	s.palms = []*battlePalm{{
+		state:                palmStateAlive,
+		aggression:           77,
+		initialAggression:    12,
+		aggressionMultiplier: 1.2,
+	}}
+	s.scores = []int{8, 9}
+	s.roundScores = []int{18, 19}
+	s.credits = []int{2800, 3100}
+	s.inventories = makeShopInventories(2)
+	s.inventories[1].classA[1] = 10
+
+	s.sendOnlineGameCommand(protocol.OnlineGameCommand{Kind: "aim", PlayerIndex: 0})
+
+	select {
+	case env := <-client.send:
+		cmd, err := protocol.Decode[protocol.OnlineGameCommand](env)
+		if err != nil {
+			t.Fatalf("decode online command: %v", err)
+		}
+		if len(cmd.Clouds) != 1 || cmd.Clouds[0].Aggression != 42 {
+			t.Fatalf("cloud snapshot = %+v, want aggression 42", cmd.Clouds)
+		}
+		if len(cmd.Palms) != 1 || cmd.Palms[0].Aggression != 77 {
+			t.Fatalf("palm snapshot = %+v, want aggression 77", cmd.Palms)
+		}
+		if cmd.Economy == nil || len(cmd.Economy.Credits) != 2 || cmd.Economy.Credits[1] != 3100 {
+			t.Fatalf("economy snapshot = %+v, want credits for both players", cmd.Economy)
+		}
+	default:
+		t.Fatal("no online command sent")
+	}
+}
+
+func TestApplyOnlineSharedStateSyncsPalmAndCloudAggression(t *testing.T) {
+	s := newOnlineTurnTestScene()
+	s.g.online.state.Players = []gamecore.Player{{ID: "p1"}, {ID: "p2"}}
+	s.clouds = []*battleCloud{{
+		sprite:     &engine.Sprite{Pos: &engine.Vec{X: 10, Y: 20}},
+		speed:      1,
+		kind:       cloudKindLightning,
+		aggression: 3,
+	}}
+	s.palms = []*battlePalm{{
+		state:                palmStateAlive,
+		aggression:           4,
+		initialAggression:    2,
+		aggressionMultiplier: 1,
+	}}
+
+	s.applyOnlineGameCommand(protocol.OnlineGameCommand{
+		MatchID:     "match-1",
+		PlayerID:    "p2",
+		PlayerIndex: 1,
+		Kind:        "aim",
+		Clouds: []protocol.OnlineCloudState{{
+			Kind:       int(cloudKindLightning),
+			X:          30,
+			Y:          40,
+			Speed:      2,
+			Aggression: 88,
+		}},
+		Palms: []protocol.OnlinePalmState{{
+			State:                int(palmStateAlive),
+			Aggression:           99,
+			InitialAggression:    7,
+			AggressionMultiplier: 1.3,
+			Screaming:            true,
+			ScreamAge:            5,
+		}},
+	})
+
+	if got, want := s.clouds[0].aggression, 88.0; got != want {
+		t.Fatalf("cloud aggression = %v, want %v", got, want)
+	}
+	if got, want := s.clouds[0].sprite.Pos.X, 30.0; got != want {
+		t.Fatalf("cloud x = %v, want %v", got, want)
+	}
+	if got, want := s.palms[0].aggression, 99.0; got != want {
+		t.Fatalf("palm aggression = %v, want %v", got, want)
+	}
+	if !s.palms[0].screaming || s.palms[0].screamAge != 5 {
+		t.Fatalf("palm scream state = screaming %v age %d, want true age 5", s.palms[0].screaming, s.palms[0].screamAge)
+	}
+}
+
+func TestOnlineZeroPowerAnimationChoiceIgnoresLocalRNGState(t *testing.T) {
+	left := newOnlineTurnTestScene()
+	right := newOnlineTurnTestScene()
+	left.rng = rand.New(rand.NewSource(1))
+	right.rng = rand.New(rand.NewSource(999))
+	left.g.online.state.Seed = 4242
+	right.g.online.state.Seed = 4242
+	left.g.online.turnSequence = 7
+	right.g.online.turnSequence = 7
+	left.roundNumber = 3
+	right.roundNumber = 3
+	left.lastDamageSource = left.tanks[0]
+	right.lastDamageSource = right.tanks[0]
+	left.tanks[1].body = &engine.Sprite{Pos: &engine.Vec{X: 120, Y: 200}, Size: &engine.Vec{X: 20, Y: 12}}
+	right.tanks[1].body = &engine.Sprite{Pos: &engine.Vec{X: 120, Y: 200}, Size: &engine.Vec{X: 20, Y: 12}}
+	left.tanks[1].cannon = &engine.Sprite{}
+	right.tanks[1].cannon = &engine.Sprite{}
+
+	left.startZeroPowerAnimation(left.tanks[1])
+	right.startZeroPowerAnimation(right.tanks[1])
+
+	if len(left.zeroPowerEffects) != 1 || len(right.zeroPowerEffects) != 1 {
+		t.Fatalf("zero power effect counts = %d/%d, want 1/1", len(left.zeroPowerEffects), len(right.zeroPowerEffects))
+	}
+	leftEffect := left.zeroPowerEffects[0]
+	rightEffect := right.zeroPowerEffects[0]
+	if leftEffect.kind != rightEffect.kind || leftEffect.randomSeed != rightEffect.randomSeed {
+		t.Fatalf("zero power choices differ: left kind %d seed %d, right kind %d seed %d", leftEffect.kind, leftEffect.randomSeed, rightEffect.kind, rightEffect.randomSeed)
+	}
+}
+
+func TestZeroPowerScatterProjectilesUseEffectSeed(t *testing.T) {
+	left := newOnlineTurnTestScene()
+	right := newOnlineTurnTestScene()
+	left.rng = rand.New(rand.NewSource(1))
+	right.rng = rand.New(rand.NewSource(999))
+	left.tanks[0].body = &engine.Sprite{Pos: &engine.Vec{X: 120, Y: 200}, Size: &engine.Vec{X: 20, Y: 12}}
+	right.tanks[0].body = &engine.Sprite{Pos: &engine.Vec{X: 120, Y: 200}, Size: &engine.Vec{X: 20, Y: 12}}
+	left.tanks[0].shotStrength = 60
+	right.tanks[0].shotStrength = 60
+
+	left.fireZeroPowerScatterProjectiles(left.tanks[0], 12345)
+	right.fireZeroPowerScatterProjectiles(right.tanks[0], 12345)
+
+	if len(left.projectiles) != len(right.projectiles) {
+		t.Fatalf("projectile counts = %d/%d, want equal", len(left.projectiles), len(right.projectiles))
+	}
+	for i := range left.projectiles {
+		l := left.projectiles[i]
+		r := right.projectiles[i]
+		if l.scatterImpactColor != r.scatterImpactColor || l.randomSeed != r.randomSeed || l.velocity != r.velocity {
+			t.Fatalf("projectile %d differs: left color %+v seed %d velocity %+v, right color %+v seed %d velocity %+v", i, l.scatterImpactColor, l.randomSeed, l.velocity, r.scatterImpactColor, r.randomSeed, r.velocity)
+		}
+	}
+}
+
+func TestSplitterFragmentsUseProjectileSeed(t *testing.T) {
+	left := newOnlineTurnTestScene()
+	right := newOnlineTurnTestScene()
+	left.rng = rand.New(rand.NewSource(1))
+	right.rng = rand.New(rand.NewSource(999))
+	left.ground = models.NewGroundWithSize(400, 200)
+	right.ground = models.NewGroundWithSize(400, 200)
+	parent := func() *projectile {
+		return &projectile{
+			pos:                engine.V(180, 40),
+			prev:               engine.V(180, 40),
+			velocity:           engine.V(0, 0.2),
+			effectiveWeapon:    weaponspkg.SplitterBomb(),
+			hasEffectiveWeapon: true,
+			splitterArmed:      true,
+			randomSeed:         98765,
+		}
+	}
+
+	leftFragments := left.splitProjectile(parent(), 0.16, 0.01)
+	rightFragments := right.splitProjectile(parent(), 0.16, 0.01)
+
+	if len(leftFragments) != len(rightFragments) {
+		t.Fatalf("fragment counts = %d/%d, want equal", len(leftFragments), len(rightFragments))
+	}
+	for i := range leftFragments {
+		l := leftFragments[i]
+		r := rightFragments[i]
+		if l.pos != r.pos || l.velocity != r.velocity || l.randomSeed != r.randomSeed || l.launchRot != r.launchRot {
+			t.Fatalf("fragment %d differs: left pos %+v velocity %+v seed %d rot %f, right pos %+v velocity %+v seed %d rot %f", i, l.pos, l.velocity, l.randomSeed, l.launchRot, r.pos, r.velocity, r.randomSeed, r.launchRot)
+		}
+	}
+}
+
+func TestMFSTripleProjectilesUseOnlineCommandSeed(t *testing.T) {
+	left := newOnlineTurnTestScene()
+	right := newOnlineTurnTestScene()
+	left.rng = rand.New(rand.NewSource(1))
+	right.rng = rand.New(rand.NewSource(999))
+	left.g.online.state.Seed = 4242
+	right.g.online.state.Seed = 4242
+	for _, s := range []*GameScene{left, right} {
+		s.players = []PlayerConfig{{Name: "Player 1"}, {Name: "Player 2"}}
+		s.inventories = makeShopInventories(2)
+		s.inventories[0].classA[9] = 1
+		s.activePlayerIndex = 0
+		s.tanks[0].selectedWeapon = 10
+		s.tanks[0].shotStrength = 50
+		s.tanks[0].cannon = &engine.Sprite{
+			Pos:  &engine.Vec{X: 100, Y: 80},
+			Size: &engine.Vec{X: 20, Y: 4},
+			Rot:  -math.Pi / 4,
+		}
+	}
+	cmd := protocol.OnlineGameCommand{
+		MatchID:         "match-1",
+		PlayerID:        "p1",
+		PlayerIndex:     0,
+		Kind:            "fire",
+		CommandSequence: 5,
+		TurnSequence:    0,
+		WeaponSlot:      10,
+		ShotStrength:    50,
+		CannonRotation:  -math.Pi / 4,
+	}
+
+	left.withDeterministicOnlineRNG(cmd, func() { left.fireActiveWeapon() })
+	right.withDeterministicOnlineRNG(cmd, func() { right.fireActiveWeapon() })
+
+	if len(left.projectiles) != 3 || len(right.projectiles) != 3 {
+		t.Fatalf("projectile counts = %d/%d, want 3/3", len(left.projectiles), len(right.projectiles))
+	}
+	for i := range left.projectiles {
+		l := left.projectiles[i]
+		r := right.projectiles[i]
+		if l.pos != r.pos || l.velocity != r.velocity || l.randomSeed != r.randomSeed || l.launchRot != r.launchRot {
+			t.Fatalf("mfs projectile %d differs: left pos %+v velocity %+v seed %d rot %f, right pos %+v velocity %+v seed %d rot %f", i, l.pos, l.velocity, l.randomSeed, l.launchRot, r.pos, r.velocity, r.randomSeed, r.launchRot)
+		}
+	}
+}
+
+func TestAirStrikeBombPlanUsesProjectileSeed(t *testing.T) {
+	left := newOnlineTurnTestScene()
+	right := newOnlineTurnTestScene()
+	left.rng = rand.New(rand.NewSource(1))
+	right.rng = rand.New(rand.NewSource(999))
+	left.ground = models.NewGroundWithSize(800, 240)
+	right.ground = models.NewGroundWithSize(800, 240)
+	left.worldWidth = 800
+	right.worldWidth = 800
+
+	left.startAirStrikeImpact(engine.V(400, 120), 54321)
+	right.startAirStrikeImpact(engine.V(400, 120), 54321)
+
+	if len(left.airStrikeImpacts) != 1 || len(right.airStrikeImpacts) != 1 {
+		t.Fatalf("air strike impact counts = %d/%d, want 1/1", len(left.airStrikeImpacts), len(right.airStrikeImpacts))
+	}
+	leftBombs := left.airStrikeImpacts[0].bombs
+	rightBombs := right.airStrikeImpacts[0].bombs
+	if len(leftBombs) != len(rightBombs) {
+		t.Fatalf("bomb counts = %d/%d, want equal", len(leftBombs), len(rightBombs))
+	}
+	for i := range leftBombs {
+		if leftBombs[i] != rightBombs[i] {
+			t.Fatalf("bomb %d differs: left %+v, right %+v", i, leftBombs[i], rightBombs[i])
+		}
+	}
+}
+
+func TestApplyOnlineFireIgnoresDuplicateCommandSequence(t *testing.T) {
+	s := newOnlineTurnTestScene()
+	s.rng = rand.New(rand.NewSource(1))
+	s.activePlayerIndex = 0
+	s.tanks[0].shotStrength = 50
+	s.tanks[0].cannon = &engine.Sprite{
+		Pos:  &engine.Vec{X: 100, Y: 80},
+		Size: &engine.Vec{X: 20, Y: 4},
+		Rot:  -math.Pi / 4,
+	}
+	cmd := protocol.OnlineGameCommand{
+		MatchID:         "match-1",
+		PlayerID:        "p1",
+		PlayerIndex:     0,
+		Kind:            "fire",
+		CommandSequence: 5,
+		TurnSequence:    0,
+		ShotStrength:    50,
+		CannonRotation:  -math.Pi / 4,
+	}
+
+	s.applyOnlineFireCommand(cmd)
+	if len(s.projectiles) != 1 {
+		t.Fatalf("projectiles after first fire = %d, want 1", len(s.projectiles))
+	}
+	s.projectiles = nil
+	s.applyOnlineFireCommand(cmd)
+	if len(s.projectiles) != 0 {
+		t.Fatalf("duplicate fire command spawned %d projectiles, want 0", len(s.projectiles))
 	}
 }
 

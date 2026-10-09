@@ -129,6 +129,8 @@ type OnlineGameCommand struct {
 	ShopHoverClass  int                `json:"shop_hover_class,omitempty"`
 	ShopListIndex   int                `json:"shop_list_index,omitempty"`
 	Clouds          []OnlineCloudState `json:"clouds,omitempty"`
+	Palms           []OnlinePalmState  `json:"palms,omitempty"`
+	Economy         *OnlineEconomy     `json:"economy,omitempty"`
 }
 
 type OnlineCloudState struct {
@@ -137,6 +139,42 @@ type OnlineCloudState struct {
 	Y          float64 `json:"y"`
 	Speed      float64 `json:"speed"`
 	Aggression float64 `json:"aggression"`
+}
+
+type OnlinePalmState struct {
+	State                int     `json:"state"`
+	Age                  int     `json:"age"`
+	EyeAge               int     `json:"eye_age"`
+	EyesOn               bool    `json:"eyes_on"`
+	ScreamAge            int     `json:"scream_age"`
+	Screaming            bool    `json:"screaming"`
+	GrinAge              int     `json:"grin_age"`
+	Grinning             bool    `json:"grinning"`
+	GrinHideAt           int     `json:"grin_hide_at"`
+	Aggression           float64 `json:"aggression"`
+	InitialAggression    float64 `json:"initial_aggression"`
+	AggressionMultiplier float64 `json:"aggression_multiplier"`
+}
+
+type OnlineEconomy struct {
+	Scores       []int                  `json:"scores,omitempty"`
+	RoundScores  []int                  `json:"round_scores,omitempty"`
+	Credits      []int                  `json:"credits,omitempty"`
+	Inventories  []OnlineInventoryState `json:"inventories,omitempty"`
+	ShopOrder    []int                  `json:"shop_order,omitempty"`
+	ShopCursor   int                    `json:"shop_cursor,omitempty"`
+	ShopMode     int                    `json:"shop_mode,omitempty"`
+	ShopHover    int                    `json:"shop_hover,omitempty"`
+	ShopSelected int                    `json:"shop_selected,omitempty"`
+}
+
+type OnlineInventoryState struct {
+	ClassA            []int   `json:"class_a,omitempty"`
+	ClassB            []int   `json:"class_b,omitempty"`
+	MFSBoosterCharges int     `json:"mfs_booster_charges,omitempty"`
+	EnergyShield      int     `json:"energy_shield,omitempty"`
+	HasXMV12          bool    `json:"has_xm_v12,omitempty"`
+	Diesel            float64 `json:"diesel,omitempty"`
 }
 
 type LobbySlot struct {
