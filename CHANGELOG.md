@@ -6,6 +6,10 @@ The format is inspired by Keep a Changelog, and the project uses the version in 
 
 ## [Unreleased]
 
+### Changed
+
+- `make all` now keeps the Android release as `dist/tankblaster-android.apk` instead of creating a versioned Android ZIP.
+
 ### Notes
 
 - Public issue and pull request workflow will start after the repository is published on GitHub.
