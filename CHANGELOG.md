@@ -15,6 +15,7 @@ The format is inspired by Keep a Changelog, and the project uses the version in 
 ### Added
 
 - Update check in the player selection screen that compares the running version with the semantic version in the GitHub `main` branch and links to `https://www.tankblaster.de`.
+- Online play now supports computer players and multiple human players in the same session.
 - Online synchronization snapshots for economy, inventories, shop order, palm state, and cloud aggression.
 - Regression coverage for online shop synchronization, deterministic projectile effects, airstrike behavior, and update checks.
 
