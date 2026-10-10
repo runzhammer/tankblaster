@@ -3,6 +3,7 @@ module github.com/runzhammer/tankblaster
 go 1.26.5
 
 require (
+	codeberg.org/rabenauge/soundsetgo v0.0.0-20260722140813-98b0e7283e6b
 	github.com/cevaris/ordered_map v0.0.0-20190319150403-3adeae072e73
 	github.com/coder/websocket v1.8.15
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
@@ -13,7 +14,6 @@ require (
 )
 
 require (
-	codeberg.org/rabenauge/soundsetgo v0.0.0-20260722140813-98b0e7283e6b // indirect
 	github.com/davecgh/go-spew v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/gomobile v0.0.0-20250923094054-ea854a63cce1 // indirect
@@ -43,5 +43,5 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+	gopkg.in/yaml.v3 v3.0.1
 )
