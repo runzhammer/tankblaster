@@ -76,7 +76,7 @@ case "$BUILD_TYPE" in
 	release|normal)
 		GRADLE_TASK=assembleRelease
 		APK_SOURCE="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
-		APK_TARGET="$ROOT_DIR/dist/tankblaster-release.apk"
+		APK_TARGET="$ROOT_DIR/dist/tankblaster-android.apk"
 		;;
 	*)
 		printf 'Unknown Android build type: %s\n' "$BUILD_TYPE" >&2

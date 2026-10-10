@@ -78,11 +78,11 @@ make all
 
 - `dist/tankblaster-VERSION-linux.zip`
 - `dist/tankblaster-VERSION-windows.zip`
-- `dist/tankblaster-VERSION-android.zip`
+- `dist/tankblaster-android.apk`
 - `dist/tankblaster-VERSION-web.zip`
 - `dist/tankblaster-server-VERSION-linux.tar`
 
-Android is built as a release APK for `make all` and `make android`. Debug APKs are only built explicitly with `make android-debug`.
+Android is built as a release APK for `make all` and `make android`; no additional Android ZIP is created. Debug APKs are only built explicitly with `make android-debug`.
 
 Individual targets:
 
