@@ -12,10 +12,9 @@ DIST_DIR ?= dist
 DESKTOP_BIN ?= $(BUILD_DIR)/$(APP_NAME)
 SERVER_BIN ?= $(BUILD_DIR)/$(APP_NAME)-server
 WINDOWS_BIN ?= $(BUILD_DIR)/$(APP_NAME).exe
-ANDROID_APK ?= $(DIST_DIR)/$(APP_NAME)-release.apk
+ANDROID_APK ?= $(DIST_DIR)/$(APP_NAME)-android.apk
 LINUX_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-linux.zip
 WINDOWS_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-windows.zip
-ANDROID_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-android.zip
 WEB_ZIP ?= $(DIST_DIR)/$(APP_NAME)-$(VERSION)-web.zip
 SERVER_IMAGE_TAR ?= $(DIST_DIR)/$(APP_NAME)-server-$(VERSION)-linux.tar
 WINDOWS_ICON ?= resources/images/tankblaster.ico
@@ -48,9 +47,9 @@ define with_release_config
 	$(1)
 endef
 
-.PHONY: all test run run-server live-test build linux server server-docker server-docker-tar windows android android-debug android-release android-env web package-linux package-windows package-android package-web clean help
+.PHONY: all test run run-server live-test build linux server server-docker server-docker-tar windows android android-debug android-release android-env web package-linux package-windows package-web clean help
 
-all: clean package-linux package-windows package-android package-web server-docker-tar
+all: clean package-linux package-windows android-release package-web server-docker-tar
 
 help:
 	@printf '%s\n' \
@@ -147,11 +146,6 @@ package-windows: windows
 	rm -f $(WINDOWS_ZIP)
 	cd $(BUILD_DIR) && $(ZIP) -9 ../$(WINDOWS_ZIP) $(APP_NAME).exe
 
-package-android: android-release
-	mkdir -p $(DIST_DIR)
-	rm -f $(ANDROID_ZIP)
-	cd $(DIST_DIR) && $(ZIP) -9 $(APP_NAME)-$(VERSION)-android.zip $(APP_NAME)-release.apk
-
 android: android-release
 
 android-debug:
@@ -166,7 +160,7 @@ android-env:
 	@printf 'ANDROID_NDK_HOME=%s\n' "$${ANDROID_NDK_HOME:-}"
 	@printf 'JAVA_HOME=%s\n' "$${JAVA_HOME:-}"
 	@printf 'Debug APK: dist/tankblaster-debug.apk\n'
-	@printf 'Release APK: dist/tankblaster-release.apk\n'
+	@printf 'Release APK: dist/tankblaster-android.apk\n'
 
 web:
 	$(call with_release_config,mkdir -p $(WEB_DIR); GOOS=js GOARCH=wasm $(GO) build $(GO_BUILD_FLAGS) -o $(WEB_WASM) .; if [ -n "$(WASM_EXEC)" ]; then cp "$(WASM_EXEC)" "$(WEB_DIR)/wasm_exec.js"; else $(GO) run ./tools/copy_wasm_exec "$(WEB_DIR)/wasm_exec.js"; fi)

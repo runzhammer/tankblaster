@@ -27,7 +27,7 @@ Das Script erzeugt zuerst `android/app/libs/tankblaster.aar`, baut danach die An
 
 ```text
 dist/tankblaster-debug.apk
-dist/tankblaster-release.apk
+dist/tankblaster-android.apk
 ```
 
 ## Installation
